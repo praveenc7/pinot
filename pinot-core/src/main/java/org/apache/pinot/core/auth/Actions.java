@@ -101,6 +101,9 @@ public class Actions {
     public static final String DELETE_RESPONSE_STORE = "DeleteResponseStore";
     public static final String GET_GROOVY_STATIC_ANALYZER_CONFIG = "GetGroovyStaticAnalyzerConfig";
     public static final String UPDATE_GROOVY_STATIC_ANALYZER_CONFIG = "UpdateGroovyStaticAnalyzerConfig";
+    public static final String GET_WORKLOAD_CONFIG = "GetWorkloadConfig";
+    public static final String UPDATE_WORKLOAD_CONFIG = "UpdateWorkloadConfig";
+    public static final String DELETE_WORKLOAD_CONFIG = "DeleteWorkloadConfig";
   }
 
   // Action names for table
