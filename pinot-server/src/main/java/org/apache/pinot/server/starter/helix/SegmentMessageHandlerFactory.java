@@ -40,10 +40,12 @@ import org.apache.pinot.common.metrics.ServerMeter;
 import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.common.metrics.ServerQueryPhase;
 import org.apache.pinot.common.metrics.ServerTimer;
+import org.apache.pinot.core.accounting.WorkloadBudgetManager;
 import org.apache.pinot.core.data.manager.InstanceDataManager;
 import org.apache.pinot.core.data.manager.realtime.RealtimeTableDataManager;
 import org.apache.pinot.core.util.SegmentRefreshSemaphore;
 import org.apache.pinot.segment.local.data.manager.TableDataManager;
+import org.apache.pinot.spi.config.workload.InstanceCost;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -56,11 +58,13 @@ public class SegmentMessageHandlerFactory implements MessageHandlerFactory {
   private final InstanceDataManager _instanceDataManager;
   private final ServerMetrics _metrics;
   private final SegmentRefreshSemaphore _segmentRefreshSemaphore;
+  private static final WorkloadBudgetManager _workloadBudgetManager;
 
   public SegmentMessageHandlerFactory(InstanceDataManager instanceDataManager, ServerMetrics metrics) {
     _instanceDataManager = instanceDataManager;
     _metrics = metrics;
     _segmentRefreshSemaphore = new SegmentRefreshSemaphore(instanceDataManager.getMaxParallelRefreshThreads(), true);
+    _workloadBudgetManager = WorkloadBudgetManager.getInstance();
   }
 
   // Called each time a message is received.
@@ -293,16 +297,20 @@ public class SegmentMessageHandlerFactory implements MessageHandlerFactory {
 
   private static class QueryWorkloadRefreshMessageHandler extends MessageHandler {
     final String _queryWorkloadName;
+    final InstanceCost _instanceCost;
 
     QueryWorkloadRefreshMessageHandler(QueryWorkloadRefreshMessage queryWorkloadRefreshMessage,
         NotificationContext context) {
       super(queryWorkloadRefreshMessage, context);
-      _queryWorkloadName = queryWorkloadRefreshMessage.getQueryWorkloadConfig().getQueryWorkloadName();
+      _queryWorkloadName = queryWorkloadRefreshMessage.getQueryWorkloadName();
+      _instanceCost = queryWorkloadRefreshMessage.getInstanceCost();
     }
 
     @Override
     public HelixTaskResult handleMessage() {
       // TODO: Add logic to invoke the query workload manager to refresh the query workload config
+      _workloadBudgetManager.addOrUpdateWorkload(_queryWorkloadName, _instanceCost.getCpuCostNs(),
+          _instanceCost.getMemoryCostBytes());
       HelixTaskResult result = new HelixTaskResult();
       result.setSuccess(true);
       return result;
