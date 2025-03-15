@@ -317,7 +317,8 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
     onQueryStart(requestId, clientRequestId, query);
 
     try {
-      Tracing.ThreadAccountantOps.setupRunner(String.valueOf(requestId), ThreadExecutionContext.TaskType.MSE);
+      String workloadName = QueryOptionsUtils.getWorkloadName(queryOptions);
+      Tracing.ThreadAccountantOps.setupRunner(String.valueOf(requestId), ThreadExecutionContext.TaskType.MSE, workloadName);
 
       long executionStartTimeNs = System.nanoTime();
       QueryDispatcher.QueryResult queryResults;

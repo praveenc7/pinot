@@ -19,6 +19,8 @@
 package org.apache.pinot.core.accounting;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -110,8 +112,8 @@ public class CPUMemThreadLevelAccountingObjects {
     }
 
     public void setThreadTaskStatus(@Nullable String queryId, int taskId, ThreadExecutionContext.TaskType taskType,
-        @Nonnull Thread anchorThread) {
-      _currentThreadTaskStatus.set(new TaskEntry(queryId, taskId, taskType, anchorThread));
+        @Nonnull Thread anchorThread, String workloadName) {
+      _currentThreadTaskStatus.set(new TaskEntry(queryId, taskId, taskType, anchorThread, workloadName));
     }
   }
 
@@ -126,15 +128,18 @@ public class CPUMemThreadLevelAccountingObjects {
     private final Thread _anchorThread;
     private final TaskType _taskType;
 
+    private final String _workloadName;
+
     public boolean isAnchorThread() {
       return _taskId == CommonConstants.Accounting.ANCHOR_TASK_ID;
     }
 
-    public TaskEntry(String queryId, int taskId, TaskType taskType, Thread anchorThread) {
+    public TaskEntry(String queryId, int taskId, TaskType taskType, Thread anchorThread, String workloadName) {
       _queryId = queryId;
       _taskId = taskId;
       _anchorThread = anchorThread;
       _taskType = taskType;
+      _workloadName = workloadName;
     }
 
     public String getQueryId() {
@@ -154,10 +159,14 @@ public class CPUMemThreadLevelAccountingObjects {
       return _taskType;
     }
 
+    public String getWorkloadName() {
+      return _workloadName;
+    }
+
     @Override
     public String toString() {
       return "TaskEntry{" + "_queryId='" + _queryId + '\'' + ", _taskId=" + _taskId + ", _rootThread=" + _anchorThread
-          + '}';
+          + ", _taskType=" + _taskType + ", _workloadName=" + _workloadName + '}';
     }
   }
 }

@@ -28,9 +28,11 @@ import java.util.concurrent.atomic.LongAccumulator;
 import javax.annotation.Nullable;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.pinot.common.datatable.DataTable.MetadataKey;
+import org.apache.pinot.common.exception.QueryException;
 import org.apache.pinot.common.metrics.ServerMeter;
 import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.common.metrics.ServerQueryPhase;
+import org.apache.pinot.common.response.ProcessingException;
 import org.apache.pinot.common.utils.config.QueryOptionsUtils;
 import org.apache.pinot.core.operator.blocks.InstanceResponseBlock;
 import org.apache.pinot.core.operator.blocks.results.ExceptionResultsBlock;
@@ -41,8 +43,8 @@ import org.apache.pinot.core.query.request.context.TimerContext;
 import org.apache.pinot.core.query.scheduler.resources.ResourceManager;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.exception.EarlyTerminationException;
+import org.apache.pinot.spi.exception.QueryCancelledException;
 import org.apache.pinot.spi.exception.QueryErrorCode;
-import org.apache.pinot.spi.exception.QueryErrorMessage;
 import org.apache.pinot.spi.trace.Tracing;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -131,12 +133,11 @@ public abstract class QueryScheduler {
    */
   @Nullable
   protected byte[] processQueryAndSerialize(ServerQueryRequest queryRequest, ExecutorService executorService) {
-
+    Map<String, String> queryOptions = queryRequest.getQueryContext().getQueryOptions();
+    String workloadName = QueryOptionsUtils.getWorkloadName(queryOptions);
     //Start instrumentation context. This must not be moved further below interspersed into the code.
-    Tracing.ThreadAccountantOps.setupRunner(queryRequest.getQueryId());
-    queryRequest.registerInMdc();
+    Tracing.ThreadAccountantOps.setupRunner(queryRequest.getQueryId(), workloadName);
 
-    try {
       _latestQueryTime.accumulate(System.currentTimeMillis());
       InstanceResponseBlock instanceResponse;
       try {
@@ -149,39 +150,38 @@ public abstract class QueryScheduler {
         instanceResponse = new InstanceResponseBlock();
         instanceResponse.addException(QueryErrorCode.INTERNAL, e.getMessage());
       }
+      try {
+        long requestId = queryRequest.getRequestId();
+        Map<String, String> responseMetadata = instanceResponse.getResponseMetadata();
+        responseMetadata.put(MetadataKey.REQUEST_ID.getName(), Long.toString(requestId));
+        byte[] responseBytes = serializeResponse(queryRequest, instanceResponse);
 
-      long requestId = queryRequest.getRequestId();
-      Map<String, String> responseMetadata = instanceResponse.getResponseMetadata();
-      responseMetadata.put(MetadataKey.REQUEST_ID.getName(), Long.toString(requestId));
-      byte[] responseBytes = serializeResponse(queryRequest, instanceResponse);
+        // Log the statistics
+        if (_queryLogger != null) {
+          _queryLogger.logQuery(queryRequest, instanceResponse, name());
+        }
 
-      // Log the statistics
-      if (_queryLogger != null) {
-        _queryLogger.logQuery(queryRequest, instanceResponse, name());
+        // TODO: Perform this check sooner during the serialization of DataTable.
+
+        Long maxResponseSizeBytes = QueryOptionsUtils.getMaxServerResponseSizeBytes(queryOptions);
+        if (maxResponseSizeBytes != null && responseBytes != null && responseBytes.length > maxResponseSizeBytes) {
+          String errMsg =
+              "Serialized query response size " + responseBytes.length + " exceeds threshold " + maxResponseSizeBytes
+                  + " for requestId " + queryRequest.getRequestId() + " from broker " + queryRequest.getBrokerId();
+          LOGGER.error(errMsg);
+          _serverMetrics.addMeteredTableValue(queryRequest.getTableNameWithType(),
+              ServerMeter.LARGE_QUERY_RESPONSE_SIZE_EXCEPTIONS, 1);
+
+          instanceResponse = new InstanceResponseBlock();
+          instanceResponse.addException(QueryException.getException(QueryException.QUERY_CANCELLATION_ERROR, errMsg));
+          instanceResponse.addMetadata(MetadataKey.REQUEST_ID.getName(), Long.toString(requestId));
+          responseBytes = serializeResponse(queryRequest, instanceResponse);
+        }
+
+        return responseBytes;
+      } finally {
+        Tracing.ThreadAccountantOps.clear();
       }
-
-      // TODO: Perform this check sooner during the serialization of DataTable.
-      Map<String, String> queryOptions = queryRequest.getQueryContext().getQueryOptions();
-      Long maxResponseSizeBytes = QueryOptionsUtils.getMaxServerResponseSizeBytes(queryOptions);
-      if (maxResponseSizeBytes != null && responseBytes != null && responseBytes.length > maxResponseSizeBytes) {
-        String errMsg = "Serialized query response size " + responseBytes.length + " exceeds threshold "
-            + maxResponseSizeBytes + " for requestId " + queryRequest.getRequestId() + " from broker "
-            + queryRequest.getBrokerId();
-        LOGGER.error(errMsg);
-        _serverMetrics.addMeteredTableValue(queryRequest.getTableNameWithType(),
-            ServerMeter.LARGE_QUERY_RESPONSE_SIZE_EXCEPTIONS, 1);
-
-        instanceResponse = new InstanceResponseBlock();
-        instanceResponse.addException(QueryErrorCode.QUERY_CANCELLATION, errMsg);
-        instanceResponse.addMetadata(MetadataKey.REQUEST_ID.getName(), Long.toString(requestId));
-        responseBytes = serializeResponse(queryRequest, instanceResponse);
-      }
-
-      return responseBytes;
-    } finally {
-      queryRequest.unregisterFromMdc();
-      Tracing.ThreadAccountantOps.clear();
-    }
   }
 
   /**
@@ -222,11 +222,10 @@ public abstract class QueryScheduler {
       responseByte = instanceResponse.toDataTable().toBytes();
     } catch (EarlyTerminationException e) {
       Exception killedErrorMsg = Tracing.getThreadAccountant().getErrorStatus();
-      String userMsg =
+      String errMsg =
           "Cancelled while building data table" + (killedErrorMsg == null ? StringUtils.EMPTY : " " + killedErrorMsg);
-      LOGGER.error(userMsg);
-      QueryErrorMessage errMsg = QueryErrorMessage.safeMsg(QueryErrorCode.QUERY_CANCELLATION, userMsg);
-      instanceResponse = new InstanceResponseBlock(new ExceptionResultsBlock(errMsg));
+      LOGGER.error(errMsg);
+      instanceResponse = new InstanceResponseBlock(new ExceptionResultsBlock(new QueryCancelledException(errMsg, e)));
       instanceResponse.addMetadata(MetadataKey.REQUEST_ID.getName(), Long.toString(queryRequest.getRequestId()));
       return serializeResponse(queryRequest, instanceResponse);
     } catch (Exception e) {
@@ -247,18 +246,10 @@ public abstract class QueryScheduler {
    * query can not be executed.
    */
   protected ListenableFuture<byte[]> immediateErrorResponse(ServerQueryRequest queryRequest,
-      QueryErrorCode errorCode) {
+      ProcessingException error) {
     InstanceResponseBlock instanceResponse = new InstanceResponseBlock();
     instanceResponse.addMetadata(MetadataKey.REQUEST_ID.getName(), Long.toString(queryRequest.getRequestId()));
-    instanceResponse.addException(errorCode, errorCode.getDefaultMessage());
+    instanceResponse.addException(error);
     return Futures.immediateFuture(serializeResponse(queryRequest, instanceResponse));
-  }
-
-  protected ListenableFuture<byte[]> shuttingDown(ServerQueryRequest queryRequest) {
-    return immediateErrorResponse(queryRequest, QueryErrorCode.SERVER_SHUTTING_DOWN);
-  }
-
-  protected ListenableFuture<byte[]> outOfCapacity(ServerQueryRequest queryRequest) {
-    return immediateErrorResponse(queryRequest, QueryErrorCode.SERVER_OUT_OF_CAPACITY);
   }
 }

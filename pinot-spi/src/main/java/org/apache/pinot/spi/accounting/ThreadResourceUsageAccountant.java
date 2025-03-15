@@ -38,12 +38,14 @@ public interface ThreadResourceUsageAccountant {
 
   /**
    * Task tracking info
+   *
    * @param queryId query id string
    * @param taskId a unique task id
    * @param parentContext the parent execution context, null for root(runner) thread
+   * @param workloadName
    */
   void createExecutionContext(String queryId, int taskId, ThreadExecutionContext.TaskType taskType,
-      @Nullable ThreadExecutionContext parentContext);
+      @Nullable ThreadExecutionContext parentContext, String workloadName);
 
   /**
    * get the executon context of current thread
