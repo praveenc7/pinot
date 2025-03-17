@@ -1,13 +1,10 @@
 package org.apache.pinot.core.accounting;
 
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -203,8 +200,6 @@ public class WorkloadCPUMemAccountantFactory implements ThreadAccountantFactory 
             try {
               // TODO(Vivek): Better name for cleanInactive.
               cleanInactive();
-
-
               // TODO(Vivek): Make this configurable.
               Thread.sleep(2);
             } catch (InterruptedException e) {
