@@ -40,6 +40,7 @@ import org.apache.pinot.common.metrics.ServerMeter;
 import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.common.metrics.ServerQueryPhase;
 import org.apache.pinot.common.metrics.ServerTimer;
+import org.apache.pinot.core.accounting.WorkloadBudgetManager;
 import org.apache.pinot.core.data.manager.InstanceDataManager;
 import org.apache.pinot.core.data.manager.realtime.RealtimeTableDataManager;
 import org.apache.pinot.core.util.SegmentRefreshSemaphore;
@@ -57,11 +58,13 @@ public class SegmentMessageHandlerFactory implements MessageHandlerFactory {
   private final InstanceDataManager _instanceDataManager;
   private final ServerMetrics _metrics;
   private final SegmentRefreshSemaphore _segmentRefreshSemaphore;
+  private static WorkloadBudgetManager _workloadBudgetManager;
 
   public SegmentMessageHandlerFactory(InstanceDataManager instanceDataManager, ServerMetrics metrics) {
     _instanceDataManager = instanceDataManager;
     _metrics = metrics;
     _segmentRefreshSemaphore = new SegmentRefreshSemaphore(instanceDataManager.getMaxParallelRefreshThreads(), true);
+    _workloadBudgetManager = WorkloadBudgetManager.getInstance();
   }
 
   // Called each time a message is received.
@@ -306,6 +309,7 @@ public class SegmentMessageHandlerFactory implements MessageHandlerFactory {
     @Override
     public HelixTaskResult handleMessage() {
       // TODO: Add logic to invoke the query workload manager to refresh the query workload config
+      _workloadBudgetManager.addOrUpdateWorkload(_queryWorkloadName, _instanceCost.getCpuCost(), _instanceCost.getMemoryCost());
       HelixTaskResult result = new HelixTaskResult();
       result.setSuccess(true);
       return result;

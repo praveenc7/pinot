@@ -20,21 +20,21 @@ package org.apache.pinot.spi.config.workload;
 
 public class InstanceCost {
 
-  private double _cpuCost;
-  private double _memoryCost;
+  private long _cpuCost;
+  private long _memoryCost;
   private long _enforcementPeriodMillis;
 
-  public InstanceCost(double cpuCost, double memoryCost, long enforcementPeriodMillis) {
+  public InstanceCost(long cpuCost, long memoryCost, long enforcementPeriodMillis) {
     _cpuCost = cpuCost;
     _memoryCost = memoryCost;
     _enforcementPeriodMillis = enforcementPeriodMillis;
   }
 
-  public double getCpuCost() {
+  public long getCpuCost() {
     return _cpuCost;
   }
 
-  public double getMemoryCost() {
+  public long getMemoryCost() {
     return _memoryCost;
   }
 
@@ -42,11 +42,11 @@ public class InstanceCost {
     return _enforcementPeriodMillis;
   }
 
-  public void setCpuCost(double cpuCost) {
+  public void setCpuCost(long cpuCost) {
     _cpuCost = cpuCost;
   }
 
-  public void setMemoryCost(double memoryCost) {
+  public void setMemoryCost(long memoryCost) {
     _memoryCost = memoryCost;
   }
 
