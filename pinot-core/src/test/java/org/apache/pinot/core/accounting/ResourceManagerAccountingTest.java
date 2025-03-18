@@ -18,7 +18,6 @@
  */
 package org.apache.pinot.core.accounting;
 
-import groovy.util.logging.Log;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;

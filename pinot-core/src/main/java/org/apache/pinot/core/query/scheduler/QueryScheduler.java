@@ -251,4 +251,12 @@ public abstract class QueryScheduler {
     instanceResponse.addException(errorCode, errorCode.getDefaultMessage());
     return Futures.immediateFuture(serializeResponse(queryRequest, instanceResponse));
   }
+
+  protected ListenableFuture<byte[]> shuttingDown(ServerQueryRequest queryRequest) {
+    return immediateErrorResponse(queryRequest, QueryErrorCode.SERVER_SHUTTING_DOWN);
+  }
+
+  protected ListenableFuture<byte[]> outOfCapacity(ServerQueryRequest queryRequest) {
+    return immediateErrorResponse(queryRequest, QueryErrorCode.SERVER_OUT_OF_CAPACITY);
+  }
 }
