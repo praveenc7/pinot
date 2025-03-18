@@ -19,17 +19,26 @@
 package org.apache.pinot.spi.config.workload;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
-import org.apache.pinot.spi.config.BaseJsonConfig;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonPropertyDescription;
 
 
-public class InstanceCost extends BaseJsonConfig {
+public class InstanceCost {
 
+  private static final String CPU_COST = "cpuCost";
+  private static final String MEMORY_COST = "memoryCost";
+  private static final String ENFORCEMENT_PERIOD_MILLIS = "enforcementPeriodMillis";
+
+  @JsonPropertyDescription("CPU cost of the instance")
   private long _cpuCost;
+  @JsonPropertyDescription("Memory cost of the instance")
   private long _memoryCost;
+  @JsonPropertyDescription("Enforcement period in milliseconds")
   private long _enforcementPeriodMillis;
 
   @JsonCreator
-  public InstanceCost(long cpuCost, long memoryCost, long enforcementPeriodMillis) {
+  public InstanceCost(@JsonProperty(CPU_COST) long cpuCost, @JsonProperty(MEMORY_COST) long memoryCost,
+      @JsonProperty(ENFORCEMENT_PERIOD_MILLIS) long enforcementPeriodMillis) {
     _cpuCost = cpuCost;
     _memoryCost = memoryCost;
     _enforcementPeriodMillis = enforcementPeriodMillis;
@@ -47,11 +56,11 @@ public class InstanceCost extends BaseJsonConfig {
     return _enforcementPeriodMillis;
   }
 
-  public void setCpuCost(double cpuCost) {
+  public void setCpuCost(long cpuCost) {
     _cpuCost = cpuCost;
   }
 
-  public void setMemoryCost(double memoryCost) {
+  public void setMemoryCost(long memoryCost) {
     _memoryCost = memoryCost;
   }
 

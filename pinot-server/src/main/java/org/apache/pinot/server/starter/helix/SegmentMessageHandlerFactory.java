@@ -309,8 +309,7 @@ public class SegmentMessageHandlerFactory implements MessageHandlerFactory {
     @Override
     public HelixTaskResult handleMessage() {
       // TODO: Add logic to invoke the query workload manager to refresh the query workload config
-      _workloadBudgetManager.addOrUpdateWorkload(_queryWorkloadName, _instanceCost.getCpuCostNs(),
-          _instanceCost.getMemoryCostBytes());
+      _workloadBudgetManager.addOrUpdateWorkload(_queryWorkloadName, _instanceCost.getCpuCost(), _instanceCost.getMemoryCost());
       HelixTaskResult result = new HelixTaskResult();
       result.setSuccess(true);
       return result;
