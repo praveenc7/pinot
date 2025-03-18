@@ -225,9 +225,9 @@ public class WorkloadCPUMemAccountantFactory implements ThreadAccountantFactory 
       }
 
       public void aggregateWorkloadLevelStats() {
-        if (_isThreadCPUSamplingEnabled && _isThreadMemorySamplingEnabled) {
-          LOGGER.info("Feature not enabled. Exiting...");
-        }
+//        if (_isThreadCPUSamplingEnabled && _isThreadMemorySamplingEnabled) {
+//          LOGGER.info("Feature not enabled. Exiting...");
+//        }
 
         Map<String, List<CPUMemThreadLevelAccountingObjects.TaskEntry>> allWorkloads = new HashMap<>();
         HashMap<String, Long> finishedTaskCPUCost = new HashMap<>();

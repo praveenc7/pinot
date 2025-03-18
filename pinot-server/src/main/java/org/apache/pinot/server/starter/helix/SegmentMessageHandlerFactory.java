@@ -58,7 +58,7 @@ public class SegmentMessageHandlerFactory implements MessageHandlerFactory {
   private final InstanceDataManager _instanceDataManager;
   private final ServerMetrics _metrics;
   private final SegmentRefreshSemaphore _segmentRefreshSemaphore;
-  private static final WorkloadBudgetManager _workloadBudgetManager;
+  private static WorkloadBudgetManager _workloadBudgetManager;
 
   public SegmentMessageHandlerFactory(InstanceDataManager instanceDataManager, ServerMetrics metrics) {
     _instanceDataManager = instanceDataManager;

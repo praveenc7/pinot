@@ -75,7 +75,7 @@ public class WorkloadBudgetManager {
     Budget budget = _workloadBudgets.get(workload);
     if (budget == null) {
       LOGGER.warn("No budget found for workload: {}", workload);
-      return new BudgetStats(0, 0);
+      return new BudgetStats(Long.MAX_VALUE, Long.MAX_VALUE);
     }
     return budget.tryCharge(cpuUsedNs, memoryUsedBytes);
   }
@@ -159,14 +159,13 @@ public class WorkloadBudgetManager {
         // Capture current values
         long currentCpu = _cpuRemaining.get();
         long currentMem = _memoryRemaining.get();
-
         if (cpuUsedNs == 0 && memoryUsedBytes == 0) {
           return new BudgetStats(currentCpu, currentMem);
         }
-
         // Attempt to deduct both CPU and Memory budgets atomically
         if (_cpuRemaining.compareAndSet(currentCpu, currentCpu - cpuUsedNs) && _memoryRemaining.compareAndSet(
             currentMem, currentMem - memoryUsedBytes)) {
+          LOGGER.info("Successfully charged CPU: {}ns, Memory: {} bytes", cpuUsedNs, memoryUsedBytes);
           return new BudgetStats(currentCpu - cpuUsedNs, currentMem - memoryUsedBytes); // Successfully charged
         }
 
