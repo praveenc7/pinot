@@ -71,6 +71,8 @@ public class DataTableHandler extends SimpleChannelInboundHandler<ByteBuf> {
       _queryRouter.receiveDataTable(_serverRoutingInstance, dataTable, responseSize,
           (int) (System.currentTimeMillis() - deserializationStartTimeMs));
       long requestID = Long.parseLong(dataTable.getMetadata().get(DataTable.MetadataKey.REQUEST_ID.getName()));
+      // Setup RunnerThread
+      // sample()
       Tracing.ThreadAccountantOps.updateQueryUsageConcurrently(String.valueOf(requestID));
     } catch (Exception e) {
       LOGGER.error("Caught exception while deserializing data table of size: {} from server: {}", responseSize,

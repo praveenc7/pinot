@@ -21,6 +21,7 @@ package org.apache.pinot.server.starter.helix;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.sun.corba.se.spi.orbutil.threadpool.Work;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -72,6 +73,7 @@ import org.apache.pinot.common.utils.regex.PatternFactory;
 import org.apache.pinot.common.utils.tls.PinotInsecureMode;
 import org.apache.pinot.common.utils.tls.TlsUtils;
 import org.apache.pinot.common.version.PinotVersion;
+import org.apache.pinot.core.accounting.WorkloadBudgetManager;
 import org.apache.pinot.core.common.datatable.DataTableBuilderFactory;
 import org.apache.pinot.core.data.manager.InstanceDataManager;
 import org.apache.pinot.core.data.manager.realtime.RealtimeConsumptionRateManager;
@@ -670,6 +672,8 @@ public abstract class BaseServerStarter implements ServiceStartable {
     InstanceDataManager instanceDataManager = _serverInstance.getInstanceDataManager();
     instanceDataManager.setSupplierOfIsServerReadyToServeQueries(() -> _isServerReadyToServeQueries);
     // initialize the thread accountant for query killing
+    // TODO(Vivek): Get the inforcement window from config.
+    WorkloadBudgetManager.init(60_000);
     Tracing.ThreadAccountantOps.initializeThreadAccountant(
         _serverConf.subset(CommonConstants.PINOT_QUERY_SCHEDULER_PREFIX), _instanceId);
     initSegmentFetcher(_serverConf);

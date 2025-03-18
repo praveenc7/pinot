@@ -141,7 +141,8 @@ public class QueryServer extends PinotQueryWorkerGrpc.PinotQueryWorkerImplBase {
     long timeoutMs = Long.parseLong(requestMetadata.get(CommonConstants.Broker.Request.QueryOptionKey.TIMEOUT_MS));
     long deadlineMs = System.currentTimeMillis() + timeoutMs;
 
-    Tracing.ThreadAccountantOps.setupRunner(Long.toString(requestId), ThreadExecutionContext.TaskType.MSE);
+    String workloadName = requestMetadata.get(CommonConstants.Broker.Request.QueryOptionKey.WORKLOAD_NAME);
+    Tracing.ThreadAccountantOps.setupRunner(Long.toString(requestId), ThreadExecutionContext.TaskType.MSE, workloadName);
     ThreadExecutionContext parentContext = Tracing.getThreadAccountant().getThreadExecutionContext();
     try {
       forEachStage(request, requestId, deadlineMs,

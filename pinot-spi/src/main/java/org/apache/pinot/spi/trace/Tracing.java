@@ -207,13 +207,13 @@ public class Tracing {
 
     @Override
     public final void createExecutionContext(@Nullable String queryId, int taskId,
-        ThreadExecutionContext.TaskType taskType, @Nullable ThreadExecutionContext parentContext) {
+        ThreadExecutionContext.TaskType taskType, @Nullable ThreadExecutionContext parentContext, String workloadName) {
       _anchorThread.set(parentContext == null ? Thread.currentThread() : parentContext.getAnchorThread());
-      createExecutionContextInner(queryId, taskId, taskType, parentContext);
+      createExecutionContextInner(queryId, taskId, taskType, parentContext, workloadName);
     }
 
     public void createExecutionContextInner(@Nullable String queryId, int taskId,
-        ThreadExecutionContext.TaskType taskType, @Nullable ThreadExecutionContext parentContext) {
+        ThreadExecutionContext.TaskType taskType, @Nullable ThreadExecutionContext parentContext, String workloadName) {
     }
 
     @Override
@@ -232,6 +232,12 @@ public class Tracing {
         @Override
         public TaskType getTaskType() {
           return TaskType.UNKNOWN;
+        }
+
+        @Override
+        public String getWorkloadName() {
+          // TODO(Vivek): Decide on a default workload name for all queries.
+          return "";
         }
       };
     }
@@ -266,21 +272,24 @@ public class Tracing {
     private ThreadAccountantOps() {
     }
 
-    public static void setupRunner(@Nonnull String queryId) {
-      setupRunner(queryId, ThreadExecutionContext.TaskType.SSE);
+    public static void setupRunner(@Nonnull String queryId, String workloadName) {
+      setupRunner(queryId, ThreadExecutionContext.TaskType.SSE, workloadName);
     }
 
-    public static void setupRunner(@Nonnull String queryId, ThreadExecutionContext.TaskType taskType) {
+    public static void setupRunner(@Nonnull String queryId, ThreadExecutionContext.TaskType taskType,
+        String workloadName) {
       Tracing.getThreadAccountant().setThreadResourceUsageProvider(new ThreadResourceUsageProvider());
       Tracing.getThreadAccountant()
-          .createExecutionContext(queryId, CommonConstants.Accounting.ANCHOR_TASK_ID, taskType, null);
+          .createExecutionContext(queryId, CommonConstants.Accounting.ANCHOR_TASK_ID, taskType, null, workloadName);
     }
 
     /**
      * Setup metadata of query worker threads. This function assumes that the workers are for Single Stage Engine.
-     * @param taskId Query task ID of the thread. In SSE, ID is an incrementing counter. In MSE, id is the stage id.
+     *
+     * @param taskId                      Query task ID of the thread. In SSE, ID is an incrementing counter. In MSE, id
+     *                                    is the stage id.
      * @param threadResourceUsageProvider Object that measures resource usage.
-     * @param threadExecutionContext Context holds metadata about the query.
+     * @param threadExecutionContext      Context holds metadata about the query.
      */
     public static void setupWorker(int taskId, ThreadResourceUsageProvider threadResourceUsageProvider,
         ThreadExecutionContext threadExecutionContext) {
@@ -298,13 +307,16 @@ public class Tracing {
         ThreadExecutionContext threadExecutionContext) {
       Tracing.getThreadAccountant().setThreadResourceUsageProvider(threadResourceUsageProvider);
       String queryId = null;
+      // TODO(Vivek): Add default workloadName here.
+      String workloadName = "";
       if (threadExecutionContext != null) {
         queryId = threadExecutionContext.getQueryId();
+        workloadName = threadExecutionContext.getWorkloadName();
       } else {
         LOGGER.warn("Request ID not available. ParentContext not set for query worker thread.");
       }
       Tracing.getThreadAccountant()
-          .createExecutionContext(queryId, taskId, taskType, threadExecutionContext);
+          .createExecutionContext(queryId, taskId, taskType, threadExecutionContext, workloadName);
     }
 
     public static void sample() {
@@ -320,12 +332,14 @@ public class Tracing {
     }
 
     public static void initializeThreadAccountant(PinotConfiguration config, String instanceId) {
-      String factoryName = config.getProperty(CommonConstants.Accounting.CONFIG_OF_FACTORY_NAME);
+      String factoryName = "org.apache.pinot.core.accounting.WorkloadCPUMemAccountantFactory";
+      //String factoryName = config.getProperty(CommonConstants.Accounting.CONFIG_OF_FACTORY_NAME);
       if (factoryName == null) {
         LOGGER.warn("No thread accountant factory provided, using default implementation");
       } else {
         LOGGER.info("Config-specified accountant factory name {}", factoryName);
         try {
+          // TODO(Vivek): Get it from the config. For now using WorkloadCPUMemAccountantFactory.
           ThreadAccountantFactory threadAccountantFactory =
               (ThreadAccountantFactory) Class.forName(factoryName).getDeclaredConstructor().newInstance();
           boolean registered = Tracing.register(threadAccountantFactory.init(config, instanceId));

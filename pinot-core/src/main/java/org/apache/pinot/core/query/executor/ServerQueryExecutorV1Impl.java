@@ -284,11 +284,13 @@ public class ServerQueryExecutorV1Impl implements QueryExecutor {
         }
       }
     }
+
     if (LOGGER.isDebugEnabled()) {
       LOGGER.debug("Processing requestId: {} with segmentsToQuery: {}, optionalSegments: {} and acquiredSegments: {}",
           requestId, segmentsToQuery, optionalSegments,
           segmentDataManagers.stream().map(SegmentDataManager::getSegmentName).collect(Collectors.toList()));
     }
+
 
     // Gather stats for realtime consuming segments
     // TODO: the freshness time should not be collected at query time because there is no guarantee that the consuming
@@ -438,6 +440,7 @@ public class ServerQueryExecutorV1Impl implements QueryExecutor {
       TimerContext timerContext, ExecutorService executorService, @Nullable ResultsBlockStreamer streamer,
       boolean enableStreaming)
       throws Exception {
+    // TODO(Vivek): Check if subquery should be handled for collecting segment level CPU/Mem cost
     handleSubquery(queryContext, tableDataManager, indexSegments, providedSegmentContexts, timerContext,
         executorService);
 
@@ -448,6 +451,7 @@ public class ServerQueryExecutorV1Impl implements QueryExecutor {
     }
 
     SegmentPrunerStatistics prunerStats = new SegmentPrunerStatistics();
+    // TODO(Vivek): Segment Pruning code. Collect the CPU/Mem cost of pruning.
     List<IndexSegment> selectedSegments = selectSegments(indexSegments, queryContext, timerContext, executorService,
         prunerStats);
 
@@ -720,6 +724,7 @@ public class ServerQueryExecutorV1Impl implements QueryExecutor {
     InstanceResponseBlock instanceResponse;
     @Nullable
     ResultsBlockStreamer actualStreamer = enableStreaming ? streamer : null;
+    // TODO(Vivek): Do we need to account for CPU/Mem cost for Explain??
     switch (queryContext.getExplain()) {
       case DESCRIPTION:
         instanceResponse = executeDescribeExplain(indexSegments, queryContext, timerContext, executorService,
@@ -747,6 +752,7 @@ public class ServerQueryExecutorV1Impl implements QueryExecutor {
       return new InstanceResponseBlock(ResultsBlockUtils.buildEmptyQueryResults(queryContext));
     }
     InstanceResponseBlock instanceResponse;
+    // TODO(Vivek): CPU/Memory cost for planning. Include that?
     Plan queryPlan = planCombineQuery(queryContext, timerContext, executorService, streamer, selectedSegmentContexts);
 
     TimerContext.Timer planExecTimer = timerContext.startNewPhaseTimer(ServerQueryPhase.QUERY_PLAN_EXECUTION);

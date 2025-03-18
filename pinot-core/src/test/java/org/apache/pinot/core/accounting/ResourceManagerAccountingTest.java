@@ -40,6 +40,7 @@ import org.apache.pinot.common.datatable.DataTable;
 import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.common.utils.DataSchema;
 import org.apache.pinot.core.accounting.PerQueryCPUMemAccountantFactory.PerQueryCPUMemResourceUsageAccountant;
+import org.apache.pinot.core.accounting.WorkloadCPUMemAccountantFactory.WorkloadCPUMemResourceUsageAccountant;
 import org.apache.pinot.core.common.datablock.DataBlockTestUtils;
 import org.apache.pinot.core.data.table.IndexedTable;
 import org.apache.pinot.core.data.table.Record;
@@ -71,10 +72,14 @@ import org.slf4j.LoggerFactory;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
+import static org.apache.log4j.Level.*;
+
 
 public class ResourceManagerAccountingTest {
 
   public static final Logger LOGGER = LoggerFactory.getLogger(ResourceManagerAccountingTest.class);
+
+  public static final String DEFAULT_WORKLOAD_NAME = "DEFAULT_WORKLOAD";
   private static final int NUM_ROWS = 1_000_000;
 
   /**
@@ -105,7 +110,7 @@ public class ResourceManagerAccountingTest {
       int finalK = k;
       rm.getQueryRunners().submit(() -> {
         String queryId = "q" + finalK;
-        Tracing.ThreadAccountantOps.setupRunner(queryId);
+        Tracing.ThreadAccountantOps.setupRunner(queryId, DEFAULT_WORKLOAD_NAME);
         Thread thread = Thread.currentThread();
         CountDownLatch countDownLatch = new CountDownLatch(10);
         ThreadExecutionContext threadExecutionContext = Tracing.getThreadAccountant().getThreadExecutionContext();
@@ -166,7 +171,7 @@ public class ResourceManagerAccountingTest {
       int finalK = k;
       rm.getQueryRunners().submit(() -> {
         String queryId = "q" + finalK;
-        Tracing.ThreadAccountantOps.setupRunner(queryId);
+        Tracing.ThreadAccountantOps.setupRunner(queryId, DEFAULT_WORKLOAD_NAME);
         Thread thread = Thread.currentThread();
         CountDownLatch countDownLatch = new CountDownLatch(10);
         ThreadExecutionContext threadExecutionContext = Tracing.getThreadAccountant().getThreadExecutionContext();
@@ -200,6 +205,78 @@ public class ResourceManagerAccountingTest {
     }
     Thread.sleep(1000000);
   }
+
+  @Test
+  public void testWorkloadLevelThreadMemoryAccounting()
+      throws Exception {
+    LogManager.getLogger(WorkloadCPUMemResourceUsageAccountant.class).setLevel(Level.DEBUG);
+    LogManager.getLogger(ThreadResourceUsageProvider.class).setLevel(Level.DEBUG);
+    LogManager.getLogger(WorkloadBudgetManager.class).setLevel(Level.DEBUG);
+    LogManager.getLogger(this.getClass()).setLevel(Level.DEBUG);
+    ThreadResourceUsageProvider.setThreadCpuTimeMeasurementEnabled(true);
+    ThreadResourceUsageProvider.setThreadMemoryMeasurementEnabled(true);
+    HashMap<String, Object> configs = new HashMap<>();
+    ServerMetrics.register(Mockito.mock(ServerMetrics.class));
+    configs.put(CommonConstants.Accounting.CONFIG_OF_ENABLE_THREAD_MEMORY_SAMPLING, true);
+    configs.put(CommonConstants.Accounting.CONFIG_OF_ENABLE_THREAD_CPU_SAMPLING, false);
+
+    // Initialize WorkloadBudgetManager.
+    PinotConfiguration pinotConfig = new PinotConfiguration(configs);
+    WorkloadBudgetManager.init(5_000);
+    WorkloadBudgetManager.getInstance().addOrUpdateWorkload(DEFAULT_WORKLOAD_NAME, 100_000_000, 900_000);
+    Tracing.ThreadAccountantOps.initializeThreadAccountant(pinotConfig, "mock-instance");
+
+    ResourceManager rm = getResourceManager(20, 2, 1, 1, configs);
+
+    for (int k = 0; k < 10; k++) {
+      int finalK = k;
+      rm.getQueryRunners().submit(() -> {
+        try {
+          String queryId = "q" + finalK;
+          Tracing.ThreadAccountantOps.setupRunner(queryId, DEFAULT_WORKLOAD_NAME);
+          Thread thread = Thread.currentThread();
+          CountDownLatch countDownLatch = new CountDownLatch(10);
+          Tracing.ThreadAccountantOps.sample();
+          ThreadExecutionContext threadExecutionContext = Tracing.getThreadAccountant().getThreadExecutionContext();
+          LOGGER.info("RunnerThread: Queueing tasks");
+          for (int j = 0; j < 10; j++) {
+            int finalJ = j;
+            rm.getQueryWorkers().submit(() -> {
+              try {
+                LOGGER.info("WorkerThread: Starting task: {}", finalJ);
+                ThreadResourceUsageProvider threadResourceUsageProvider = new ThreadResourceUsageProvider();
+                Tracing.ThreadAccountantOps.setupWorker(finalJ, threadResourceUsageProvider, threadExecutionContext);
+                long[][] a = new long[1000][];
+                for (int i = 0; i < 10; i++) {
+                  a[i] = new long[1000];
+                  Tracing.ThreadAccountantOps.sample();
+                  Thread.sleep(100);
+                }
+
+                LOGGER.info("WorkerThread: Finished task: {}", finalJ);
+                Tracing.ThreadAccountantOps.clear();
+                Assert.assertEquals(a[0][0], 0);
+                countDownLatch.countDown();
+              } catch (Exception e) {
+                LOGGER.error("====Worker Thread:{} task={} interrupted. Working", Thread.currentThread(), finalJ, e);
+                Tracing.ThreadAccountantOps.clear();
+              }
+            });
+          }
+          LOGGER.info("RunnerThread. Queued all tasks: {}", queryId);
+          Thread.sleep(10000);
+          countDownLatch.await();
+          Tracing.ThreadAccountantOps.clear();
+        } catch (InterruptedException e) {
+          LOGGER.error("====Runner Thread:{} interrupted. Working", Thread.currentThread(), e);
+          Tracing.ThreadAccountantOps.clear();
+        }
+      });
+    }
+    Thread.sleep(1000_000);
+  }
+
+
 
   /**
    * Test the mechanism of worker thread checking for runnerThread's interruption flag
@@ -296,7 +373,7 @@ public class ResourceManagerAccountingTest {
     for (int i = 0; i < 100; i++) {
       int finalI = i;
       rm.getQueryRunners().submit(() -> {
-        Tracing.ThreadAccountantOps.setupRunner("testSelectQueryId" + finalI);
+        Tracing.ThreadAccountantOps.setupRunner("testSelectQueryId" + finalI, DEFAULT_WORKLOAD_NAME);
         try {
           SelectionOperatorUtils.getDataTableFromRows(rows, dataSchema, false).toBytes();
         } catch (EarlyTerminationException e) {
@@ -365,7 +442,7 @@ public class ResourceManagerAccountingTest {
     for (int i = 0; i < 100; i++) {
       int finalI = i;
       rm.getQueryRunners().submit(() -> {
-        Tracing.ThreadAccountantOps.setupRunner("testGroupByQueryId" + finalI);
+        Tracing.ThreadAccountantOps.setupRunner("testGroupByQueryId" + finalI, DEFAULT_WORKLOAD_NAME);
         try {
           groupByResultsBlock.getDataTable().toBytes();
         } catch (EarlyTerminationException e) {
@@ -443,7 +520,7 @@ public class ResourceManagerAccountingTest {
 
       // test mutable json index .getMatchingFlattenedDocsMap()
       rm.getQueryRunners().submit(() -> {
-        Tracing.ThreadAccountantOps.setupRunner("testJsonExtractIndexId1");
+        Tracing.ThreadAccountantOps.setupRunner("testJsonExtractIndexId1", DEFAULT_WORKLOAD_NAME);
         try {
           mutableJsonIndex.getMatchingFlattenedDocsMap("key", null);
         } catch (EarlyTerminationException e) {
@@ -458,7 +535,7 @@ public class ResourceManagerAccountingTest {
       File indexFile = new File(indexDir, colName + V1Constants.Indexes.JSON_INDEX_FILE_EXTENSION);
       AtomicBoolean immutableEarlyTerminationOccurred = new AtomicBoolean(false);
       rm.getQueryRunners().submit(() -> {
-        Tracing.ThreadAccountantOps.setupRunner("testJsonExtractIndexId2");
+        Tracing.ThreadAccountantOps.setupRunner("testJsonExtractIndexId2", DEFAULT_WORKLOAD_NAME);
         try {
           try (PinotDataBuffer offHeapDataBuffer = PinotDataBuffer.mapReadOnlyBigEndianFile(indexFile);
               ImmutableJsonIndexReader offHeapIndexReader = new ImmutableJsonIndexReader(offHeapDataBuffer, 1000000)) {
@@ -508,7 +585,7 @@ public class ResourceManagerAccountingTest {
       int finalK = k;
       futures[finalK] = rm.getQueryRunners().submit(() -> {
         String queryId = "q" + finalK;
-        Tracing.ThreadAccountantOps.setupRunner(queryId);
+        Tracing.ThreadAccountantOps.setupRunner(queryId, DEFAULT_WORKLOAD_NAME);
         Thread thread = Thread.currentThread();
         CountDownLatch countDownLatch = new CountDownLatch(10);
         Future[] futuresThread = new Future[10];

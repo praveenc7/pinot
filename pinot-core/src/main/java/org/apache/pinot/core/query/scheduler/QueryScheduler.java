@@ -131,9 +131,11 @@ public abstract class QueryScheduler {
    */
   @Nullable
   protected byte[] processQueryAndSerialize(ServerQueryRequest queryRequest, ExecutorService executorService) {
+    Map<String, String> queryOptions = queryRequest.getQueryContext().getQueryOptions();
+    String workloadName = QueryOptionsUtils.getWorkloadName(queryOptions);
 
     //Start instrumentation context. This must not be moved further below interspersed into the code.
-    Tracing.ThreadAccountantOps.setupRunner(queryRequest.getQueryId());
+    Tracing.ThreadAccountantOps.setupRunner(queryRequest.getQueryId(), workloadName);
     queryRequest.registerInMdc();
 
     try {
@@ -161,7 +163,7 @@ public abstract class QueryScheduler {
       }
 
       // TODO: Perform this check sooner during the serialization of DataTable.
-      Map<String, String> queryOptions = queryRequest.getQueryContext().getQueryOptions();
+
       Long maxResponseSizeBytes = QueryOptionsUtils.getMaxServerResponseSizeBytes(queryOptions);
       if (maxResponseSizeBytes != null && responseBytes != null && responseBytes.length > maxResponseSizeBytes) {
         String errMsg = "Serialized query response size " + responseBytes.length + " exceeds threshold "
