@@ -29,6 +29,7 @@ import javax.ws.rs.core.HttpHeaders;
 import org.apache.hc.client5.http.io.HttpClientConnectionManager;
 import org.apache.pinot.broker.api.RequesterIdentity;
 import org.apache.pinot.common.response.BrokerResponse;
+import org.apache.pinot.common.response.PinotBrokerTimeSeriesResponse;
 import org.apache.pinot.spi.trace.RequestContext;
 import org.apache.pinot.spi.trace.RequestScope;
 import org.apache.pinot.spi.trace.Tracing;
@@ -59,6 +60,14 @@ public interface BrokerRequestHandler {
     }
   }
 
+  /**
+   * Run a query and use the time-series engine.
+   */
+  default PinotBrokerTimeSeriesResponse handleTimeSeriesRequest(String lang, String rawQueryParamString,
+      RequestContext requestContext) {
+    throw new UnsupportedOperationException("Handler does not support Time Series requests");
+  }
+
   Map<Long, String> getRunningQueries();
 
   /**
@@ -72,6 +81,21 @@ public interface BrokerRequestHandler {
    * @return true if there is a running query for the given queryId.
    */
   boolean cancelQuery(long queryId, int timeoutMs, Executor executor, HttpClientConnectionManager connMgr,
+      Map<String, Integer> serverResponses)
+      throws Exception;
+
+  /**
+   * Cancel a query as identified by the clientQueryId provided externally. This method is non-blocking so the query may
+   * still run for a while after calling this method. This cancel method can be called multiple times.
+   * @param clientQueryId the Id assigned to the query by the client
+   * @param timeoutMs timeout to wait for servers to respond the cancel requests
+   * @param executor to send cancel requests to servers in parallel
+   * @param connMgr to provide the http connections
+   * @param serverResponses to collect cancel responses from all servers if a map is provided
+   * @return true if there is a running query for the given clientQueryId.
+   */
+  boolean cancelQueryByClientId(String clientQueryId, int timeoutMs, Executor executor,
+      HttpClientConnectionManager connMgr,
       Map<String, Integer> serverResponses)
       throws Exception;
 }

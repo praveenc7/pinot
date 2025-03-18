@@ -33,6 +33,7 @@ import org.apache.hc.client5.http.io.HttpClientConnectionManager;
 import org.apache.pinot.common.exception.InvalidConfigException;
 import org.apache.pinot.common.restlet.resources.TableMetadataInfo;
 import org.apache.pinot.common.restlet.resources.ValidDocIdsMetadataInfo;
+import org.apache.pinot.controller.api.resources.TableStaleSegmentResponse;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
 import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.utils.JsonUtils;
@@ -58,19 +59,26 @@ public class TableMetadataReader {
     _pinotHelixResourceManager = helixResourceManager;
   }
 
-  public Map<String, JsonNode> getServerCheckSegmentsReloadMetadata(String tableNameWithType, int timeoutMs)
+  /**
+   * Check if segments need a reload on any servers
+   * @return pair of: a) number of failed responses, b) reload responses returned
+   */
+  public TableReloadJsonResponse getServerCheckSegmentsReloadMetadata(String tableNameWithType,
+      int timeoutMs)
       throws InvalidConfigException, IOException {
-    List<String> segmentsMetadata = getReloadCheckResponses(tableNameWithType, timeoutMs);
+    ServerSegmentMetadataReader.TableReloadResponse segmentsMetadataPair =
+        getReloadCheckResponses(tableNameWithType, timeoutMs);
+    List<String> segmentsMetadata = segmentsMetadataPair.getServerReloadResponses();
     Map<String, JsonNode> response = new HashMap<>();
     for (String segmentMetadata : segmentsMetadata) {
       JsonNode responseJson = JsonUtils.stringToJsonNode(segmentMetadata);
       response.put(responseJson.get("instanceId").asText(), responseJson);
     }
-    return response;
+    return new TableReloadJsonResponse(segmentsMetadataPair.getNumFailedResponses(), response);
   }
 
-  public List<String> getReloadCheckResponses(String tableNameWithType, int timeoutMs)
-      throws InvalidConfigException {
+  public ServerSegmentMetadataReader.TableReloadResponse getReloadCheckResponses(String tableNameWithType,
+      int timeoutMs) throws InvalidConfigException {
     TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableNameWithType);
     List<String> serverInstances = _pinotHelixResourceManager.getServerInstancesForTable(tableNameWithType, tableType);
     Set<String> serverInstanceSet = new HashSet<>(serverInstances);
@@ -198,5 +206,36 @@ public class TableMetadataReader {
         serverSegmentMetadataReader.getValidDocIdsMetadataFromServer(tableNameWithType, serverToSegments, endpoints,
             segmentNames, timeoutMs, validDocIdsType, numSegmentsBatchPerServerRequest);
     return JsonUtils.objectToJsonNode(aggregateTableMetadataInfo);
+  }
+
+  public Map<String, TableStaleSegmentResponse> getStaleSegments(String tableNameWithType,
+      int timeoutMs)
+      throws InvalidConfigException, IOException {
+    TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableNameWithType);
+    List<String> serverInstances = _pinotHelixResourceManager.getServerInstancesForTable(tableNameWithType, tableType);
+    Set<String> serverInstanceSet = new HashSet<>(serverInstances);
+    BiMap<String, String> endpoints = _pinotHelixResourceManager.getDataInstanceAdminEndpoints(serverInstanceSet);
+    ServerSegmentMetadataReader serverSegmentMetadataReader =
+        new ServerSegmentMetadataReader(_executor, _connectionManager);
+    return serverSegmentMetadataReader.getStaleSegmentsFromServer(tableNameWithType, serverInstanceSet, endpoints,
+        timeoutMs);
+  }
+
+  public class TableReloadJsonResponse {
+    private int _numFailedResponses;
+    private Map<String, JsonNode> _serverReloadJsonResponses;
+
+    TableReloadJsonResponse(int numFailedResponses, Map<String, JsonNode> serverReloadJsonResponses) {
+      _numFailedResponses = numFailedResponses;
+      _serverReloadJsonResponses = serverReloadJsonResponses;
+    }
+
+    public int getNumFailedResponses() {
+      return _numFailedResponses;
+    }
+
+    public Map<String, JsonNode> getServerReloadJsonResponses() {
+      return _serverReloadJsonResponses;
+    }
   }
 }

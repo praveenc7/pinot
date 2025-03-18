@@ -21,18 +21,17 @@ package org.apache.pinot.core.common.datatable;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Random;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.pinot.common.CustomObject;
 import org.apache.pinot.common.datatable.DataTable;
 import org.apache.pinot.common.datatable.DataTable.MetadataKey;
 import org.apache.pinot.common.datatable.DataTableFactory;
-import org.apache.pinot.common.exception.QueryException;
-import org.apache.pinot.common.response.ProcessingException;
 import org.apache.pinot.common.utils.DataSchema;
-import org.apache.pinot.core.common.ObjectSerDeUtils;
 import org.apache.pinot.spi.accounting.ThreadResourceUsageProvider;
+import org.apache.pinot.spi.exception.QueryErrorCode;
 import org.apache.pinot.spi.utils.ByteArray;
 import org.roaringbitmap.RoaringBitmap;
 import org.testng.Assert;
@@ -68,23 +67,21 @@ public class DataTableSerDeTest {
   private static final int[][] BOOLEAN_ARRAYS = new int[NUM_ROWS][];
   private static final long[][] TIMESTAMP_ARRAYS = new long[NUM_ROWS][];
   private static final String[][] STRING_ARRAYS = new String[NUM_ROWS][];
+  private static final Map<String, Object>[] MAPS = new Map[NUM_ROWS];
 
   @Test(dataProvider = "versionProvider")
   public void testException(int dataTableVersion)
       throws IOException {
     DataTableBuilderFactory.setDataTableVersion(dataTableVersion);
-    Exception exception = new UnsupportedOperationException("Caught exception.");
-    ProcessingException processingException =
-        QueryException.getException(QueryException.QUERY_EXECUTION_ERROR, exception);
-    String expected = processingException.getMessage();
+    String expected = "Caught exception.";
 
     DataTable dataTable = DataTableBuilderFactory.getEmptyDataTable();
-    dataTable.addException(processingException);
+    dataTable.addException(QueryErrorCode.QUERY_EXECUTION, expected);
     DataTable newDataTable = DataTableFactory.getDataTable(dataTable.toBytes());
     Assert.assertNull(newDataTable.getDataSchema());
     Assert.assertEquals(newDataTable.getNumberOfRows(), 0);
 
-    String actual = newDataTable.getExceptions().get(QueryException.QUERY_EXECUTION_ERROR.getErrorCode());
+    String actual = newDataTable.getExceptions().get(QueryErrorCode.QUERY_EXECUTION.getId());
     Assert.assertEquals(actual, expected);
   }
 
@@ -154,7 +151,6 @@ public class DataTableSerDeTest {
 
   private void testEmptyValues(DataSchema dataSchema, int numRows, Object[] emptyValues)
       throws IOException {
-
     DataTableBuilder dataTableBuilder = DataTableBuilderFactory.getDataTableBuilder(dataSchema);
     for (int rowId = 0; rowId < numRows; rowId++) {
       dataTableBuilder.startRow();
@@ -175,7 +171,7 @@ public class DataTableSerDeTest {
         } else if (emptyValue instanceof ByteArray) {
           dataTableBuilder.setColumn(columnId, (ByteArray) emptyValue);
         } else {
-          dataTableBuilder.setColumn(columnId, emptyValue);
+          Assert.fail();
         }
       }
       dataTableBuilder.finishRow();
@@ -363,11 +359,6 @@ public class DataTableSerDeTest {
             BYTES[rowId] = isNull ? new byte[0] : RandomStringUtils.random(RANDOM.nextInt(20)).getBytes();
             dataTableBuilder.setColumn(colId, new ByteArray(BYTES[rowId]));
             break;
-          // Just test Double here, all object types will be covered in ObjectCustomSerDeTest.
-          case OBJECT:
-            OBJECTS[rowId] = isNull ? null : RANDOM.nextDouble();
-            dataTableBuilder.setColumn(colId, OBJECTS[rowId]);
-            break;
           case INT_ARRAY:
             int length = RANDOM.nextInt(20);
             int[] intArray = new int[length];
@@ -434,8 +425,17 @@ public class DataTableSerDeTest {
             STRING_ARRAYS[rowId] = stringArray;
             dataTableBuilder.setColumn(colId, stringArray);
             break;
+          case MAP:
+            Map<String, Object> map = new HashMap<>();
+            for (int j = 0; j < 1 + RANDOM.nextInt(20); j++) {
+              map.put("k" + j, RandomStringUtils.random(RANDOM.nextInt(20)));
+            }
+            MAPS[rowId] = map;
+            dataTableBuilder.setColumn(colId, map);
+            break;
+          case OBJECT:
           case UNKNOWN:
-            dataTableBuilder.setColumn(colId, (Object) null);
+            dataTableBuilder.setNull(colId);
             break;
           default:
             throw new UnsupportedOperationException("Unable to generate random data for: " + columnDataTypes[colId]);
@@ -496,15 +496,6 @@ public class DataTableSerDeTest {
             Assert.assertEquals(newDataTable.getBytes(rowId, colId).getBytes(), isNull ? new byte[0] : BYTES[rowId],
                 ERROR_MESSAGE);
             break;
-          case OBJECT:
-            CustomObject customObject = newDataTable.getCustomObject(rowId, colId);
-            if (isNull) {
-              Assert.assertNull(customObject, ERROR_MESSAGE);
-            } else {
-              Assert.assertNotNull(customObject);
-              Assert.assertEquals(ObjectSerDeUtils.deserialize(customObject), OBJECTS[rowId], ERROR_MESSAGE);
-            }
-            break;
           case INT_ARRAY:
             Assert.assertTrue(Arrays.equals(newDataTable.getIntArray(rowId, colId), INT_ARRAYS[rowId]), ERROR_MESSAGE);
             break;
@@ -535,6 +526,10 @@ public class DataTableSerDeTest {
             Assert.assertTrue(Arrays.equals(newDataTable.getStringArray(rowId, colId), STRING_ARRAYS[rowId]),
                 ERROR_MESSAGE);
             break;
+          case MAP:
+            Assert.assertEquals(newDataTable.getMap(rowId, colId), MAPS[rowId], ERROR_MESSAGE);
+            break;
+          case OBJECT:
           case UNKNOWN:
             Object nulValue = newDataTable.getCustomObject(rowId, colId);
             Assert.assertNull(nulValue, ERROR_MESSAGE);

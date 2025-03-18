@@ -93,7 +93,7 @@ public class MultiStageAccountingTest implements ITest {
     Tracing.ThreadAccountantOps.initializeThreadAccountant(new PinotConfiguration(configs), "testGroupBy");
 
     // Setup Thread Context
-    Tracing.ThreadAccountantOps.setupRunner("MultiStageAccountingTest", ThreadExecutionContext.TaskType.MSE);
+    Tracing.ThreadAccountantOps.setupRunner("MultiStageAccountingTest", ThreadExecutionContext.TaskType.MSE, "");
     ThreadExecutionContext threadExecutionContext = Tracing.getThreadAccountant().getThreadExecutionContext();
     ThreadResourceUsageProvider threadResourceUsageProvider = new ThreadResourceUsageProvider();
     Tracing.ThreadAccountantOps.setupWorker(1, ThreadExecutionContext.TaskType.MSE, threadResourceUsageProvider,
@@ -152,7 +152,7 @@ public class MultiStageAccountingTest implements ITest {
         new DataSchema(new String[]{"group", "sum"}, new DataSchema.ColumnDataType[]{INT, DOUBLE});
     return new AggregateOperator(OperatorTestUtil.getTracingContext(), input,
         new AggregateNode(-1, resultSchema, PlanNode.NodeHint.EMPTY, List.of(), aggCalls, filterArgs, groupKeys,
-            AggregateNode.AggType.DIRECT));
+            AggregateNode.AggType.DIRECT, false, null, 0));
   }
 
   private static MultiStageOperator getHashJoinOperator() {
@@ -178,7 +178,7 @@ public class MultiStageAccountingTest implements ITest {
         });
     return new HashJoinOperator(OperatorTestUtil.getTracingContext(), leftInput, leftSchema, rightInput,
         new JoinNode(-1, resultSchema, PlanNode.NodeHint.EMPTY, List.of(), JoinRelType.INNER, List.of(0), List.of(0),
-            List.of()));
+            List.of(), JoinNode.JoinStrategy.HASH));
   }
 
   private static MultiStageOperator getSortOperator() {

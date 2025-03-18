@@ -18,6 +18,7 @@
  */
 package org.apache.pinot.plugin.stream.kafka20;
 
+import org.apache.pinot.plugin.stream.kafka.KafkaConfigBackwardCompatibleUtils;
 import org.apache.pinot.spi.stream.PartitionGroupConsumer;
 import org.apache.pinot.spi.stream.PartitionGroupConsumptionStatus;
 import org.apache.pinot.spi.stream.StreamConfig;
@@ -47,6 +48,6 @@ public class KafkaConsumerFactory extends StreamConsumerFactory {
   public PartitionGroupConsumer createPartitionGroupConsumer(String clientId,
       PartitionGroupConsumptionStatus partitionGroupConsumptionStatus) {
     return new KafkaPartitionLevelConsumer(clientId, _streamConfig,
-        partitionGroupConsumptionStatus.getPartitionGroupId());
+        partitionGroupConsumptionStatus.getStreamPartitionGroupId());
   }
 }

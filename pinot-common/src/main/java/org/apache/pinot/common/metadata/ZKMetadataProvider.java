@@ -40,12 +40,14 @@ import org.apache.pinot.common.utils.LLCSegmentName;
 import org.apache.pinot.common.utils.SchemaUtils;
 import org.apache.pinot.common.utils.config.AccessControlUserConfigUtils;
 import org.apache.pinot.common.utils.config.TableConfigUtils;
+import org.apache.pinot.common.utils.config.WorkloadConfigUtils;
 import org.apache.pinot.spi.config.ConfigUtils;
 import org.apache.pinot.spi.config.DatabaseConfig;
 import org.apache.pinot.spi.config.table.QuotaConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.config.user.UserConfig;
+import org.apache.pinot.spi.config.workload.QueryWorkloadConfig;
 import org.apache.pinot.spi.data.Schema;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.spi.utils.JsonUtils;
@@ -63,8 +65,10 @@ public class ZKMetadataProvider {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(ZKMetadataProvider.class);
   private static final String CLUSTER_TENANT_ISOLATION_ENABLED_KEY = "tenantIsolationEnabled";
+  private static final String CLUSTER_APPLICATION_QUOTAS = "applicationQuotas";
   private static final String PROPERTYSTORE_CONTROLLER_JOBS_PREFIX = "/CONTROLLER_JOBS";
   private static final String PROPERTYSTORE_SEGMENTS_PREFIX = "/SEGMENTS";
+  private static final String PROPERTYSTORE_PAUSELESS_DEBUG_METADATA_PREFIX = "/PAUSELESS_DEBUG_METADATA";
   private static final String PROPERTYSTORE_SCHEMAS_PREFIX = "/SCHEMAS";
   private static final String PROPERTYSTORE_INSTANCE_PARTITIONS_PREFIX = "/INSTANCE_PARTITIONS";
   private static final String PROPERTYSTORE_DATABASE_CONFIGS_PREFIX = "/CONFIGS/DATABASE";
@@ -74,6 +78,7 @@ public class ZKMetadataProvider {
   private static final String PROPERTYSTORE_CLUSTER_CONFIGS_PREFIX = "/CONFIGS/CLUSTER";
   private static final String PROPERTYSTORE_SEGMENT_LINEAGE = "/SEGMENT_LINEAGE";
   private static final String PROPERTYSTORE_MINION_TASK_METADATA_PREFIX = "/MINION_TASK_METADATA";
+  private static final String PROPERTYSTORE_QUERY_WORKLOAD_CONFIGS_PREFIX = "/CONFIGS/QUERYWORKLOAD";
 
   public static void setUserConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String username, ZNRecord znRecord) {
     propertyStore.set(constructPropertyStorePathForUserConfig(username), znRecord, AccessOption.PERSISTENT);
@@ -100,8 +105,8 @@ public class ZKMetadataProvider {
   public static boolean setDatabaseConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, DatabaseConfig databaseConfig) {
     String databaseName = databaseConfig.getDatabaseName();
     ZNRecord databaseConfigZNRecord = toZNRecord(databaseConfig);
-    return propertyStore.set(constructPropertyStorePathForDatabaseConfig(databaseName), databaseConfigZNRecord,
-        -1, AccessOption.PERSISTENT);
+    return propertyStore.set(constructPropertyStorePathForDatabaseConfig(databaseName), databaseConfigZNRecord, -1,
+        AccessOption.PERSISTENT);
   }
 
   /**
@@ -110,6 +115,15 @@ public class ZKMetadataProvider {
   @VisibleForTesting
   public static void removeDatabaseConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String databaseName) {
     propertyStore.remove(constructPropertyStorePathForDatabaseConfig(databaseName), AccessOption.PERSISTENT);
+  }
+
+  /**
+   * Remove database config.
+   */
+  @VisibleForTesting
+  public static void removeApplicationQuotas(ZkHelixPropertyStore<ZNRecord> propertyStore) {
+    propertyStore.remove(constructPropertyStorePathForControllerConfig(CLUSTER_APPLICATION_QUOTAS),
+        AccessOption.PERSISTENT);
   }
 
   private static ZNRecord toZNRecord(DatabaseConfig databaseConfig) {
@@ -236,6 +250,10 @@ public class ZKMetadataProvider {
     return StringUtil.join("/", PROPERTYSTORE_SEGMENTS_PREFIX, resourceName, segmentName);
   }
 
+  public static String constructPropertyStorePathForPauselessDebugMetadata(String resourceName) {
+    return StringUtil.join("/", PROPERTYSTORE_PAUSELESS_DEBUG_METADATA_PREFIX, resourceName);
+  }
+
   public static String constructPropertyStorePathForSchema(String schemaName) {
     return StringUtil.join("/", PROPERTYSTORE_SCHEMAS_PREFIX, schemaName);
   }
@@ -282,6 +300,14 @@ public class ZKMetadataProvider {
 
   public static String constructPropertyStorePathForMinionTaskMetadata(String tableNameWithType) {
     return StringUtil.join("/", PROPERTYSTORE_MINION_TASK_METADATA_PREFIX, tableNameWithType);
+  }
+
+  public static String getPropertyStoreWorkloadConfigsPrefix() {
+    return PROPERTYSTORE_QUERY_WORKLOAD_CONFIGS_PREFIX;
+  }
+
+  public static String constructPropertyStorePathForQueryWorkloadConfig(String workloadName) {
+    return StringUtil.join("/", PROPERTYSTORE_QUERY_WORKLOAD_CONFIGS_PREFIX, workloadName);
   }
 
   @Deprecated
@@ -441,14 +467,41 @@ public class ZKMetadataProvider {
 
   @Nullable
   public static DatabaseConfig getDatabaseConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String databaseName) {
-    return toDatabaseConfig(propertyStore.get(constructPropertyStorePathForDatabaseConfig(databaseName), null,
-        AccessOption.PERSISTENT));
+    return toDatabaseConfig(
+        propertyStore.get(constructPropertyStorePathForDatabaseConfig(databaseName), null, AccessOption.PERSISTENT));
+  }
+
+  /**
+   * Get the table config for the given table name with type. Any environment variables and system properties will be
+   * replaced with their actual values.
+   */
+  @Nullable
+  public static TableConfig getTableConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String tableNameWithType) {
+    return getTableConfig(propertyStore, tableNameWithType, true);
+  }
+
+  /**
+   * Get the table config for the given table name with type
+   *
+   * @param tableNameWithType Table name with type
+   * @param replaceVariables Whether to replace environment variables and system properties with their actual values
+   * @return Table config
+   */
+  @Nullable
+  public static TableConfig getTableConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String tableNameWithType,
+      boolean replaceVariables) {
+    return toTableConfig(propertyStore.get(constructPropertyStorePathForResourceConfig(tableNameWithType), null,
+        AccessOption.PERSISTENT), replaceVariables);
   }
 
   @Nullable
-  public static TableConfig getTableConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String tableNameWithType) {
-    return toTableConfig(propertyStore.get(constructPropertyStorePathForResourceConfig(tableNameWithType), null,
-        AccessOption.PERSISTENT));
+  public static ImmutablePair<TableConfig, Stat> getTableConfigWithStat(ZkHelixPropertyStore<ZNRecord> propertyStore,
+      String tableNameWithType) {
+    Stat tableConfigStat = new Stat();
+    TableConfig tableConfig = toTableConfig(
+        propertyStore.get(constructPropertyStorePathForResourceConfig(tableNameWithType), tableConfigStat,
+            AccessOption.PERSISTENT));
+    return tableConfig != null ? ImmutablePair.of(tableConfig, tableConfigStat) : null;
   }
 
   /**
@@ -467,14 +520,54 @@ public class ZKMetadataProvider {
     return ImmutablePair.of(tableConfig, tableConfigStat.getVersion());
   }
 
+  /**
+   * Get the offline table config for the given table name. Any environment variables and system properties will be
+   * replaced with their actual values.
+   *
+   * @param tableName Table name with or without type suffix
+   * @return Table config
+   */
   @Nullable
   public static TableConfig getOfflineTableConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String tableName) {
-    return getTableConfig(propertyStore, TableNameBuilder.OFFLINE.tableNameWithType(tableName));
+    return getOfflineTableConfig(propertyStore, tableName, true);
   }
 
+  /**
+   * Get the offline table config for the given table name.
+   *
+   * @param tableName Table name with or without type suffix
+   * @param replaceVariables Whether to replace environment variables and system properties with their actual values
+   * @return Table config
+   */
+  @Nullable
+  public static TableConfig getOfflineTableConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String tableName,
+      boolean replaceVariables) {
+    return getTableConfig(propertyStore, TableNameBuilder.OFFLINE.tableNameWithType(tableName), replaceVariables);
+  }
+
+  /**
+   * Get the realtime table config for the given table name. Any environment variables and system properties will be
+   * replaced with their actual values.
+   *
+   * @param tableName Table name with or without type suffix
+   * @return Table config
+   */
   @Nullable
   public static TableConfig getRealtimeTableConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String tableName) {
-    return getTableConfig(propertyStore, TableNameBuilder.REALTIME.tableNameWithType(tableName));
+    return getRealtimeTableConfig(propertyStore, tableName, true);
+  }
+
+  /**
+   * Get the realtime table config for the given table name.
+   *
+   * @param tableName Table name with or without type suffix
+   * @param replaceVariables Whether to replace environment variables and system properties with their actual values
+   * @return Table config
+   */
+  @Nullable
+  public static TableConfig getRealtimeTableConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String tableName,
+      boolean replaceVariables) {
+    return getTableConfig(propertyStore, TableNameBuilder.REALTIME.tableNameWithType(tableName), replaceVariables);
   }
 
   public static List<TableConfig> getAllTableConfigs(ZkHelixPropertyStore<ZNRecord> propertyStore) {
@@ -502,12 +595,17 @@ public class ZKMetadataProvider {
 
   @Nullable
   private static TableConfig toTableConfig(@Nullable ZNRecord znRecord) {
+    return toTableConfig(znRecord, true);
+  }
+
+  @Nullable
+  private static TableConfig toTableConfig(@Nullable ZNRecord znRecord, boolean replaceVariables) {
     if (znRecord == null) {
       return null;
     }
     try {
       TableConfig tableConfig = TableConfigUtils.fromZNRecord(znRecord);
-      return ConfigUtils.applyConfigWithEnvVariablesAndSystemProperties(tableConfig);
+      return replaceVariables ? ConfigUtils.applyConfigWithEnvVariablesAndSystemProperties(tableConfig) : tableConfig;
     } catch (Exception e) {
       LOGGER.error("Caught exception while creating table config from ZNRecord: {}", znRecord.getId(), e);
       return null;
@@ -694,6 +792,117 @@ public class ZKMetadataProvider {
       }
     } else {
       return true;
+    }
+  }
+
+  public static boolean setApplicationQpsQuota(ZkHelixPropertyStore<ZNRecord> propertyStore, String applicationName,
+      Double value) {
+    final ZNRecord znRecord;
+    final String path = constructPropertyStorePathForControllerConfig(CLUSTER_APPLICATION_QUOTAS);
+
+    boolean doCreate;
+    if (!propertyStore.exists(path, AccessOption.PERSISTENT)) {
+      znRecord = new ZNRecord(CLUSTER_APPLICATION_QUOTAS);
+      doCreate = true;
+    } else {
+      znRecord = propertyStore.get(path, null, AccessOption.PERSISTENT);
+      doCreate = false;
+    }
+
+    Map<String, String> quotas = znRecord.getMapField(CLUSTER_APPLICATION_QUOTAS);
+    if (quotas == null) {
+      quotas = new HashMap<>();
+      znRecord.setMapField(CLUSTER_APPLICATION_QUOTAS, quotas);
+    }
+    quotas.put(applicationName, value != null ? value.toString() : null);
+
+    if (doCreate) {
+      return propertyStore.create(path, znRecord, AccessOption.PERSISTENT);
+    } else {
+      return propertyStore.set(path, znRecord, AccessOption.PERSISTENT);
+    }
+  }
+
+  @Nullable
+  public static Map<String, Double> getApplicationQpsQuotas(ZkHelixPropertyStore<ZNRecord> propertyStore) {
+    String controllerConfigPath = constructPropertyStorePathForControllerConfig(CLUSTER_APPLICATION_QUOTAS);
+    if (propertyStore.exists(controllerConfigPath, AccessOption.PERSISTENT)) {
+      ZNRecord znRecord = propertyStore.get(controllerConfigPath, null, AccessOption.PERSISTENT);
+      if (znRecord.getMapFields().containsKey(CLUSTER_APPLICATION_QUOTAS)) {
+        return toApplicationQpsQuotas(znRecord.getMapField(CLUSTER_APPLICATION_QUOTAS));
+      } else {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  }
+
+  private static Map<String, Double> toApplicationQpsQuotas(Map<String, String> quotas) {
+    if (quotas == null) {
+      return new HashMap<>();
+    } else {
+      HashMap<String, Double> result = new HashMap<>();
+      for (Map.Entry<String, String> entry : quotas.entrySet()) {
+        if (entry.getValue() != null) {
+          try {
+            double value = Double.parseDouble(entry.getValue());
+            result.put(entry.getKey(), value);
+          } catch (NumberFormatException nfe) {
+            continue;
+          }
+        }
+      }
+      return result;
+    }
+  }
+
+  @Nullable
+  public static List<QueryWorkloadConfig> getQueryWorkloadConfigs(ZkHelixPropertyStore<ZNRecord> propertyStore)
+      throws Exception {
+    List<ZNRecord> znRecords =
+        propertyStore.getChildren(getPropertyStoreWorkloadConfigsPrefix(), null, AccessOption.PERSISTENT,
+            CommonConstants.Helix.ZkClient.RETRY_COUNT, CommonConstants.Helix.ZkClient.RETRY_INTERVAL_MS);
+    if (znRecords != null) {
+      int numZNRecords = znRecords.size();
+      List<QueryWorkloadConfig> queryWorkloadConfigs = new ArrayList<>(numZNRecords);
+      for (ZNRecord znRecord : znRecords) {
+        queryWorkloadConfigs.add(WorkloadConfigUtils.fromZNRecord(znRecord));
+      }
+      return queryWorkloadConfigs;
+    }
+    return null;
+  }
+
+  @Nullable
+  public static QueryWorkloadConfig getQueryWorkloadConfig(ZkHelixPropertyStore<ZNRecord> propertyStore,
+      String workloadName) throws Exception {
+    ZNRecord znRecord = propertyStore.get(constructPropertyStorePathForQueryWorkloadConfig(workloadName),
+        null, AccessOption.PERSISTENT);
+    if (znRecord == null) {
+      return null;
+    }
+    return WorkloadConfigUtils.fromZNRecord(znRecord);
+  }
+
+  public static boolean setQueryWorkloadConfig(ZkHelixPropertyStore<ZNRecord> propertyStore,
+      QueryWorkloadConfig queryWorkloadConfig) throws Exception {
+
+    String path = constructPropertyStorePathForQueryWorkloadConfig(queryWorkloadConfig.getQueryWorkloadName());
+    boolean isNewConfig = !propertyStore.exists(path, AccessOption.PERSISTENT);
+    ZNRecord znRecord = isNewConfig ? new ZNRecord(queryWorkloadConfig.getQueryWorkloadName())
+        : propertyStore.get(path, null, AccessOption.PERSISTENT);
+    // Update the record with new workload configuration
+    WorkloadConfigUtils.updateZNRecordWithWorkloadConfig(znRecord, queryWorkloadConfig);
+    // Create or update based on existence
+    return isNewConfig ? propertyStore.create(path, znRecord, AccessOption.PERSISTENT)
+        : propertyStore.set(path, znRecord, AccessOption.PERSISTENT);
+  }
+
+  public static void deleteQueryWorkloadConfig(ZkHelixPropertyStore<ZNRecord> propertyStore, String workloadName) {
+    String propertyStorePath = constructPropertyStorePathForQueryWorkloadConfig(workloadName);
+    if (propertyStore.exists(propertyStorePath, AccessOption.PERSISTENT)) {
+      propertyStore.remove(propertyStorePath, AccessOption.PERSISTENT);
     }
   }
 }

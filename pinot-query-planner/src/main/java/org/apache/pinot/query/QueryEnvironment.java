@@ -20,7 +20,10 @@ package org.apache.pinot.query;
 
 import com.google.common.annotations.VisibleForTesting;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.Set;
 import javax.annotation.Nullable;
@@ -50,27 +53,36 @@ import org.apache.calcite.sql2rel.SqlToRelConverter;
 import org.apache.calcite.tools.FrameworkConfig;
 import org.apache.calcite.tools.Frameworks;
 import org.apache.calcite.tools.RelBuilder;
+import org.apache.pinot.calcite.rel.rules.PinotImplicitTableHintRule;
 import org.apache.pinot.calcite.rel.rules.PinotQueryRuleSets;
 import org.apache.pinot.calcite.rel.rules.PinotRelDistributionTraitRule;
 import org.apache.pinot.calcite.rel.rules.PinotRuleUtils;
 import org.apache.pinot.calcite.sql.fun.PinotOperatorTable;
 import org.apache.pinot.calcite.sql2rel.PinotConvertletTable;
 import org.apache.pinot.common.config.provider.TableCache;
+import org.apache.pinot.common.utils.config.QueryOptionsUtils;
 import org.apache.pinot.query.catalog.PinotCatalog;
 import org.apache.pinot.query.context.PlannerContext;
+import org.apache.pinot.query.context.RuleTimingPlannerListener;
 import org.apache.pinot.query.planner.PlannerUtils;
 import org.apache.pinot.query.planner.SubPlan;
+import org.apache.pinot.query.planner.explain.AskingServerStageExplainer;
+import org.apache.pinot.query.planner.explain.MultiStageExplainAskingServersUtils;
 import org.apache.pinot.query.planner.explain.PhysicalExplainPlanVisitor;
 import org.apache.pinot.query.planner.logical.PinotLogicalQueryPlanner;
 import org.apache.pinot.query.planner.logical.RelToPlanNodeConverter;
+import org.apache.pinot.query.planner.logical.TransformationTracker;
 import org.apache.pinot.query.planner.physical.DispatchableSubPlan;
 import org.apache.pinot.query.planner.physical.PinotDispatchPlanner;
+import org.apache.pinot.query.planner.plannode.PlanNode;
 import org.apache.pinot.query.routing.WorkerManager;
 import org.apache.pinot.query.type.TypeFactory;
 import org.apache.pinot.query.validate.BytesCastVisitor;
+import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.sql.parsers.CalciteSqlParser;
 import org.apache.pinot.sql.parsers.SqlNodeAndOptions;
 import org.apache.pinot.sql.parsers.parser.SqlPhysicalExplain;
+import org.immutables.value.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,41 +91,92 @@ import org.slf4j.LoggerFactory;
  * The {@code QueryEnvironment} contains the main entrypoint for query planning.
  *
  * <p>It provide the higher level entry interface to convert a SQL string into a {@link DispatchableSubPlan}.
+ * It is also used to execute some static analysis on the query like to determine if it can be compiled or get the
+ * tables involved in the query.
  */
+
+//TODO: We should consider splitting this class in two: One that is used for parsing and one that is used for
+// executing queries. This would allow us to remove the worker manager from the parsing environment and therefore
+// make sure there is a worker manager when executing queries.
+@Value.Enclosing
 public class QueryEnvironment {
   private static final Logger LOGGER = LoggerFactory.getLogger(QueryEnvironment.class);
-  private static final CalciteConnectionConfig CONNECTION_CONFIG;
-
-  static {
-    Properties connectionConfigProperties = new Properties();
-    connectionConfigProperties.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName(), "true");
-    CONNECTION_CONFIG = new CalciteConnectionConfigImpl(connectionConfigProperties);
-  }
 
   private final TypeFactory _typeFactory = new TypeFactory();
   private final FrameworkConfig _config;
   private final CalciteCatalogReader _catalogReader;
   private final HepProgram _optProgram;
-  private final HepProgram _traitProgram;
+  private final Config _envConfig;
+  private final PinotCatalog _catalog;
 
-  // Pinot extensions
-  private final TableCache _tableCache;
-  private final WorkerManager _workerManager;
-
-  public QueryEnvironment(String database, TableCache tableCache, @Nullable WorkerManager workerManager) {
-    PinotCatalog catalog = new PinotCatalog(database, tableCache);
-    CalciteSchema rootSchema = CalciteSchema.createRootSchema(false, false, database, catalog);
+  public QueryEnvironment(Config config) {
+    _envConfig = config;
+    String database = config.getDatabase();
+    _catalog = new PinotCatalog(config.getTableCache(), database);
+    CalciteSchema rootSchema = CalciteSchema.createRootSchema(false, false, database, _catalog);
+    Properties connectionConfigProperties = new Properties();
+    connectionConfigProperties.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName(), Boolean.toString(
+        config.getTableCache() == null
+            ? !CommonConstants.Helix.DEFAULT_ENABLE_CASE_INSENSITIVE
+            : !config.getTableCache().isIgnoreCase()));
+    CalciteConnectionConfig connectionConfig = new CalciteConnectionConfigImpl(connectionConfigProperties);
     _config = Frameworks.newConfigBuilder().traitDefs().operatorTable(PinotOperatorTable.instance())
         .defaultSchema(rootSchema.plus()).sqlToRelConverterConfig(PinotRuleUtils.PINOT_SQL_TO_REL_CONFIG).build();
-    _catalogReader = new CalciteCatalogReader(rootSchema, List.of(database), _typeFactory, CONNECTION_CONFIG);
+    _catalogReader = new CalciteCatalogReader(rootSchema, List.of(database), _typeFactory, connectionConfig);
     _optProgram = getOptProgram();
-    _traitProgram = getTraitProgram();
-    _tableCache = tableCache;
-    _workerManager = workerManager;
   }
 
-  private PlannerContext getPlannerContext() {
-    return new PlannerContext(_config, _catalogReader, _typeFactory, _optProgram, _traitProgram);
+  public QueryEnvironment(String database, TableCache tableCache, @Nullable WorkerManager workerManager) {
+    this(configBuilder()
+        .database(database)
+        .tableCache(tableCache)
+        .workerManager(workerManager)
+        .build());
+  }
+
+  /**
+   * Returns a planner context that can be used to either parse, explain or execute a query.
+   */
+  private PlannerContext getPlannerContext(SqlNodeAndOptions sqlNodeAndOptions) {
+    WorkerManager workerManager = getWorkerManager(sqlNodeAndOptions);
+    HepProgram traitProgram = getTraitProgram(workerManager);
+    SqlExplainFormat format = SqlExplainFormat.DOT;
+    if (sqlNodeAndOptions.getSqlNode().getKind().equals(SqlKind.EXPLAIN)) {
+      SqlExplain explain = (SqlExplain) sqlNodeAndOptions.getSqlNode();
+      if (explain.getFormat() != null) {
+        format = explain.getFormat();
+      }
+    }
+    return new PlannerContext(_config, _catalogReader, _typeFactory, _optProgram, traitProgram,
+        sqlNodeAndOptions.getOptions(), _envConfig, format);
+  }
+
+  public Set<String> getResolvedTables() {
+    return _catalog.getResolvedTables();
+  }
+
+  @Nullable
+  private WorkerManager getWorkerManager(SqlNodeAndOptions sqlNodeAndOptions) {
+    String inferPartitionHint = sqlNodeAndOptions.getOptions()
+        .get(CommonConstants.Broker.Request.QueryOptionKey.INFER_PARTITION_HINT);
+    WorkerManager workerManager = _envConfig.getWorkerManager();
+
+    if (inferPartitionHint == null) {
+      return _envConfig.defaultInferPartitionHint() ? workerManager : null;
+    }
+    switch (inferPartitionHint.toLowerCase()) {
+      case "true":
+        Objects.requireNonNull(workerManager, "WorkerManager is required in order to infer partition hint. "
+            + "Please enable it using broker config"
+            + CommonConstants.Broker.CONFIG_OF_ENABLE_PARTITION_METADATA_MANAGER + "=true");
+        return workerManager;
+      case "false":
+        return null;
+      default:
+        throw new RuntimeException("Invalid value for query option '"
+            + CommonConstants.Broker.Request.QueryOptionKey.INFER_PARTITION_HINT + "': "
+            + inferPartitionHint);
+    }
   }
 
   /**
@@ -129,53 +192,17 @@ public class QueryEnvironment {
    * @return QueryPlannerResult containing the dispatchable query plan and the relRoot.
    */
   public QueryPlannerResult planQuery(String sqlQuery, SqlNodeAndOptions sqlNodeAndOptions, long requestId) {
-    try (PlannerContext plannerContext = getPlannerContext()) {
-      plannerContext.setOptions(sqlNodeAndOptions.getOptions());
+    try (PlannerContext plannerContext = getPlannerContext(sqlNodeAndOptions)) {
       RelRoot relRoot = compileQuery(sqlNodeAndOptions.getSqlNode(), plannerContext);
       // TODO: current code only assume one SubPlan per query, but we should support multiple SubPlans per query.
       // Each SubPlan should be able to run independently from Broker then set the results into the dependent
       // SubPlan for further processing.
       DispatchableSubPlan dispatchableSubPlan = toDispatchableSubPlan(relRoot, plannerContext, requestId);
-      return new QueryPlannerResult(dispatchableSubPlan, null, dispatchableSubPlan.getTableNames());
+      return getQueryPlannerResult(plannerContext, dispatchableSubPlan, null, dispatchableSubPlan.getTableNames());
     } catch (CalciteContextException e) {
       throw new RuntimeException("Error composing query plan for '" + sqlQuery + "': " + e.getMessage() + "'", e);
     } catch (Throwable t) {
       throw new RuntimeException("Error composing query plan for: " + sqlQuery, t);
-    }
-  }
-
-  /**
-   * Explain a SQL query.
-   *
-   * Similar to {@link QueryEnvironment#planQuery(String, SqlNodeAndOptions, long)}, this API runs the query
-   * compilation. But it doesn't run the distributed {@link DispatchableSubPlan} generation, instead it only
-   * returns the
-   * explained logical plan.
-   *
-   * @param sqlQuery SQL query string.
-   * @param sqlNodeAndOptions parsed SQL query.
-   * @return QueryPlannerResult containing the explained query plan and the relRoot.
-   */
-  public QueryPlannerResult explainQuery(String sqlQuery, SqlNodeAndOptions sqlNodeAndOptions, long requestId) {
-    try (PlannerContext plannerContext = getPlannerContext()) {
-      SqlExplain explain = (SqlExplain) sqlNodeAndOptions.getSqlNode();
-      plannerContext.setOptions(sqlNodeAndOptions.getOptions());
-      RelRoot relRoot = compileQuery(explain.getExplicandum(), plannerContext);
-      if (explain instanceof SqlPhysicalExplain) {
-        // get the physical plan for query.
-        DispatchableSubPlan dispatchableSubPlan = toDispatchableSubPlan(relRoot, plannerContext, requestId);
-        return new QueryPlannerResult(null, PhysicalExplainPlanVisitor.explain(dispatchableSubPlan),
-            dispatchableSubPlan.getTableNames());
-      } else {
-        // get the logical plan for query.
-        SqlExplainFormat format = explain.getFormat() == null ? SqlExplainFormat.DOT : explain.getFormat();
-        SqlExplainLevel level =
-            explain.getDetailLevel() == null ? SqlExplainLevel.DIGEST_ATTRIBUTES : explain.getDetailLevel();
-        Set<String> tableNames = RelToPlanNodeConverter.getTableNamesFromRelRoot(relRoot.rel);
-        return new QueryPlannerResult(null, PlannerUtils.explainPlan(relRoot.rel, format, level), tableNames);
-      }
-    } catch (Exception e) {
-      throw new RuntimeException("Error explain query plan for: " + sqlQuery, e);
     }
   }
 
@@ -184,14 +211,84 @@ public class QueryEnvironment {
     return planQuery(sqlQuery, CalciteSqlParser.compileToSqlNodeAndOptions(sqlQuery), 0).getQueryPlan();
   }
 
+  /**
+   * Explain a SQL query.
+   *
+   * Similar to {@link QueryEnvironment#planQuery(String, SqlNodeAndOptions, long)}, this API runs the query
+   * compilation. But it doesn't run the distributed {@link DispatchableSubPlan} generation, instead it only
+   * returns the explained logical plan.
+   *
+   * @param sqlQuery SQL query string.
+   * @param sqlNodeAndOptions parsed SQL query.
+   * @param onServerExplainer the callback to explain the query plan on the server side.
+   * @return QueryPlannerResult containing the explained query plan and the relRoot.
+   */
+  public QueryPlannerResult explainQuery(String sqlQuery, SqlNodeAndOptions sqlNodeAndOptions, long requestId,
+      @Nullable AskingServerStageExplainer.OnServerExplainer onServerExplainer) {
+    try (PlannerContext plannerContext = getPlannerContext(sqlNodeAndOptions)) {
+      SqlExplain explain = (SqlExplain) sqlNodeAndOptions.getSqlNode();
+      RelRoot relRoot = compileQuery(explain.getExplicandum(), plannerContext);
+      SqlExplainFormat format = plannerContext.getSqlExplainFormat();
+      if (explain instanceof SqlPhysicalExplain) {
+        // get the physical plan for query.
+        DispatchableSubPlan dispatchableSubPlan = toDispatchableSubPlan(relRoot, plannerContext, requestId);
+        return getQueryPlannerResult(plannerContext, dispatchableSubPlan,
+            PhysicalExplainPlanVisitor.explain(dispatchableSubPlan), dispatchableSubPlan.getTableNames());
+      } else {
+        // get the logical plan for query.
+        SqlExplainLevel level =
+            explain.getDetailLevel() == null ? SqlExplainLevel.DIGEST_ATTRIBUTES : explain.getDetailLevel();
+        Set<String> tableNames = RelToPlanNodeConverter.getTableNamesFromRelRoot(relRoot.rel);
+        if (!explain.withImplementation() || onServerExplainer == null) {
+          return getQueryPlannerResult(plannerContext, null, PlannerUtils.explainPlan(relRoot.rel, format, level),
+              tableNames);
+        } else {
+          Map<String, String> options = sqlNodeAndOptions.getOptions();
+          boolean explainPlanVerbose = QueryOptionsUtils.isExplainPlanVerbose(options);
+
+          // A map from the actual PlanNodes to the original RelNode in the logical rel tree
+          TransformationTracker.ByIdentity.Builder<PlanNode, RelNode> nodeTracker =
+              new TransformationTracker.ByIdentity.Builder<>();
+          // Transform RelNodes into DispatchableSubPlan
+          DispatchableSubPlan dispatchableSubPlan =
+              toDispatchableSubPlan(relRoot, plannerContext, requestId, nodeTracker);
+
+          AskingServerStageExplainer serversExplainer = new AskingServerStageExplainer(
+              onServerExplainer, explainPlanVerbose, RelBuilder.create(_config));
+
+          RelNode explainedNode = MultiStageExplainAskingServersUtils.modifyRel(relRoot.rel,
+              dispatchableSubPlan.getQueryStages(), nodeTracker, serversExplainer);
+
+          return getQueryPlannerResult(plannerContext, dispatchableSubPlan,
+              PlannerUtils.explainPlan(explainedNode, format, level), dispatchableSubPlan.getTableNames());
+        }
+      }
+    } catch (Exception e) {
+      throw new RuntimeException("Error explain query plan for: " + sqlQuery, e);
+    }
+  }
+
+  private QueryEnvironment.QueryPlannerResult getQueryPlannerResult(PlannerContext plannerContext,
+      DispatchableSubPlan dispatchableSubPlan, String explainStr, Set<String> tableNames) {
+    Map<String, String> extraFields = new HashMap<>();
+    if (plannerContext.getPlannerOutput().containsKey(RuleTimingPlannerListener.RULE_TIMINGS)) {
+      extraFields.put(RuleTimingPlannerListener.RULE_TIMINGS,
+          plannerContext.getPlannerOutput().get(RuleTimingPlannerListener.RULE_TIMINGS));
+    }
+    return new QueryPlannerResult(dispatchableSubPlan, explainStr, tableNames, extraFields);
+  }
+
   @VisibleForTesting
   public String explainQuery(String sqlQuery, long requestId) {
-    return explainQuery(sqlQuery, CalciteSqlParser.compileToSqlNodeAndOptions(sqlQuery), requestId).getExplainPlan();
+    SqlNodeAndOptions sqlNodeAndOptions = CalciteSqlParser.compileToSqlNodeAndOptions(sqlQuery);
+    QueryPlannerResult queryPlannerResult = explainQuery(sqlQuery, sqlNodeAndOptions, requestId, null);
+    return queryPlannerResult.getExplainPlan();
   }
 
   public List<String> getTableNamesForQuery(String sqlQuery) {
-    try (PlannerContext plannerContext = getPlannerContext()) {
-      SqlNode sqlNode = CalciteSqlParser.compileToSqlNodeAndOptions(sqlQuery).getSqlNode();
+    SqlNodeAndOptions sqlNodeAndOptions = CalciteSqlParser.compileToSqlNodeAndOptions(sqlQuery);
+    try (PlannerContext plannerContext = getPlannerContext(sqlNodeAndOptions)) {
+      SqlNode sqlNode = sqlNodeAndOptions.getSqlNode();
       if (sqlNode.getKind().equals(SqlKind.EXPLAIN)) {
         sqlNode = ((SqlExplain) sqlNode).getExplicandum();
       }
@@ -207,17 +304,27 @@ public class QueryEnvironment {
    * Returns whether the query can be successfully compiled in this query environment
    */
   public boolean canCompileQuery(String query) {
-    try (PlannerContext plannerContext = getPlannerContext()) {
-      SqlNode sqlNode = CalciteSqlParser.compileToSqlNodeAndOptions(query).getSqlNode();
+    return getRelRootIfCanCompile(query) != null;
+  }
+
+  /**
+   * Returns the RelRoot node if the query can be compiled, null otherwise.
+   */
+  @Nullable
+  public RelRoot getRelRootIfCanCompile(String query) {
+    try {
+      SqlNodeAndOptions sqlNodeAndOptions = CalciteSqlParser.compileToSqlNodeAndOptions(query);
+      PlannerContext plannerContext = getPlannerContext(sqlNodeAndOptions);
+      SqlNode sqlNode = sqlNodeAndOptions.getSqlNode();
       if (sqlNode.getKind().equals(SqlKind.EXPLAIN)) {
         sqlNode = ((SqlExplain) sqlNode).getExplicandum();
       }
-      compileQuery(sqlNode, plannerContext);
+      RelRoot node = compileQuery(sqlNode, plannerContext);
       LOGGER.debug("Successfully compiled query using the multi-stage query engine: `{}`", query);
-      return true;
-    } catch (Exception e) {
-      LOGGER.warn("Encountered an error while compiling query `{}` using the multi-stage query engine", query, e);
-      return false;
+      return node;
+    } catch (Throwable t) {
+      LOGGER.warn("Encountered an error while compiling query `{}` using the multi-stage query engine", query, t);
+      return null;
     }
   }
 
@@ -228,12 +335,14 @@ public class QueryEnvironment {
     private final DispatchableSubPlan _dispatchableSubPlan;
     private final String _explainPlan;
     private final Set<String> _tableNames;
+    private final Map<String, String> _extraFields;
 
     QueryPlannerResult(@Nullable DispatchableSubPlan dispatchableSubPlan, @Nullable String explainPlan,
-        Set<String> tableNames) {
+        Set<String> tableNames, Map<String, String> extraFields) {
       _dispatchableSubPlan = dispatchableSubPlan;
       _explainPlan = explainPlan;
       _tableNames = tableNames;
+      _extraFields = extraFields;
     }
 
     public String getExplainPlan() {
@@ -246,6 +355,10 @@ public class QueryEnvironment {
 
     public Set<String> getTableNames() {
       return _tableNames;
+    }
+
+    public Map<String, String> getExtraFields() {
+      return _extraFields;
     }
   }
 
@@ -303,7 +416,11 @@ public class QueryEnvironment {
     try {
       RelOptPlanner optPlanner = plannerContext.getRelOptPlanner();
       optPlanner.setRoot(relRoot.rel);
+      RuleTimingPlannerListener listener = new RuleTimingPlannerListener(plannerContext);
+      optPlanner.addListener(listener);
       RelNode optimized = optPlanner.findBestExp();
+      listener.printRuleTimings();
+      listener.populateRuleTimings();
       RelOptPlanner traitPlanner = plannerContext.getRelTraitPlanner();
       traitPlanner.setRoot(optimized);
       return traitPlanner.findBestExp();
@@ -314,9 +431,15 @@ public class QueryEnvironment {
   }
 
   private DispatchableSubPlan toDispatchableSubPlan(RelRoot relRoot, PlannerContext plannerContext, long requestId) {
-    SubPlan plan = PinotLogicalQueryPlanner.makePlan(relRoot);
+    return toDispatchableSubPlan(relRoot, plannerContext, requestId, null);
+  }
+
+  private DispatchableSubPlan toDispatchableSubPlan(RelRoot relRoot, PlannerContext plannerContext, long requestId,
+      @Nullable TransformationTracker.Builder<PlanNode, RelNode> tracker) {
+    SubPlan plan = PinotLogicalQueryPlanner.makePlan(relRoot, tracker,
+        _envConfig.getTableCache(), useSpools(plannerContext.getOptions()));
     PinotDispatchPlanner pinotDispatchPlanner =
-        new PinotDispatchPlanner(plannerContext, _workerManager, requestId, _tableCache);
+        new PinotDispatchPlanner(plannerContext, _envConfig.getWorkerManager(), requestId, _envConfig.getTableCache());
     return pinotDispatchPlanner.createDispatchableSubPlan(plan);
   }
 
@@ -341,6 +464,12 @@ public class QueryEnvironment {
     // Pushdown filters using a single HepInstruction.
     hepProgramBuilder.addRuleCollection(PinotQueryRuleSets.FILTER_PUSHDOWN_RULES);
 
+    // Pushdown projects after first filter pushdown to minimize projected columns.
+    hepProgramBuilder.addRuleCollection(PinotQueryRuleSets.PROJECT_PUSHDOWN_RULES);
+
+    // Pushdown filters again since filter should be pushed down at the lowest level, after project pushdown.
+    hepProgramBuilder.addRuleCollection(PinotQueryRuleSets.FILTER_PUSHDOWN_RULES);
+
     // ----
     // Prune duplicate/unnecessary nodes using a single HepInstruction.
     // TODO: We can consider using HepMatchOrder.TOP_DOWN if we find cases where it would help.
@@ -348,7 +477,7 @@ public class QueryEnvironment {
     return hepProgramBuilder.build();
   }
 
-  private static HepProgram getTraitProgram() {
+  private static HepProgram getTraitProgram(@Nullable WorkerManager workerManager) {
     HepProgramBuilder hepProgramBuilder = new HepProgramBuilder();
 
     // Set the match order as BOTTOM_UP.
@@ -361,8 +490,72 @@ public class QueryEnvironment {
     }
 
     // apply RelDistribution trait to all nodes
+    if (workerManager != null) {
+      hepProgramBuilder.addRuleInstance(PinotImplicitTableHintRule.withWorkerManager(workerManager));
+    }
     hepProgramBuilder.addRuleInstance(PinotRelDistributionTraitRule.INSTANCE);
 
     return hepProgramBuilder.build();
+  }
+
+  public static ImmutableQueryEnvironment.Config.Builder configBuilder() {
+    return ImmutableQueryEnvironment.Config.builder();
+  }
+
+  public boolean useSpools(Map<String, String> options) {
+    String optionValue = options.get(CommonConstants.Broker.Request.QueryOptionKey.USE_SPOOLS);
+    if (optionValue == null) {
+      return _envConfig.defaultUseSpools();
+    }
+    return Boolean.parseBoolean(optionValue);
+  }
+
+  @Value.Immutable
+  public interface Config {
+    String getDatabase();
+
+    /**
+     * In theory nullable only in tests. We should fix LiteralOnlyBrokerRequestTest to not need this.
+     */
+    @Nullable
+    TableCache getTableCache();
+
+    /**
+     * Whether to apply partition hint by default or not.
+     *
+     * This is treated as the default value for the broker and it is expected to be obtained from a Pinot configuration.
+     * This default value can be always overridden at query level by the query option
+     * {@link CommonConstants.Broker.Request.QueryOptionKey#INFER_PARTITION_HINT}.
+     */
+    @Value.Default
+    default boolean defaultInferPartitionHint() {
+      return CommonConstants.Broker.DEFAULT_INFER_PARTITION_HINT;
+    }
+
+    /**
+     * Whether to use spools or not.
+     *
+     * This is treated as the default value for the broker and it is expected to be obtained from a Pinot configuration.
+     * This default value can be always overridden at query level by the query option
+     * {@link CommonConstants.Broker.Request.QueryOptionKey#USE_SPOOLS}.
+     */
+    @Value.Default
+    default boolean defaultUseSpools() {
+      return CommonConstants.Broker.DEFAULT_OF_SPOOLS;
+    }
+
+    @Value.Default
+    default boolean defaultEnableGroupTrim() {
+      return CommonConstants.Broker.DEFAULT_MSE_ENABLE_GROUP_TRIM;
+    }
+
+    /**
+     * Returns the worker manager.
+     *
+     * This is used whenever the query needs to be executed, but can be null when the QueryEnvironment will be used
+     * just to execute some static analysis on the query like parsing it or getting the tables involved in the query.
+     */
+    @Nullable
+    WorkerManager getWorkerManager();
   }
 }

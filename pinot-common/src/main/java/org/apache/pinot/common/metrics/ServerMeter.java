@@ -39,11 +39,16 @@ public enum ServerMeter implements AbstractMetrics.Meter {
   DELETED_SEGMENT_COUNT("segments", false),
   DELETE_TABLE_FAILURES("tables", false),
   REALTIME_ROWS_CONSUMED("rows", true),
+  REALTIME_BYTES_CONSUMED("bytes", true),
+  REALTIME_BYTES_DROPPED("bytes", true),
   REALTIME_ROWS_SANITIZED("rows", true),
   REALTIME_ROWS_FETCHED("rows", false),
   REALTIME_ROWS_FILTERED("rows", false),
   INVALID_REALTIME_ROWS_DROPPED("rows", false),
   INCOMPLETE_REALTIME_ROWS_CONSUMED("rows", false),
+  REALTIME_CLP_TOO_MANY_ENCODED_VARS("rows", false),
+  REALTIME_CLP_UNENCODABLE("rows", false),
+  REALTIME_CLP_ENCODED_NON_STRINGS("rows", false),
   REALTIME_CONSUMPTION_EXCEPTIONS("exceptions", true),
   REALTIME_MERGED_TEXT_IDX_TRUNCATED_DOCUMENT_SIZE("bytes", false),
   REALTIME_OFFSET_COMMITS("commits", true),
@@ -52,6 +57,7 @@ public enum ServerMeter implements AbstractMetrics.Meter {
   // number of times partition of a record did not match the partition of the stream
   REALTIME_PARTITION_MISMATCH("mismatch", false),
   REALTIME_DEDUP_DROPPED("rows", false),
+  DEDUP_PRELOAD_FAILURE("count", false),
   UPSERT_KEYS_IN_WRONG_SEGMENT("rows", false),
   PARTIAL_UPSERT_OUT_OF_ORDER("rows", false),
   PARTIAL_UPSERT_KEYS_NOT_REPLACED("rows", false),
@@ -163,7 +169,13 @@ public enum ServerMeter implements AbstractMetrics.Meter {
    * That means that if a stage has 10 workers and all of them reach the limit, this will be increased by 1.
    * But if a single query has 2 different window operators and each one reaches the limit, this will be increased by 2.
    */
-  WINDOW_TIMES_MAX_ROWS_REACHED("times", true);
+  WINDOW_TIMES_MAX_ROWS_REACHED("times", true),
+
+  // predownload metrics
+  PREDOWNLOAD_SEGMENT_DOWNLOAD_COUNT("predownloadSegmentCount", true),
+  PREDOWNLOAD_SEGMENT_DOWNLOAD_FAILURE_COUNT("predownloadSegmentFailureCount", true),
+  PREDOWNLOAD_SUCCEED("predownloadSucceed", true),
+  PREDOWNLOAD_FAILED("predownloadFailed", true);
 
   private final String _meterName;
   private final String _unit;

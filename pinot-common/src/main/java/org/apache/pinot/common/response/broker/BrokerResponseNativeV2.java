@@ -25,7 +25,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import javax.annotation.Nullable;
+import javax.validation.constraints.NotNull;
 import org.apache.pinot.common.datatable.StatMap;
 import org.apache.pinot.common.response.BrokerResponse;
 import org.apache.pinot.common.response.ProcessingException;
@@ -37,15 +39,16 @@ import org.apache.pinot.common.response.ProcessingException;
  */
 @JsonPropertyOrder({
     "resultTable", "numRowsResultSet", "partialResult", "exceptions", "numGroupsLimitReached", "maxRowsInJoinReached",
-    "maxRowsInWindowReached", "timeUsedMs", "stageStats", "maxRowsInOperator", "requestId", "brokerId",
-    "numDocsScanned", "totalDocs", "numEntriesScannedInFilter", "numEntriesScannedPostFilter", "numServersQueried",
-    "numServersResponded", "numSegmentsQueried", "numSegmentsProcessed", "numSegmentsMatched",
+    "maxRowsInWindowReached", "timeUsedMs", "stageStats", "maxRowsInOperator", "requestId", "clientRequestId",
+    "brokerId", "numDocsScanned", "totalDocs", "numEntriesScannedInFilter", "numEntriesScannedPostFilter",
+    "numServersQueried", "numServersResponded", "numSegmentsQueried", "numSegmentsProcessed", "numSegmentsMatched",
     "numConsumingSegmentsQueried", "numConsumingSegmentsProcessed", "numConsumingSegmentsMatched",
     "minConsumingFreshnessTimeMs", "numSegmentsPrunedByBroker", "numSegmentsPrunedByServer", "numSegmentsPrunedInvalid",
     "numSegmentsPrunedByLimit", "numSegmentsPrunedByValue", "brokerReduceTimeMs", "offlineThreadCpuTimeNs",
     "realtimeThreadCpuTimeNs", "offlineSystemActivitiesCpuTimeNs", "realtimeSystemActivitiesCpuTimeNs",
     "offlineResponseSerializationCpuTimeNs", "realtimeResponseSerializationCpuTimeNs", "offlineTotalCpuTimeNs",
-    "realtimeTotalCpuTimeNs", "explainPlanNumEmptyFilterSegments", "explainPlanNumMatchAllFilterSegments", "traceInfo"
+    "realtimeTotalCpuTimeNs", "explainPlanNumEmptyFilterSegments", "explainPlanNumMatchAllFilterSegments", "traceInfo",
+    "tablesQueried"
 })
 public class BrokerResponseNativeV2 implements BrokerResponse {
   private final StatMap<StatKey> _brokerStats = new StatMap<>(StatKey.class);
@@ -69,10 +72,12 @@ public class BrokerResponseNativeV2 implements BrokerResponse {
    */
   private long _maxRowsInOperator;
   private String _requestId;
+  private String _clientRequestId;
   private String _brokerId;
   private int _numServersQueried;
   private int _numServersResponded;
   private long _brokerReduceTimeMs;
+  private Set<String> _tablesQueried = Set.of();
 
   @JsonInclude(JsonInclude.Include.NON_NULL)
   @Nullable
@@ -176,6 +181,16 @@ public class BrokerResponseNativeV2 implements BrokerResponse {
   @Override
   public String getRequestId() {
     return _requestId;
+  }
+
+  @Override
+  public String getClientRequestId() {
+    return _clientRequestId;
+  }
+
+  @Override
+  public void setClientRequestId(String clientRequestId) {
+    _clientRequestId = clientRequestId;
   }
 
   @Override
@@ -383,5 +398,16 @@ public class BrokerResponseNativeV2 implements BrokerResponse {
     public StatMap.Type getType() {
       return _type;
     }
+  }
+
+  @Override
+  public void setTablesQueried(@NotNull Set<String> tablesQueried) {
+    _tablesQueried = tablesQueried;
+  }
+
+  @Override
+  @NotNull
+  public Set<String> getTablesQueried() {
+    return _tablesQueried;
   }
 }

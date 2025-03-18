@@ -21,7 +21,6 @@ package org.apache.pinot.query.runtime.blocks;
 import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -35,14 +34,17 @@ import org.apache.pinot.common.datablock.RowDataBlock;
 import org.apache.pinot.common.utils.DataSchema;
 import org.apache.pinot.core.common.Block;
 import org.apache.pinot.core.common.datablock.DataBlockBuilder;
+import org.apache.pinot.core.query.aggregation.function.AggregationFunction;
 import org.apache.pinot.core.util.DataBlockExtractUtils;
 import org.apache.pinot.query.runtime.plan.MultiStageQueryStats;
+import org.apache.pinot.segment.spi.memory.DataBuffer;
 
 
 /**
  * A {@code TransferableBlock} is a wrapper around {@link DataBlock} for transferring data using
  * {@link org.apache.pinot.common.proto.Mailbox}.
  */
+@SuppressWarnings("rawtypes")
 public class TransferableBlock implements Block {
   private final DataBlock.Type _type;
   @Nullable
@@ -55,12 +57,21 @@ public class TransferableBlock implements Block {
   @Nullable
   private final MultiStageQueryStats _queryStats;
 
+  @Nullable
+  private AggregationFunction[] _aggFunctions;
+
   public TransferableBlock(List<Object[]> container, DataSchema dataSchema, DataBlock.Type type) {
+    this(container, dataSchema, type, null);
+  }
+
+  public TransferableBlock(List<Object[]> container, DataSchema dataSchema, DataBlock.Type type,
+      @Nullable AggregationFunction[] aggFunctions) {
     _container = container;
     _dataSchema = dataSchema;
     Preconditions.checkArgument(type == DataBlock.Type.ROW || type == DataBlock.Type.COLUMNAR,
         "Container cannot be used to construct block of type: %s", type);
     _type = type;
+    _aggFunctions = aggFunctions;
     _numRows = _container.size();
     // NOTE: Use assert to avoid breaking production code.
     assert _numRows > 0 : "Container should not be empty";
@@ -86,11 +97,11 @@ public class TransferableBlock implements Block {
     _errCodeToExceptionMap = null;
   }
 
-  public List<ByteBuffer> getSerializedStatsByStage() {
+  public List<DataBuffer> getSerializedStatsByStage() {
     if (isSuccessfulEndOfStreamBlock()) {
-      List<ByteBuffer> statsByStage;
+      List<DataBuffer> statsByStage;
       if (_dataBlock instanceof MetadataBlock) {
-        statsByStage = ((MetadataBlock) _dataBlock).getStatsByStage();
+        statsByStage = _dataBlock.getStatsByStage();
         if (statsByStage == null) {
           return new ArrayList<>();
         }
@@ -134,6 +145,14 @@ public class TransferableBlock implements Block {
    * If not already constructed. It will use {@link DataBlockUtils} to extract the row/columnar data from the
    * binary-packed format.
    *
+   * TODO: This method should never been called by operators, as it allocates a lot for no reason.
+   *   Instead, an iterable should be returned.
+   *   That iterable can materialize rows one by one, without allocating all of them at once.
+   *   In fact transformations and filters could be implemented in zero allocate fashion by having a special type of
+   *   block that wraps the child block and decorates it with a transformation/predicate.
+   *   By doing so only operators that actually require to keep multi-stage results in memory will allocate memory.
+   *   PS: the term _allocate memory_ here means _keep alive an amount of memory proportional to the number of rows_.
+   *
    * @return data container.
    */
   public List<Object[]> getContainer() {
@@ -163,10 +182,10 @@ public class TransferableBlock implements Block {
       try {
         switch (_type) {
           case ROW:
-            _dataBlock = DataBlockBuilder.buildFromRows(_container, _dataSchema);
+            _dataBlock = DataBlockBuilder.buildFromRows(_container, _dataSchema, _aggFunctions);
             break;
           case COLUMNAR:
-            _dataBlock = DataBlockBuilder.buildFromColumns(_container, _dataSchema);
+            _dataBlock = DataBlockBuilder.buildFromColumns(_container, _dataSchema, _aggFunctions);
             break;
           case METADATA:
             _dataBlock = new MetadataBlock(getSerializedStatsByStage());
@@ -198,6 +217,11 @@ public class TransferableBlock implements Block {
     return _type;
   }
 
+  @Nullable
+  public AggregationFunction[] getAggFunctions() {
+    return _aggFunctions;
+  }
+
   /**
    * Return whether a transferable block is at the end of a stream.
    *
@@ -208,7 +232,6 @@ public class TransferableBlock implements Block {
    *
    * @return whether this block is the end of stream.
    */
-  // TODO: Update the name to isTerminateBlock.
   public boolean isEndOfStreamBlock() {
     return isType(MetadataBlock.MetadataBlockType.ERROR) || isType(MetadataBlock.MetadataBlockType.EOS);
   }

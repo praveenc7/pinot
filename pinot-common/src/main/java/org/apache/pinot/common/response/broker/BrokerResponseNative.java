@@ -29,11 +29,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import javax.annotation.Nullable;
-import org.apache.pinot.common.exception.QueryException;
+import javax.validation.constraints.NotNull;
 import org.apache.pinot.common.response.BrokerResponse;
-import org.apache.pinot.common.response.ProcessingException;
 import org.apache.pinot.common.utils.DataSchema;
+import org.apache.pinot.spi.exception.QueryErrorCode;
+import org.apache.pinot.spi.exception.QueryErrorMessage;
 import org.apache.pinot.spi.utils.JsonUtils;
 
 
@@ -43,23 +45,25 @@ import org.apache.pinot.spi.utils.JsonUtils;
  */
 @JsonPropertyOrder({
     "resultTable", "numRowsResultSet", "partialResult", "exceptions", "numGroupsLimitReached", "timeUsedMs",
-    "requestId", "brokerId", "numDocsScanned", "totalDocs", "numEntriesScannedInFilter", "numEntriesScannedPostFilter",
-    "numServersQueried", "numServersResponded", "numSegmentsQueried", "numSegmentsProcessed", "numSegmentsMatched",
-    "numConsumingSegmentsQueried", "numConsumingSegmentsProcessed", "numConsumingSegmentsMatched",
-    "minConsumingFreshnessTimeMs", "numSegmentsPrunedByBroker", "numSegmentsPrunedByServer",
-    "numSegmentsPrunedInvalid", "numSegmentsPrunedByLimit", "numSegmentsPrunedByValue", "brokerReduceTimeMs",
-    "offlineThreadCpuTimeNs", "realtimeThreadCpuTimeNs", "offlineSystemActivitiesCpuTimeNs",
+    "requestId", "clientRequestId", "brokerId", "numDocsScanned", "totalDocs", "numEntriesScannedInFilter",
+    "numEntriesScannedPostFilter", "numServersQueried", "numServersResponded", "numSegmentsQueried",
+    "numSegmentsProcessed", "numSegmentsMatched", "numConsumingSegmentsQueried", "numConsumingSegmentsProcessed",
+    "numConsumingSegmentsMatched", "minConsumingFreshnessTimeMs", "numSegmentsPrunedByBroker",
+    "numSegmentsPrunedByServer", "numSegmentsPrunedInvalid", "numSegmentsPrunedByLimit", "numSegmentsPrunedByValue",
+    "brokerReduceTimeMs", "offlineThreadCpuTimeNs", "realtimeThreadCpuTimeNs", "offlineSystemActivitiesCpuTimeNs",
     "realtimeSystemActivitiesCpuTimeNs", "offlineResponseSerializationCpuTimeNs",
     "realtimeResponseSerializationCpuTimeNs", "offlineTotalCpuTimeNs", "realtimeTotalCpuTimeNs",
-    "explainPlanNumEmptyFilterSegments", "explainPlanNumMatchAllFilterSegments", "traceInfo"
+    "explainPlanNumEmptyFilterSegments", "explainPlanNumMatchAllFilterSegments", "traceInfo", "tablesQueried"
 })
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class BrokerResponseNative implements BrokerResponse {
   public static final BrokerResponseNative EMPTY_RESULT = BrokerResponseNative.empty();
   public static final BrokerResponseNative NO_TABLE_RESULT =
-      new BrokerResponseNative(QueryException.BROKER_RESOURCE_MISSING_ERROR);
+      new BrokerResponseNative(QueryErrorCode.BROKER_RESOURCE_MISSING);
   public static final BrokerResponseNative TABLE_DOES_NOT_EXIST =
-      new BrokerResponseNative(QueryException.TABLE_DOES_NOT_EXIST_ERROR);
+      new BrokerResponseNative(QueryErrorCode.TABLE_DOES_NOT_EXIST);
+  public static final BrokerResponseNative TABLE_IS_DISABLED =
+      new BrokerResponseNative(QueryErrorCode.TABLE_IS_DISABLED);
   public static final BrokerResponseNative BROKER_ONLY_EXPLAIN_PLAN_OUTPUT = getBrokerResponseExplainPlanOutput();
 
   private ResultTable _resultTable;
@@ -68,6 +72,7 @@ public class BrokerResponseNative implements BrokerResponse {
   private boolean _numGroupsLimitReached = false;
   private long _timeUsedMs = 0L;
   private String _requestId;
+  private String _clientRequestId;
   private String _brokerId;
   private long _numDocsScanned = 0L;
   private long _totalDocs = 0L;
@@ -97,18 +102,27 @@ public class BrokerResponseNative implements BrokerResponse {
   private long _explainPlanNumEmptyFilterSegments = 0L;
   private long _explainPlanNumMatchAllFilterSegments = 0L;
   private Map<String, String> _traceInfo = new HashMap<>();
+  private Set<String> _tablesQueried = Set.of();
 
   public BrokerResponseNative() {
   }
 
-  public BrokerResponseNative(ProcessingException exception) {
-    _exceptions.add(new QueryProcessingException(exception.getErrorCode(), exception.getMessage()));
+  public BrokerResponseNative(QueryErrorCode errorCode, String errorMessage) {
+    _exceptions.add(new QueryProcessingException(errorCode.getId(), errorMessage));
   }
 
-  public BrokerResponseNative(List<ProcessingException> exceptions) {
-    for (ProcessingException exception : exceptions) {
-      _exceptions.add(new QueryProcessingException(exception.getErrorCode(), exception.getMessage()));
-    }
+  public BrokerResponseNative(QueryErrorCode errorCode) {
+    _exceptions.add(new QueryProcessingException(errorCode.getId(), errorCode.getDefaultMessage()));
+  }
+
+  public BrokerResponseNative(QueryErrorMessage errorMsg) {
+    _exceptions.add(QueryProcessingException.fromQueryErrorMessage(errorMsg));
+  }
+
+  public static BrokerResponseNative fromBrokerErrors(List<QueryProcessingException> exceptions) {
+    BrokerResponseNative brokerResponse = new BrokerResponseNative();
+    brokerResponse.setExceptions(exceptions);
+    return brokerResponse;
   }
 
   /** Generate EXPLAIN PLAN output when queries are evaluated by Broker without going to the Server. */
@@ -178,10 +192,6 @@ public class BrokerResponseNative implements BrokerResponse {
     _exceptions.add(exception);
   }
 
-  public void addException(ProcessingException exception) {
-    addException(new QueryProcessingException(exception.getErrorCode(), exception.getMessage()));
-  }
-
   @Override
   public boolean isNumGroupsLimitReached() {
     return _numGroupsLimitReached;
@@ -220,6 +230,16 @@ public class BrokerResponseNative implements BrokerResponse {
   @Override
   public void setRequestId(String requestId) {
     _requestId = requestId;
+  }
+
+  @Override
+  public String getClientRequestId() {
+    return _clientRequestId;
+  }
+
+  @Override
+  public void setClientRequestId(String clientRequestId) {
+    _clientRequestId = clientRequestId;
   }
 
   @Override
@@ -482,5 +502,16 @@ public class BrokerResponseNative implements BrokerResponse {
 
   public void setTraceInfo(Map<String, String> traceInfo) {
     _traceInfo = traceInfo;
+  }
+
+  @Override
+  public void setTablesQueried(@NotNull Set<String> tablesQueried) {
+    _tablesQueried = tablesQueried;
+  }
+
+  @Override
+  @NotNull
+  public Set<String> getTablesQueried() {
+    return _tablesQueried;
   }
 }

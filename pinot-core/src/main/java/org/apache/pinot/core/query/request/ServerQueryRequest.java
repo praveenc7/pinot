@@ -29,6 +29,7 @@ import org.apache.pinot.core.query.request.context.QueryContext;
 import org.apache.pinot.core.query.request.context.TimerContext;
 import org.apache.pinot.core.query.request.context.utils.QueryContextConverterUtils;
 import org.apache.pinot.core.query.utils.QueryIdUtils;
+import org.apache.pinot.spi.trace.LoggerConstants;
 import org.apache.pinot.spi.utils.CommonConstants.Query.Request;
 import org.apache.pinot.spi.utils.builder.TableNameBuilder;
 import org.apache.pinot.sql.parsers.CalciteSqlCompiler;
@@ -107,6 +108,28 @@ public class ServerQueryRequest {
     _timerContext = new TimerContext(_queryContext.getTableName(), serverMetrics, queryArrivalTimeMs);
   }
 
+  /**
+   * To be used by Time Series Query Engine.
+   */
+  public ServerQueryRequest(QueryContext queryContext, List<String> segmentsToQuery, Map<String, String> metadata,
+      ServerMetrics serverMetrics) {
+    long queryArrivalTimeMs = System.currentTimeMillis();
+    _queryContext = queryContext;
+
+    // Initialize metadata
+    _requestId = Long.parseLong(metadata.getOrDefault(Request.MetadataKeys.REQUEST_ID, "0"));
+    _brokerId = metadata.getOrDefault(Request.MetadataKeys.BROKER_ID, "unknown");
+    _enableTrace = Boolean.parseBoolean(metadata.getOrDefault(Request.MetadataKeys.ENABLE_TRACE, "false"));
+    _enableStreaming = Boolean.parseBoolean(metadata.getOrDefault(Request.MetadataKeys.ENABLE_STREAMING, "false"));
+    _queryId = QueryIdUtils.getQueryId(_brokerId, _requestId,
+        TableNameBuilder.getTableTypeFromTableName(_queryContext.getTableName()));
+
+    _segmentsToQuery = segmentsToQuery;
+    _optionalSegments = null;
+
+    _timerContext = new TimerContext(_queryContext.getTableName(), serverMetrics, queryArrivalTimeMs);
+  }
+
   private static QueryContext getQueryContext(PinotQuery pinotQuery) {
     return QueryContextConverterUtils.getQueryContext(pinotQuery);
   }
@@ -149,5 +172,13 @@ public class ServerQueryRequest {
 
   public TimerContext getTimerContext() {
     return _timerContext;
+  }
+
+  public void registerInMdc() {
+    LoggerConstants.QUERY_ID_KEY.registerInMdcIfNotSet(String.valueOf(_requestId));
+  }
+
+  public void unregisterFromMdc() {
+    LoggerConstants.QUERY_ID_KEY.unregisterFromMdc();
   }
 }

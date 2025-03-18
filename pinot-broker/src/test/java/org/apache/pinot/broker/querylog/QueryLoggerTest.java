@@ -27,8 +27,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import org.apache.pinot.broker.api.RequesterIdentity;
 import org.apache.pinot.broker.requesthandler.BaseSingleStageBrokerRequestHandler.ServerStats;
-import org.apache.pinot.common.response.ProcessingException;
 import org.apache.pinot.common.response.broker.BrokerResponseNative;
+import org.apache.pinot.common.response.broker.QueryProcessingException;
+import org.apache.pinot.spi.exception.QueryErrorCode;
 import org.apache.pinot.spi.trace.DefaultRequestContext;
 import org.apache.pinot.spi.trace.RequestContext;
 import org.mockito.Mock;
@@ -110,6 +111,7 @@ public class QueryLoggerTest {
         + "offlineThreadCpuTimeNs(total/thread/sysActivity/resSer):45/14/15/16,"
         + "realtimeThreadCpuTimeNs(total/thread/sysActivity/resSer):54/17/18/19,"
         + "clientIp=ip,"
+        + "queryEngine=singleStage,"
         + "query=SELECT * FROM foo");
     //@formatter:on
   }
@@ -247,7 +249,7 @@ public class QueryLoggerTest {
     BrokerResponseNative response = new BrokerResponseNative();
     response.setNumGroupsLimitReached(numGroupsLimitReached);
     for (int i = 0; i < numExceptions; i++) {
-      response.addException(new ProcessingException());
+      response.addException(new QueryProcessingException(QueryErrorCode.INTERNAL, "message" + i));
     }
     response.setTimeUsedMs(timeUsedMs);
     response.setNumDocsScanned(1);
@@ -281,6 +283,7 @@ public class QueryLoggerTest {
     ServerStats serverStats = new ServerStats();
     serverStats.setServerStats("serverStats");
 
-    return new QueryLogger.QueryLogParams(requestContext, "table", response, identity, serverStats);
+    return new QueryLogger.QueryLogParams(requestContext, "table", response,
+        QueryLogger.QueryLogParams.QueryEngine.SINGLE_STAGE, identity, serverStats);
   }
 }

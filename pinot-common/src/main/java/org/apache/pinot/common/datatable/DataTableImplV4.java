@@ -31,7 +31,6 @@ import java.util.Map;
 import javax.annotation.Nullable;
 import org.apache.pinot.common.CustomObject;
 import org.apache.pinot.common.datablock.DataBlockUtils;
-import org.apache.pinot.common.response.ProcessingException;
 import org.apache.pinot.common.utils.DataSchema;
 import org.apache.pinot.common.utils.HashUtil;
 import org.apache.pinot.common.utils.RoaringBitmapUtils;
@@ -39,6 +38,7 @@ import org.apache.pinot.spi.accounting.ThreadResourceUsageProvider;
 import org.apache.pinot.spi.trace.Tracing;
 import org.apache.pinot.spi.utils.BigDecimalUtils;
 import org.apache.pinot.spi.utils.ByteArray;
+import org.apache.pinot.spi.utils.MapUtils;
 import org.roaringbitmap.RoaringBitmap;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -319,6 +319,18 @@ public class DataTableImplV4 implements DataTable {
 
   @Nullable
   @Override
+  public Map<String, Object> getMap(int rowId, int colId) {
+    int size = positionOffsetInVariableBufferAndGetLength(rowId, colId);
+    if (size == 0) {
+      return null;
+    }
+    ByteBuffer buffer = _variableSizeData.slice();
+    buffer.limit(size);
+    return MapUtils.deserializeMap(buffer);
+  }
+
+  @Nullable
+  @Override
   public CustomObject getCustomObject(int rowId, int colId) {
     int size = positionOffsetInVariableBufferAndGetLength(rowId, colId);
     int type = _variableSizeData.getInt();
@@ -388,11 +400,6 @@ public class DataTableImplV4 implements DataTable {
       stringDictionary[i] = DataTableUtils.decodeString(buffer);
     }
     return stringDictionary;
-  }
-
-  @Override
-  public void addException(ProcessingException processingException) {
-    _errCodeToExceptionMap.put(processingException.getErrorCode(), processingException.getMessage());
   }
 
   @Override

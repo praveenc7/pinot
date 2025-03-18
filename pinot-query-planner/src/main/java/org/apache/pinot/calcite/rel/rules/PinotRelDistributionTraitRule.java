@@ -18,8 +18,10 @@
  */
 package org.apache.pinot.calcite.rel.rules;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
@@ -30,10 +32,11 @@ import org.apache.calcite.rel.RelDistributions;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Exchange;
 import org.apache.calcite.rel.core.Project;
+import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.logical.LogicalFilter;
 import org.apache.calcite.rel.logical.LogicalJoin;
 import org.apache.calcite.rel.logical.LogicalProject;
-import org.apache.calcite.rel.logical.LogicalTableScan;
+import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.tools.RelBuilderFactory;
 import org.apache.calcite.util.mapping.IntPair;
 import org.apache.calcite.util.mapping.Mapping;
@@ -43,6 +46,8 @@ import org.apache.pinot.calcite.rel.hint.PinotHintOptions;
 import org.apache.pinot.calcite.rel.hint.PinotHintStrategyTable;
 import org.apache.pinot.calcite.rel.logical.PinotLogicalAggregate;
 import org.apache.pinot.calcite.rel.logical.PinotLogicalExchange;
+import org.apache.pinot.calcite.rel.logical.PinotLogicalTableScan;
+import org.apache.pinot.query.planner.logical.RelToPlanNodeConverter;
 import org.apache.pinot.query.planner.plannode.AggregateNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,12 +66,7 @@ public class PinotRelDistributionTraitRule extends RelOptRule {
   private static final Logger LOGGER = LoggerFactory.getLogger(PinotRelDistributionTraitRule.class);
 
   public PinotRelDistributionTraitRule(RelBuilderFactory factory) {
-    super(operand(RelNode.class, any()));
-  }
-
-  @Override
-  public boolean matches(RelOptRuleCall call) {
-    return call.rels.length >= 1;
+    super(operand(RelNode.class, any()), factory, null);
   }
 
   @Override
@@ -74,8 +74,7 @@ public class PinotRelDistributionTraitRule extends RelOptRule {
     RelNode current = call.rel(0);
     List<RelNode> inputs = current.getInputs();
     RelDistribution relDistribution;
-
-    if (inputs == null || inputs.size() == 0) {
+    if (inputs == null || inputs.isEmpty()) {
       relDistribution = computeCurrentDistribution(current);
     } else {
       // if there's input to the current node, attempt to derive the RelDistribution.
@@ -97,9 +96,9 @@ public class PinotRelDistributionTraitRule extends RelOptRule {
       return new LogicalJoin(join.getCluster(), clusterTraitSet.plus(trait), join.getLeft(), join.getRight(),
           join.getCondition(), join.getVariablesSet(), join.getJoinType(), join.isSemiJoinDone(),
           ImmutableList.copyOf(join.getSystemFieldList()));
-    } else if (relNode instanceof LogicalTableScan) {
-      LogicalTableScan tableScan = (LogicalTableScan) relNode;
-      return new LogicalTableScan(tableScan.getCluster(), clusterTraitSet.plus(trait), tableScan.getTable());
+    } else if (relNode instanceof PinotLogicalTableScan) {
+      PinotLogicalTableScan tableScan = (PinotLogicalTableScan) relNode;
+      return tableScan.copy(clusterTraitSet.plus(trait), Collections.emptyList());
     } else {
       return relNode.copy(clusterTraitSet.plus(trait), relNode.getInputs());
     }
@@ -167,15 +166,17 @@ public class PinotRelDistributionTraitRule extends RelOptRule {
   private static RelDistribution computeCurrentDistribution(RelNode node) {
     if (node instanceof Exchange) {
       return ((Exchange) node).getDistribution();
-    } else if (node instanceof LogicalTableScan) {
-      LogicalTableScan tableScan = (LogicalTableScan) node;
+    } else if (node instanceof TableScan) {
+      TableScan tableScan = (TableScan) node;
       // convert table scan hints into rel trait
       String partitionKey =
           PinotHintStrategyTable.getHintOption(tableScan.getHints(), PinotHintOptions.TABLE_HINT_OPTIONS,
               PinotHintOptions.TableHintOptions.PARTITION_KEY);
       if (partitionKey != null) {
-        int partitionIndex = tableScan.getRowType().getField(partitionKey, true, true).getIndex();
-        return RelDistributions.hash(ImmutableList.of(partitionIndex));
+        RelDataTypeField field = tableScan.getRowType().getField(partitionKey, true, true);
+        Preconditions.checkState(field != null, "Failed to find partition key: %s in table: %s", partitionKey,
+            RelToPlanNodeConverter.getTableNameFromTableScan(tableScan));
+        return RelDistributions.hash(List.of(field.getIndex()));
       } else {
         return RelDistributions.of(RelDistribution.Type.RANDOM_DISTRIBUTED, RelDistributions.EMPTY);
       }
@@ -183,9 +184,7 @@ public class PinotRelDistributionTraitRule extends RelOptRule {
       PinotLogicalAggregate agg = (PinotLogicalAggregate) node;
       AggregateNode.AggType aggType = agg.getAggType();
       if (aggType == AggregateNode.AggType.FINAL || aggType == AggregateNode.AggType.DIRECT) {
-        List<Integer> groupSetIndices = new ArrayList<>();
-        agg.getGroupSet().forEach(groupSetIndices::add);
-        return RelDistributions.hash(groupSetIndices);
+        return RelDistributions.hash(agg.getGroupSet().asList());
       } else {
         return RelDistributions.of(RelDistribution.Type.RANDOM_DISTRIBUTED, RelDistributions.EMPTY);
       }

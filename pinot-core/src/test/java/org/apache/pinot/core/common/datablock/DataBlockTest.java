@@ -27,10 +27,9 @@ import org.apache.pinot.common.datablock.ColumnarDataBlock;
 import org.apache.pinot.common.datablock.DataBlock;
 import org.apache.pinot.common.datablock.DataBlockUtils;
 import org.apache.pinot.common.datablock.RowDataBlock;
-import org.apache.pinot.common.exception.QueryException;
-import org.apache.pinot.common.response.ProcessingException;
 import org.apache.pinot.common.utils.DataSchema;
 import org.apache.pinot.common.utils.DataSchema.ColumnDataType;
+import org.apache.pinot.spi.exception.QueryErrorCode;
 import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
@@ -45,19 +44,17 @@ public class DataBlockTest {
   public void testException()
       throws IOException {
     Exception originalException = new UnsupportedOperationException("Expected test exception.");
-    ProcessingException processingException =
-        QueryException.getException(QueryException.QUERY_EXECUTION_ERROR, originalException);
-    String expected = processingException.getMessage();
+    String expected = "Expected test error";
 
     DataBlock dataBlock = DataBlockUtils.getErrorDataBlock(originalException);
-    dataBlock.addException(processingException);
+    dataBlock.addException(QueryErrorCode.QUERY_EXECUTION, expected);
     Assert.assertEquals(dataBlock.getNumberOfRows(), 0);
 
     // Assert processing exception and original exception both matches.
-    String actual = dataBlock.getExceptions().get(QueryException.QUERY_EXECUTION_ERROR.getErrorCode());
+    String actual = dataBlock.getExceptions().get(QueryErrorCode.QUERY_EXECUTION.getId());
     Assert.assertEquals(actual, expected);
     Assert.assertTrue(
-        dataBlock.getExceptions().get(QueryException.UNKNOWN_ERROR_CODE).contains(originalException.getMessage()));
+        dataBlock.getExceptions().get(QueryErrorCode.UNKNOWN.getId()).contains(originalException.getMessage()));
   }
 
   @Test(dataProvider = "testTypeNullPercentile")
@@ -83,11 +80,30 @@ public class DataBlockTest {
     for (int colId = 0; colId < dataSchema.getColumnNames().length; colId++) {
       ColumnDataType columnDataType = dataSchema.getColumnDataType(colId);
       for (int rowId = 0; rowId < TEST_ROW_COUNT; rowId++) {
-        Object rowVal = DataBlockTestUtils.getElement(rowBlock, rowId, colId, columnDataType);
-        Object colVal = DataBlockTestUtils.getElement(columnarBlock, rowId, colId, columnDataType);
-        Assert.assertEquals(rowVal, colVal,
-            "Error comparing Row/Column Block at (" + rowId + "," + colId + ")" + " of Type: " + columnDataType
-                + "! rowValue: [" + rowVal + "], columnarValue: [" + colVal + "]");
+        Object rowVal;
+        Object colVal;
+        try {
+          try {
+            rowVal = DataBlockTestUtils.getElement(rowBlock, rowId, colId, columnDataType);
+          } catch (AssertionError e) {
+            throw new AssertionError(
+                "Error comparing Row/Column Block at (" + rowId + "," + colId + ") of Type: " + columnDataType
+                    + ". Cannot get element on row block!", e);
+          }
+          try {
+            colVal = DataBlockTestUtils.getElement(columnarBlock, rowId, colId, columnDataType);
+          } catch (AssertionError e) {
+            throw new AssertionError(
+                "Error comparing Row/Column Block at (" + rowId + "," + colId + ") of Type: " + columnDataType
+                    + ". Cannot get element on columnar block!", e);
+          }
+          Assert.assertEquals(rowVal, colVal,
+              "Error comparing Row/Column Block at (" + rowId + "," + colId + ")" + " of Type: " + columnDataType
+                  + "! rowValue: [" + rowVal + "], columnarValue: [" + colVal + "]");
+        } catch (RuntimeException e) {
+          throw new RuntimeException(
+              "Error comparing Row/Column Block at (" + rowId + "," + colId + ") of Type: " + columnDataType + "!", e);
+        }
       }
     }
   }
@@ -121,7 +137,9 @@ public class DataBlockTest {
     rows.add(row);
     DataSchema dataSchema = new DataSchema(new String[]{"intArray"}, new ColumnDataType[]{ColumnDataType.INT_ARRAY});
     DataBlock dataBlock = DataBlockBuilder.buildFromRows(rows, dataSchema);
-    int[] intArray = DataBlockUtils.getDataBlock(ByteBuffer.wrap(dataBlock.toBytes())).getIntArray(0, 0);
+    List<ByteBuffer> serialize = dataBlock.serialize();
+    DataBlock deserialized = DataBlockUtils.deserialize(serialize);
+    int[] intArray = deserialized.getIntArray(0, 0);
     Assert.assertEquals(intArray.length, 0);
   }
 }
