@@ -40,7 +40,6 @@
   <modules>
     <module>pinot-dependency-verifier</module>
     <module>pinot-spi</module>
-    <module>pinot-lnkd-deps</module>
     <module>pinot-segment-spi</module>
     <module>pinot-broker</module>
     <module>pinot-common</module>
@@ -340,7 +339,7 @@
                 <configuration>
                   <rules>
                     <pinotCustomDependencyVersionRule implementation="org.apache.pinot.verifier.PinotCustomDependencyVersionRule">
-                      <skipModules>pinot-plugins,pinot-connectors,pinot-integration-tests,
+                      <skipModules>pinot-plugins,pinot-connectors,pinot-integration-tests,pinot-lnkd-deps,
                         pinot-tools,contrib,pinot-dependency-verifier</skipModules>
                     </pinotCustomDependencyVersionRule>
                   </rules>
@@ -480,6 +479,12 @@
         <scala.version>2.13.16</scala.version>
         <scala.compat.version>2.13</scala.compat.version>
       </properties>
+    </profile>
+    <profile>
+      <id>li-publish</id>
+      <modules>
+        <module>pinot-lnkd-deps</module>
+      </modules>
     </profile>
   </profiles>
 

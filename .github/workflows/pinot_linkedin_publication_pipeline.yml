@@ -63,7 +63,7 @@ jobs:
         run: |
           mvn -B -T1C clean install \
             -DskipTests \
-            -Pbin-dist -Pbuild-shaded-jar \
+            -Pbin-dist -Pbuild-shaded-jar -Pli-publish \
             --no-transfer-progress \
             -Djdk.version=11
 
@@ -71,7 +71,7 @@ jobs:
         run: |
           mvn -B deploy \
             -DskipTests \
-            -Pbuild-shaded-jar \
+            -Pbuild-shaded-jar -Pli-publish \
             --no-transfer-progress \
             -Djdk.version=11 \
             -s ci.settings.xml \
