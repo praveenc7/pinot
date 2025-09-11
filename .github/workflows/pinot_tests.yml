@@ -84,8 +84,7 @@ jobs:
       # Changed to false in order to improve coverage using unsafe buffers
       fail-fast: false
       matrix:
-#        testset: [ 1, 2 ] TODO: re-enable unit testset 2
-        testset: [ 1 ]
+        testset: [ 1, 2 ]
         java: [ 11, 21 ]
         distribution: [ "temurin" ]
     name: Pinot Unit Test Set ${{ matrix.testset }} (${{matrix.distribution}}-${{matrix.java}})
@@ -170,7 +169,7 @@ jobs:
           verbose: true
 
   integration-test:
-    if: github.repository == 'apache/pinot'
+    if: github.repository == 'linkedin/pinot'
     runs-on: ubuntu-latest
     strategy:
       # Changed to false in order to improve coverage using unsafe buffers
