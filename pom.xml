@@ -482,9 +482,29 @@
     </profile>
     <profile>
       <id>li-publish</id>
+      <!--  ELR-specific module  -->
       <modules>
         <module>pinot-lnkd-deps</module>
       </modules>
+      <!-- ELR-specific version pins. These versions are inherited from pinot-elr:
+       https://github.com/linkedin/pinot-elr/blob/master/property-overrides.txt.
+       TODO: directly update the versions in the root POM. -->
+      <properties>
+        <protobuf.version>3.25.5</protobuf.version>
+        <proto-google-common-protos.version>2.9.6</proto-google-common-protos.version>
+        <grpc.version>1.68.3</grpc.version>
+        <confluent.version>7.6.2</confluent.version>
+
+        <helix.version>1.4.3</helix.version>
+        <netty.version>4.1.118.Final</netty.version>
+
+        <grpc-context.version>1.59.1</grpc-context.version>
+        <grpc-protobuf-lite.version>1.59.1</grpc-protobuf-lite.version>
+        <grpc-proto.version>2.9.6</grpc-proto.version>
+
+        <google.cloud.libraries.version>26.56.0</google.cloud.libraries.version>
+        <reflections.version>0.9.11</reflections.version>
+      </properties>
     </profile>
   </profiles>
 

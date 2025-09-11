@@ -82,4 +82,4 @@ jobs:
         if: success()
         run: |
           echo "Dependency tree for pinot-lnkd-deps:"
-          mvn -B dependency:tree -pl pinot-lnkd-deps -s ci.settings.xml || true
+          mvn -B dependency:tree -pl pinot-lnkd-deps -Pli-publish -s ci.settings.xml || true
