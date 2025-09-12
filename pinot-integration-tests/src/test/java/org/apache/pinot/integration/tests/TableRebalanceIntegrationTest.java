@@ -331,8 +331,10 @@ public class TableRebalanceIntegrationTest extends BaseHybridClusterIntegrationT
 
     // Set minimizeDataMovement to true and false respectively for COMPLETED and CONSUMING segments
     instanceAssignmentConfigMap = new HashMap<>();
-    instanceAssignmentConfigMap.put("CONSUMING", createInstanceAssignmentConfig(true, TableType.REALTIME));
-    instanceAssignmentConfigMap.put("COMPLETED", createInstanceAssignmentConfig(false, TableType.REALTIME));
+    instanceAssignmentConfigMap.put("CONSUMING",
+        createInstanceAssignmentConfig(true, TableType.REALTIME));
+    instanceAssignmentConfigMap.put("COMPLETED",
+        createInstanceAssignmentConfig(false, TableType.REALTIME));
     replicaGroupPartitionConfig = instanceAssignmentConfigMap.get("CONSUMING").getReplicaGroupPartitionConfig();
     tableConfig.setInstanceAssignmentConfigMap(instanceAssignmentConfigMap);
     updateTableConfig(tableConfig);
@@ -382,8 +384,13 @@ public class TableRebalanceIntegrationTest extends BaseHybridClusterIntegrationT
             ? "0 (using as many instances as possible)" : replicaGroupPartitionConfig.getNumInstancesPerReplicaGroup()),
         RebalancePreCheckerResult.PreCheckStatus.WARN);
 
-    instanceAssignmentConfigMap.put("CONSUMING", createInstanceAssignmentConfig(true, TableType.REALTIME));
-    instanceAssignmentConfigMap.put("COMPLETED", createInstanceAssignmentConfig(true, TableType.REALTIME));
+    instanceAssignmentConfigMap.put("CONSUMING", createInstanceAssignmentConfigWithPartitionSelector(true,
+        TableType.REALTIME,
+        InstanceAssignmentConfig.PartitionSelector.FD_AWARE_INSTANCE_PARTITION_SELECTOR.name()));
+    instanceAssignmentConfigMap.put("COMPLETED", createInstanceAssignmentConfigWithPartitionSelector(true,
+        TableType.REALTIME,
+        InstanceAssignmentConfig.PartitionSelector.INSTANCE_REPLICA_GROUP_PARTITION_SELECTOR.name()));
+
     replicaGroupPartitionConfig = instanceAssignmentConfigMap.get("CONSUMING").getReplicaGroupPartitionConfig();
     tableConfig.setInstanceAssignmentConfigMap(instanceAssignmentConfigMap);
     updateTableConfig(tableConfig);
@@ -431,8 +438,12 @@ public class TableRebalanceIntegrationTest extends BaseHybridClusterIntegrationT
             ? "0 (using as many instances as possible)" : replicaGroupPartitionConfig.getNumInstancesPerReplicaGroup()),
         RebalancePreCheckerResult.PreCheckStatus.WARN);
 
-    instanceAssignmentConfigMap.put("CONSUMING", createInstanceAssignmentConfig(false, TableType.REALTIME));
-    instanceAssignmentConfigMap.put("COMPLETED", createInstanceAssignmentConfig(false, TableType.REALTIME));
+    instanceAssignmentConfigMap.put("CONSUMING", createInstanceAssignmentConfigWithPartitionSelector(false,
+        TableType.REALTIME,
+        InstanceAssignmentConfig.PartitionSelector.FD_AWARE_INSTANCE_PARTITION_SELECTOR.name()));
+    instanceAssignmentConfigMap.put("COMPLETED", createInstanceAssignmentConfigWithPartitionSelector(false,
+        TableType.REALTIME,
+        InstanceAssignmentConfig.PartitionSelector.INSTANCE_REPLICA_GROUP_PARTITION_SELECTOR.name()));
     replicaGroupPartitionConfig = instanceAssignmentConfigMap.get("CONSUMING").getReplicaGroupPartitionConfig();
     tableConfig.setInstanceAssignmentConfigMap(instanceAssignmentConfigMap);
     updateTableConfig(tableConfig);
@@ -1038,6 +1049,21 @@ public class TableRebalanceIntegrationTest extends BaseHybridClusterIntegrationT
             null);
     return new InstanceAssignmentConfig(instanceTagPoolConfig,
         instanceConstraintConfig, instanceReplicaGroupPartitionConfig, null, minimizeDataMovement);
+  }
+
+  private InstanceAssignmentConfig createInstanceAssignmentConfigWithPartitionSelector(boolean minimizeDataMovement,
+      TableType tableType, String partitionSelector) {
+    InstanceTagPoolConfig instanceTagPoolConfig =
+        new InstanceTagPoolConfig(TagNameUtils.getServerTagForTenant(getServerTenant(), tableType), false, 1, null);
+    List<String> constraints = new ArrayList<>();
+    constraints.add("constraints1");
+    InstanceConstraintConfig instanceConstraintConfig = new InstanceConstraintConfig(constraints);
+    InstanceReplicaGroupPartitionConfig instanceReplicaGroupPartitionConfig =
+        new InstanceReplicaGroupPartitionConfig(true, 1, 1,
+            1, 1, 1, minimizeDataMovement,
+            null);
+    return new InstanceAssignmentConfig(instanceTagPoolConfig,
+        instanceConstraintConfig, instanceReplicaGroupPartitionConfig, partitionSelector, minimizeDataMovement);
   }
 
   @Test
