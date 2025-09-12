@@ -63,6 +63,10 @@ jobs:
         run: |
           mvn -B -T1C clean install \
             -DskipTests \
+            -pl '!pinot-distribution,
+                 !pinot-plugins/pinot-file-system/pinot-gcs,
+                 !pinot-plugins/pinot-environment/pinot-azure,
+                 !pinot-plugins/pinot-input-format/pinot-confluent-protobuf' \
             -Pbin-dist -Pbuild-shaded-jar -Pli-publish \
             --no-transfer-progress \
             -Djdk.version=11
@@ -71,7 +75,11 @@ jobs:
         run: |
           mvn -B deploy \
             -DskipTests \
-            -Pbuild-shaded-jar -Pli-publish \
+            -P build-shaded-jar,li-publish \
+            -pl '!pinot-distribution,
+                 !pinot-plugins/pinot-file-system/pinot-gcs,
+                 !pinot-plugins/pinot-environment/pinot-azure,
+                 !pinot-plugins/pinot-input-format/pinot-confluent-protobuf' \
             --no-transfer-progress \
             -Djdk.version=11 \
             -s ci.settings.xml \

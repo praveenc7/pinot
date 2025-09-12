@@ -52,6 +52,7 @@
     <module>pinot-tools</module>
     <module>pinot-integration-test-base</module>
     <module>pinot-integration-tests</module>
+    <module>pinot-distribution</module>
     <module>pinot-segment-local</module>
     <module>pinot-compatibility-verifier</module>
     <module>pinot-query-planner</module>

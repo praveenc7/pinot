@@ -54,6 +54,7 @@ else
       -DskipTests -Dcheckstyle.skip -Dspotless.skip -Denforcer.skip -Dlicense.skip -Dmaven.plugin.appassembler.skip=true \
       -am -B -T 16 -ntp \
       -P github-actions \
+      -pl '!pinot-distribution' \
       -pl '!pinot-integration-tests' || exit 1
   fi
 fi
