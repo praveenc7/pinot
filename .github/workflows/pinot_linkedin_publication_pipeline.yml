@@ -49,15 +49,15 @@ jobs:
         run: |
           # 1) Get base version from POM (strip -SNAPSHOT if present)
           set -euo pipefail
-          BASE=$(mvn -q --non-recursive exec:exec -Dexec.executable=echo -Dexec.args='${project.version}')
+          BASE=$(mvn -q --non-recursive -Pli-publish exec:exec -Dexec.executable=echo -Dexec.args='${project.version}')
           BASE=${BASE%-SNAPSHOT}
           
           # 2) Compose new version, e.g. 1.4.0-li-1
           NEW_VERSION="${BASE}-li-${GITHUB_RUN_NUMBER}"
           echo "Setting project version to: $NEW_VERSION"
           
-          mvn -B -q versions:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
-          mvn -B -q versions:commit
+          mvn -B -q -Pli-publish versions:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
+          mvn -B -q -Pli-publish versions:commit
 
       - name: Build the repo
         run: |
