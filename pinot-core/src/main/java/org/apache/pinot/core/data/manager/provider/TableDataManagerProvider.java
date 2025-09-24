@@ -31,6 +31,7 @@ import org.apache.pinot.segment.local.data.manager.TableDataManager;
 import org.apache.pinot.segment.local.utils.SegmentLocks;
 import org.apache.pinot.segment.local.utils.SegmentOperationsThrottler;
 import org.apache.pinot.segment.local.utils.SegmentReloadSemaphore;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCacheFactory;
 import org.apache.pinot.spi.annotations.InterfaceAudience;
 import org.apache.pinot.spi.config.instance.InstanceDataManagerConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
@@ -47,14 +48,16 @@ public interface TableDataManagerProvider {
       @Nullable SegmentOperationsThrottler segmentOperationsThrottler);
 
   TableDataManager getTableDataManager(TableConfig tableConfig, Schema schema,
-      SegmentReloadSemaphore segmentRefreshSemaphore, ExecutorService segmentRefreshExecutor,
-      @Nullable ExecutorService segmentPreloadExecutor,
-      @Nullable Cache<Pair<String, String>, SegmentErrorInfo> errorCache,
-      Supplier<Boolean> isServerReadyToServeQueries);
+                                       SegmentReloadSemaphore segmentRefreshSemaphore,
+                                       ExecutorService segmentRefreshExecutor,
+                                       @Nullable ExecutorService segmentPreloadExecutor,
+                                       @Nullable Cache<Pair<String, String>, SegmentErrorInfo> errorCache,
+                                       Supplier<Boolean> isServerReadyToServeQueries,
+                                       KeyBasedCrypterCacheFactory crypterCacheFactory);
 
   @VisibleForTesting
   default TableDataManager getTableDataManager(TableConfig tableConfig, Schema schema) {
     return getTableDataManager(tableConfig, schema, new SegmentReloadSemaphore(1), Executors.newSingleThreadExecutor(),
-        null, null, () -> true);
+        null, null, () -> true, null);
   }
 }

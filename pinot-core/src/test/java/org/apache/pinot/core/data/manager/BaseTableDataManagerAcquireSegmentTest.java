@@ -130,7 +130,8 @@ public class BaseTableDataManagerAcquireSegmentTest {
             new SegmentStarTreePreprocessThrottler(4, 8, true), new SegmentDownloadThrottler(10, 20, true));
     TableDataManager tableDataManager = new OfflineTableDataManager();
     tableDataManager.init(instanceDataManagerConfig, mock(HelixManager.class), new SegmentLocks(), tableConfig, schema,
-        new SegmentReloadSemaphore(1), Executors.newSingleThreadExecutor(), null, null, segmentOperationsThrottler);
+        new SegmentReloadSemaphore(1), Executors.newSingleThreadExecutor(), null, null,
+            segmentOperationsThrottler, null);
     tableDataManager.start();
     Field segsMapField = BaseTableDataManager.class.getDeclaredField("_segmentDataManagerMap");
     segsMapField.setAccessible(true);

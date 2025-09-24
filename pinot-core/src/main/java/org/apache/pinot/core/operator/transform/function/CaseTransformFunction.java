@@ -32,6 +32,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.pinot.core.operator.ColumnContext;
 import org.apache.pinot.core.operator.blocks.ValueBlock;
 import org.apache.pinot.core.operator.transform.TransformResultMetadata;
+import org.apache.pinot.core.query.request.context.QueryContext;
 import org.apache.pinot.spi.data.FieldSpec.DataType;
 import org.apache.pinot.spi.utils.BytesUtils;
 import org.apache.pinot.spi.utils.CommonConstants.NullValuePlaceHolder;
@@ -76,8 +77,8 @@ public class CaseTransformFunction extends ComputeDifferentlyWhenNullHandlingEna
 
   @Override
   public void init(List<TransformFunction> arguments, Map<String, ColumnContext> columnContextMap,
-      boolean nullHandlingEnabled) {
-    super.init(arguments, columnContextMap, nullHandlingEnabled);
+      QueryContext queryContext) {
+    super.init(arguments, columnContextMap, queryContext);
     // Check that there are more than 2 arguments
     // Else statement can be omitted.
     if (arguments.size() < 2) {

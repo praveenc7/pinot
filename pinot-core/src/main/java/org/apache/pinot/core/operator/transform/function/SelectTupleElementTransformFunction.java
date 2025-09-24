@@ -26,6 +26,7 @@ import java.util.Map;
 import org.apache.pinot.core.operator.ColumnContext;
 import org.apache.pinot.core.operator.blocks.ValueBlock;
 import org.apache.pinot.core.operator.transform.TransformResultMetadata;
+import org.apache.pinot.core.query.request.context.QueryContext;
 import org.apache.pinot.spi.data.FieldSpec;
 
 
@@ -49,8 +50,8 @@ public abstract class SelectTupleElementTransformFunction extends BaseTransformF
 
   @Override
   public void init(List<TransformFunction> arguments, Map<String, ColumnContext> columnContextMap,
-      boolean nullHandlingEnabled) {
-    super.init(arguments, columnContextMap, nullHandlingEnabled);
+      QueryContext queryContext) {
+    super.init(arguments, columnContextMap, queryContext);
     if (arguments.isEmpty()) {
       throw new IllegalArgumentException(_name + " takes at least one argument");
     }

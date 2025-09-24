@@ -46,6 +46,7 @@ import org.apache.pinot.core.transport.InstanceRequestHandler;
 import org.apache.pinot.core.transport.QueryServer;
 import org.apache.pinot.core.transport.grpc.GrpcQueryServer;
 import org.apache.pinot.segment.local.utils.SegmentOperationsThrottler;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCacheFactory;
 import org.apache.pinot.server.access.AccessControl;
 import org.apache.pinot.server.access.AccessControlFactory;
 import org.apache.pinot.server.access.AllowAllAccessFactory;
@@ -108,8 +109,12 @@ public class ServerInstance {
     String instanceDataManagerClassName = serverConf.getInstanceDataManagerClassName();
     LOGGER.info("Initializing instance data manager of class: {}", instanceDataManagerClassName);
     _instanceDataManager = PluginManager.get().createInstance(instanceDataManagerClassName);
+    // TODO Instantiate this from the configuration
+    String crypterCacheFactoryClassName = serverConf.getCrypterCacheFactoryName();
+    KeyBasedCrypterCacheFactory crypterCacheFactory = PluginManager.get().createInstance(crypterCacheFactoryClassName);
+    // Create crypter cache factory based on the configuration here.
     _instanceDataManager.init(serverConf.getInstanceDataManagerConfig(), helixManager, _serverMetrics,
-        segmentOperationsThrottler);
+        segmentOperationsThrottler, crypterCacheFactory);
 
     // Initialize ServerQueryLogger and FunctionRegistry before starting the query executor
     ServerQueryLogger.init(serverConf.getQueryLogMaxRate(), serverConf.getQueryLogDroppedReportMaxRate(),

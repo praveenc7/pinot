@@ -35,6 +35,7 @@ import org.apache.pinot.segment.local.data.manager.TableDataManager;
 import org.apache.pinot.segment.local.utils.SegmentLocks;
 import org.apache.pinot.segment.local.utils.SegmentOperationsThrottler;
 import org.apache.pinot.segment.local.utils.SegmentReloadSemaphore;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCacheFactory;
 import org.apache.pinot.spi.config.instance.InstanceDataManagerConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.data.Schema;
@@ -66,10 +67,12 @@ public class DefaultTableDataManagerProvider implements TableDataManagerProvider
 
   @Override
   public TableDataManager getTableDataManager(TableConfig tableConfig, Schema schema,
-      SegmentReloadSemaphore segmentReloadSemaphore, ExecutorService segmentReloadExecutor,
-      @Nullable ExecutorService segmentPreloadExecutor,
-      @Nullable Cache<Pair<String, String>, SegmentErrorInfo> errorCache,
-      Supplier<Boolean> isServerReadyToServeQueries) {
+                                              SegmentReloadSemaphore segmentReloadSemaphore,
+                                              ExecutorService segmentReloadExecutor,
+                                              @Nullable ExecutorService segmentPreloadExecutor,
+                                              @Nullable Cache<Pair<String, String>, SegmentErrorInfo> errorCache,
+                                              Supplier<Boolean> isServerReadyToServeQueries,
+                                              KeyBasedCrypterCacheFactory crypterCacheFactory) {
     TableDataManager tableDataManager;
     switch (tableConfig.getTableType()) {
       case OFFLINE:
@@ -93,7 +96,8 @@ public class DefaultTableDataManagerProvider implements TableDataManagerProvider
         throw new IllegalStateException();
     }
     tableDataManager.init(_instanceDataManagerConfig, _helixManager, _segmentLocks, tableConfig, schema,
-        segmentReloadSemaphore, segmentReloadExecutor, segmentPreloadExecutor, errorCache, _segmentOperationsThrottler);
+        segmentReloadSemaphore, segmentReloadExecutor, segmentPreloadExecutor, errorCache, _segmentOperationsThrottler,
+            crypterCacheFactory);
     return tableDataManager;
   }
 }

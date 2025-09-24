@@ -35,6 +35,7 @@ import javax.annotation.Nullable;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.pinot.common.request.context.ExpressionContext;
 import org.apache.pinot.common.request.context.FunctionContext;
 import org.apache.pinot.common.request.context.RequestContextUtils;
@@ -1461,5 +1462,32 @@ public final class TableConfigUtils {
       clone.setFieldConfigList(cleanFieldConfigList);
     }
     return clone;
+  }
+
+  public static boolean hasEarEnabled(TableConfig tableConfig) {
+    // TODO Scan the fields of tableconfig to determine if EAR is enabled
+    return false;
+  }
+
+  public static String getEncryptionKeyColumnName(TableConfig tableConfig) {
+    // TODO Scan fields of tableconfig
+    Preconditions.checkArgument(hasEarEnabled(tableConfig));
+    return null;
+  }
+
+  public static List<String> getEncryptedColumnNames(TableConfig tableConfig) {
+    // TODO Scan fields of tableconfig
+    Preconditions.checkArgument(hasEarEnabled(tableConfig));
+    return null;
+  }
+
+  public static Pair<String, DataType> getEncryptionKeyColumn(TableConfig tableConfig) {
+    Preconditions.checkArgument(hasEarEnabled(tableConfig));
+    return null;
+  }
+
+  public static Map<String, DataType> getEncryptedColumns(TableConfig tableConfig) {
+    Preconditions.checkArgument(hasEarEnabled(tableConfig));
+    return null;
   }
 }

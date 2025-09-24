@@ -78,11 +78,14 @@ import org.apache.pinot.segment.local.utils.SegmentDownloadThrottler;
 import org.apache.pinot.segment.local.utils.SegmentLocks;
 import org.apache.pinot.segment.local.utils.SegmentOperationsThrottler;
 import org.apache.pinot.segment.local.utils.SegmentReloadSemaphore;
+import org.apache.pinot.segment.local.utils.TableConfigUtils;
 import org.apache.pinot.segment.spi.ColumnMetadata;
 import org.apache.pinot.segment.spi.ImmutableSegment;
 import org.apache.pinot.segment.spi.IndexSegment;
 import org.apache.pinot.segment.spi.SegmentContext;
 import org.apache.pinot.segment.spi.SegmentMetadata;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCache;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCacheFactory;
 import org.apache.pinot.segment.spi.datasource.DataSource;
 import org.apache.pinot.segment.spi.index.FieldIndexConfigs;
 import org.apache.pinot.segment.spi.index.FieldIndexConfigsUtil;
@@ -151,12 +154,22 @@ public abstract class BaseTableDataManager implements TableDataManager {
 
   protected volatile boolean _shutDown;
 
+  protected KeyBasedCrypterCacheFactory _crypterCacheFactory;
+  // A concurrent hashmap that holds the crypter for each key in the table. This map is populated when segments are
+  // loaded or reloaded on the table. For now, only offline tables are supported.
+  // This object is non-null ONLY if the table has EAR enabled.
+  // TODO Change the crypter to be appropriate type after li-crypt packages are linked correctly.
+  // TODO Change so that the key can be of types other than Long.
+  protected KeyBasedCrypterCache _crypterCache;
+
   @Override
   public void init(InstanceDataManagerConfig instanceDataManagerConfig, HelixManager helixManager,
-      SegmentLocks segmentLocks, TableConfig tableConfig, Schema schema, SegmentReloadSemaphore segmentReloadSemaphore,
-      ExecutorService segmentReloadExecutor, @Nullable ExecutorService segmentPreloadExecutor,
-      @Nullable Cache<Pair<String, String>, SegmentErrorInfo> errorCache,
-      @Nullable SegmentOperationsThrottler segmentOperationsThrottler) {
+                   SegmentLocks segmentLocks, TableConfig tableConfig, Schema schema,
+                   SegmentReloadSemaphore segmentReloadSemaphore, ExecutorService segmentReloadExecutor,
+                   @Nullable ExecutorService segmentPreloadExecutor,
+                   @Nullable Cache<Pair<String, String>, SegmentErrorInfo> errorCache,
+                   @Nullable SegmentOperationsThrottler segmentOperationsThrottler,
+                   KeyBasedCrypterCacheFactory crypterCacheFactory) {
     LOGGER.info("Initializing table data manager for table: {}", tableConfig.getTableName());
 
     _instanceDataManagerConfig = instanceDataManagerConfig;
@@ -168,6 +181,7 @@ public abstract class BaseTableDataManager implements TableDataManager {
     _segmentReloadExecutor = segmentReloadExecutor;
     _segmentPreloadExecutor = segmentPreloadExecutor;
     _authProvider = AuthProviderUtils.extractAuthProvider(instanceDataManagerConfig.getAuthConfig(), null);
+    _crypterCacheFactory = crypterCacheFactory;
 
     _tableNameWithType = tableConfig.getTableName();
     _tableDataDir = instanceDataManagerConfig.getInstanceDataDir() + File.separator + _tableNameWithType;
@@ -227,6 +241,10 @@ public abstract class BaseTableDataManager implements TableDataManager {
       _numSegmentsAcquiredDownloadSemaphore = null;
     }
     _logger = LoggerFactory.getLogger(_tableNameWithType + "-" + getClass().getSimpleName());
+    if (TableConfigUtils.hasEarEnabled(tableConfig)) {
+      _crypterCache = _crypterCacheFactory.create(TableConfigUtils.getEncryptionKeyColumnName(tableConfig),
+              TableConfigUtils.getEncryptedColumnNames(tableConfig));
+    }
 
     doInit();
 
@@ -264,6 +282,10 @@ public abstract class BaseTableDataManager implements TableDataManager {
     _shutDown = true;
     doShutdown();
     _logger.info("Shut down table data manager");
+  }
+
+  public KeyBasedCrypterCache getCrypterCache() {
+    return _crypterCache;
   }
 
   protected abstract void doShutdown();
@@ -433,7 +455,9 @@ public abstract class BaseTableDataManager implements TableDataManager {
     String segmentName = zkMetadata.getSegmentName();
     _logger.info("Downloading and loading segment: {}", segmentName);
     File indexDir = downloadSegment(zkMetadata);
-    addSegment(ImmutableSegmentLoader.load(indexDir, indexLoadingConfig, _segmentOperationsThrottler), zkMetadata);
+    // this call should update the crypter cache
+    addSegment(ImmutableSegmentLoader.load(indexDir, indexLoadingConfig, _segmentOperationsThrottler, _crypterCache),
+            zkMetadata);
     _logger.info("Downloaded and loaded segment: {} with CRC: {} on tier: {}", segmentName, zkMetadata.getCrc(),
         TierConfigUtils.normalizeTierName(zkMetadata.getTier()));
   }
@@ -812,7 +836,8 @@ public abstract class BaseTableDataManager implements TableDataManager {
         if (canReuseExistingDirectoryForReload(zkMetadata, segmentTier, segmentDirectory, indexLoadingConfig)) {
           _logger.info("Reloading segment: {} using existing segment directory as no reprocessing needed", segmentName);
           // No reprocessing needed, reuse the same segment
-          ImmutableSegment segment = ImmutableSegmentLoader.load(segmentDirectory, indexLoadingConfig);
+          // this call should update the crypter cache
+          ImmutableSegment segment = ImmutableSegmentLoader.load(segmentDirectory, indexLoadingConfig, _crypterCache);
           addSegment(segment, zkMetadata);
           return;
         }
@@ -833,7 +858,9 @@ public abstract class BaseTableDataManager implements TableDataManager {
       indexLoadingConfig.setSegmentTier(zkMetadata.getTier());
       _logger.info("Loading segment: {} from indexDir: {} to tier: {}", segmentName, indexDir,
           TierConfigUtils.normalizeTierName(zkMetadata.getTier()));
-      ImmutableSegment segment = ImmutableSegmentLoader.load(indexDir, indexLoadingConfig, _segmentOperationsThrottler);
+      // This call should update crypter cache
+      ImmutableSegment segment = ImmutableSegmentLoader.load(indexDir, indexLoadingConfig, _segmentOperationsThrottler,
+              _crypterCache);
       addSegment(segment, zkMetadata);
 
       // Remove backup directory to mark the completion of segment reloading.
@@ -1212,7 +1239,8 @@ public abstract class BaseTableDataManager implements TableDataManager {
         ImmutableSegmentLoader.preprocess(indexDir, indexLoadingConfig, _segmentOperationsThrottler);
         segmentDirectory = initSegmentDirectory(segmentName, String.valueOf(zkMetadata.getCrc()), indexLoadingConfig);
       }
-      ImmutableSegment segment = ImmutableSegmentLoader.load(segmentDirectory, indexLoadingConfig);
+      // This call should update the crypter cache
+      ImmutableSegment segment = ImmutableSegmentLoader.load(segmentDirectory, indexLoadingConfig, _crypterCache);
       addSegment(segment, zkMetadata);
       _logger.info("Loaded existing segment: {} with CRC: {} on tier: {}", segmentName, zkMetadata.getCrc(),
           TierConfigUtils.normalizeTierName(segmentTier));

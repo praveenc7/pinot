@@ -38,6 +38,7 @@ import org.apache.pinot.segment.spi.ColumnMetadata;
 import org.apache.pinot.segment.spi.ImmutableSegment;
 import org.apache.pinot.segment.spi.converter.SegmentFormatConverter;
 import org.apache.pinot.segment.spi.creator.SegmentVersion;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCache;
 import org.apache.pinot.segment.spi.index.column.ColumnIndexContainer;
 import org.apache.pinot.segment.spi.index.metadata.SegmentMetadataImpl;
 import org.apache.pinot.segment.spi.loader.SegmentDirectoryLoader;
@@ -88,12 +89,12 @@ public class ImmutableSegmentLoader {
   /**
    * Loads the segment with specified IndexLoadingConfig.
    * This method modifies the segment like to convert segment format, add or remove indices.
-   * Mostly used by UT cases to add some specific index for testing purpose.
    */
   public static ImmutableSegment load(File indexDir, IndexLoadingConfig indexLoadingConfig,
-      @Nullable SegmentOperationsThrottler segmentOperationsThrottler)
+                                      @Nullable SegmentOperationsThrottler segmentOperationsThrottler,
+                                      KeyBasedCrypterCache crypterCache)
       throws Exception {
-    return load(indexDir, indexLoadingConfig, true, segmentOperationsThrottler);
+    return load(indexDir, indexLoadingConfig, true, segmentOperationsThrottler, crypterCache);
   }
 
   /**
@@ -103,7 +104,7 @@ public class ImmutableSegmentLoader {
    */
   public static ImmutableSegment load(File indexDir, IndexLoadingConfig indexLoadingConfig)
       throws Exception {
-    return load(indexDir, indexLoadingConfig, true, null);
+    return load(indexDir, indexLoadingConfig, true, null, null);
   }
 
   /**
@@ -111,10 +112,11 @@ public class ImmutableSegmentLoader {
    * This method modifies the segment like to convert segment format, add or remove indices.
    */
   public static ImmutableSegment load(File indexDir, IndexLoadingConfig indexLoadingConfig, boolean needPreprocess,
-      @Nullable SegmentOperationsThrottler segmentOperationsThrottler)
+                                      @Nullable SegmentOperationsThrottler segmentOperationsThrottler,
+                                      @Nullable KeyBasedCrypterCache crypterCache)
       throws Exception {
     return load(indexDir, indexLoadingConfig, indexLoadingConfig.getSchema(), needPreprocess,
-        segmentOperationsThrottler);
+        segmentOperationsThrottler, crypterCache);
   }
 
   /**
@@ -124,7 +126,7 @@ public class ImmutableSegmentLoader {
   public static ImmutableSegment load(File indexDir, IndexLoadingConfig indexLoadingConfig, boolean needPreprocess)
       throws Exception {
     return load(indexDir, indexLoadingConfig, indexLoadingConfig.getSchema(), needPreprocess,
-        null);
+        null, null);
   }
 
   /**
@@ -135,7 +137,7 @@ public class ImmutableSegmentLoader {
   public static ImmutableSegment load(File indexDir, IndexLoadingConfig indexLoadingConfig, @Nullable Schema schema,
       @Nullable SegmentOperationsThrottler segmentOperationsThrottler)
       throws Exception {
-    return load(indexDir, indexLoadingConfig, schema, true, segmentOperationsThrottler);
+    return load(indexDir, indexLoadingConfig, schema, true, segmentOperationsThrottler, null);
   }
 
   /**
@@ -145,7 +147,7 @@ public class ImmutableSegmentLoader {
   public static ImmutableSegment load(File indexDir, IndexLoadingConfig indexLoadingConfig, @Nullable Schema schema,
       boolean needPreprocess)
       throws Exception {
-    return load(indexDir, indexLoadingConfig, schema, needPreprocess, null);
+    return load(indexDir, indexLoadingConfig, schema, needPreprocess, null, null);
   }
 
   /**
@@ -153,7 +155,9 @@ public class ImmutableSegmentLoader {
    * modify the segment like to convert segment format, add or remove indices.
    */
   public static ImmutableSegment load(File indexDir, IndexLoadingConfig indexLoadingConfig, @Nullable Schema schema,
-      boolean needPreprocess, @Nullable SegmentOperationsThrottler segmentOperationsThrottler)
+                                      boolean needPreprocess,
+                                      @Nullable SegmentOperationsThrottler segmentOperationsThrottler,
+                                      @Nullable KeyBasedCrypterCache crypterCache)
       throws Exception {
     Preconditions.checkArgument(indexDir.isDirectory(), "Index directory: %s does not exist or is not a directory",
         indexDir);
@@ -182,7 +186,7 @@ public class ImmutableSegmentLoader {
         SegmentDirectoryLoaderRegistry.getSegmentDirectoryLoader(indexLoadingConfig.getSegmentDirectoryLoader());
     SegmentDirectory segmentDirectory = segmentLoader.load(indexDir.toURI(), segmentLoaderContext);
     try {
-      return load(segmentDirectory, indexLoadingConfig, schema);
+      return load(segmentDirectory, indexLoadingConfig, schema, crypterCache);
     } catch (Exception e) {
       LOGGER.error("Failed to load segment: {} with SegmentDirectory", segmentName, e);
       segmentDirectory.close();
@@ -226,14 +230,18 @@ public class ImmutableSegmentLoader {
   /**
    * Load the segment represented by the SegmentDirectory object to serve queries.
    */
-  public static ImmutableSegment load(SegmentDirectory segmentDirectory, IndexLoadingConfig indexLoadingConfig)
+  public static ImmutableSegment load(SegmentDirectory segmentDirectory, IndexLoadingConfig indexLoadingConfig,
+                                      @Nullable KeyBasedCrypterCache crypterCache)
       throws Exception {
-    return load(segmentDirectory, indexLoadingConfig, indexLoadingConfig.getSchema());
+    return load(segmentDirectory, indexLoadingConfig, indexLoadingConfig.getSchema(), crypterCache);
   }
 
   @Deprecated
+  /*
+   * TODO This is marked as deprecated in OSS before fork, but is used by TableDataManager. Need to investigate
+   */
   public static ImmutableSegment load(SegmentDirectory segmentDirectory, IndexLoadingConfig indexLoadingConfig,
-      @Nullable Schema schema)
+                                      @Nullable Schema schema, @Nullable KeyBasedCrypterCache crypterCache)
       throws Exception {
     SegmentMetadataImpl segmentMetadata = segmentDirectory.getSegmentMetadata();
     if (segmentMetadata.getTotalDocs() == 0) {
@@ -285,6 +293,9 @@ public class ImmutableSegmentLoader {
 
     ImmutableSegmentImpl segment =
         new ImmutableSegmentImpl(segmentDirectory, segmentMetadata, indexContainerMap, starTreeIndexContainer);
+    if (crypterCache != null) {
+      crypterCache.fillSegmentCache(segment);
+    }
     LOGGER.info("Successfully loaded segment: {} with SegmentDirectory", segmentName);
     return segment;
   }

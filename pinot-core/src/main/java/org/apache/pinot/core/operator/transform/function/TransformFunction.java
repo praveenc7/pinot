@@ -25,6 +25,7 @@ import javax.annotation.Nullable;
 import org.apache.pinot.core.operator.ColumnContext;
 import org.apache.pinot.core.operator.blocks.ValueBlock;
 import org.apache.pinot.core.operator.transform.TransformResultMetadata;
+import org.apache.pinot.core.query.request.context.QueryContext;
 import org.apache.pinot.segment.spi.index.reader.Dictionary;
 import org.roaringbitmap.RoaringBitmap;
 
@@ -50,15 +51,8 @@ public interface TransformFunction {
    */
   void init(List<TransformFunction> arguments, Map<String, ColumnContext> columnContextMap);
 
-  /**
-   * Initializes the transform function.
-   *
-   * @param arguments           Arguments for the transform function
-   * @param columnContextMap    Map from column name to context
-   * @param nullHandlingEnabled Whether this transform function handles {@code null}
-   */
   default void init(List<TransformFunction> arguments, Map<String, ColumnContext> columnContextMap,
-      boolean nullHandlingEnabled) {
+      QueryContext queryContext) {
     init(arguments, columnContextMap);
   }
 

@@ -62,6 +62,7 @@ import org.apache.pinot.segment.local.utils.SegmentLocks;
 import org.apache.pinot.segment.local.utils.SegmentOperationsThrottler;
 import org.apache.pinot.segment.local.utils.SegmentReloadSemaphore;
 import org.apache.pinot.segment.spi.SegmentMetadata;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCacheFactory;
 import org.apache.pinot.segment.spi.loader.SegmentDirectoryLoader;
 import org.apache.pinot.segment.spi.loader.SegmentDirectoryLoaderContext;
 import org.apache.pinot.segment.spi.loader.SegmentDirectoryLoaderRegistry;
@@ -107,6 +108,7 @@ public class HelixInstanceDataManager implements InstanceDataManager {
   // Cache for recently deleted tables to prevent re-creating them accidentally.
   // Key is table name with type, value is deletion time.
   protected Cache<String, Long> _recentlyDeletedTables;
+  private KeyBasedCrypterCacheFactory _keyBasedCrypterCacheFactory;
 
   private SegmentReloadSemaphore _segmentReloadSemaphore;
   private ExecutorService _segmentReloadExecutor;
@@ -121,7 +123,7 @@ public class HelixInstanceDataManager implements InstanceDataManager {
 
   @Override
   public synchronized void init(PinotConfiguration config, HelixManager helixManager, ServerMetrics serverMetrics,
-      @Nullable SegmentOperationsThrottler segmentOperationsThrottler)
+      @Nullable SegmentOperationsThrottler segmentOperationsThrottler, KeyBasedCrypterCacheFactory crypterCacheFactory)
       throws Exception {
     LOGGER.info("Initializing Helix instance data manager");
 
@@ -166,6 +168,7 @@ public class HelixInstanceDataManager implements InstanceDataManager {
     _errorCache = CacheBuilder.newBuilder().maximumSize(_instanceDataManagerConfig.getErrorCacheSize()).build();
     _recentlyDeletedTables = CacheBuilder.newBuilder()
         .expireAfterWrite(_instanceDataManagerConfig.getDeletedTablesCacheTtlMinutes(), TimeUnit.MINUTES).build();
+    _keyBasedCrypterCacheFactory = crypterCacheFactory;
   }
 
   @VisibleForTesting
@@ -327,7 +330,8 @@ public class HelixInstanceDataManager implements InstanceDataManager {
     TimestampIndexUtils.applyTimestampIndex(tableConfig, schema);
     TableDataManager tableDataManager =
         _tableDataManagerProvider.getTableDataManager(tableConfig, schema, _segmentReloadSemaphore,
-            _segmentReloadExecutor, _segmentPreloadExecutor, _errorCache, _isServerReadyToServeQueries);
+            _segmentReloadExecutor, _segmentPreloadExecutor, _errorCache, _isServerReadyToServeQueries,
+                _keyBasedCrypterCacheFactory);
     tableDataManager.start();
     LOGGER.info("Created table data manager for table: {}", tableNameWithType);
     return tableDataManager;

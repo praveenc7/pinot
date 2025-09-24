@@ -40,6 +40,7 @@ import org.apache.pinot.core.plan.maker.InstancePlanMakerImplV2;
 import org.apache.pinot.core.query.aggregation.function.AggregationFunction;
 import org.apache.pinot.core.query.aggregation.function.AggregationFunctionFactory;
 import org.apache.pinot.core.util.MemoizedClassAssociation;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCache;
 import org.apache.pinot.segment.spi.datasource.DataSource;
 import org.apache.pinot.spi.config.table.FieldConfig;
 import org.apache.pinot.spi.data.Schema;
@@ -142,6 +143,7 @@ public class QueryContext {
   private boolean _accurateGroupByWithoutOrderBy;
   // Collection of index types to skip per column
   private Map<String, Set<FieldConfig.IndexType>> _skipIndexes;
+  private KeyBasedCrypterCache _crypterCache;
 
   private QueryContext(@Nullable String tableName, @Nullable QueryContext subquery,
       List<ExpressionContext> selectExpressions, boolean distinct, List<String> aliasList,
@@ -487,6 +489,14 @@ public class QueryContext {
 
   public void setServerReturnFinalResultKeyUnpartitioned(boolean serverReturnFinalResultKeyUnpartitioned) {
     _serverReturnFinalResultKeyUnpartitioned = serverReturnFinalResultKeyUnpartitioned;
+  }
+
+  public KeyBasedCrypterCache getCrypterCache() {
+    return _crypterCache;
+  }
+
+  public void setCrypterCache(KeyBasedCrypterCache crypterCache) {
+    _crypterCache = crypterCache;
   }
 
   /**

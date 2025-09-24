@@ -100,7 +100,6 @@ public class ImmutableSegmentImpl implements ImmutableSegment {
       }
     }
   }
-
   public void enableDedup(PartitionDedupMetadataManager partitionDedupMetadataManager) {
     _partitionDedupMetadataManager = partitionDedupMetadataManager;
   }

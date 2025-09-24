@@ -38,6 +38,8 @@ import org.apache.pinot.segment.local.utils.SegmentReloadSemaphore;
 import org.apache.pinot.segment.spi.ImmutableSegment;
 import org.apache.pinot.segment.spi.IndexSegment;
 import org.apache.pinot.segment.spi.SegmentContext;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCache;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCacheFactory;
 import org.apache.pinot.spi.config.instance.InstanceDataManagerConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.data.Schema;
@@ -53,10 +55,11 @@ public interface TableDataManager {
    * Initializes the table data manager. Should be called only once and before calling any other method.
    */
   void init(InstanceDataManagerConfig instanceDataManagerConfig, HelixManager helixManager, SegmentLocks segmentLocks,
-      TableConfig tableConfig, Schema schema, SegmentReloadSemaphore segmentReloadSemaphore,
-      ExecutorService segmentReloadExecutor, @Nullable ExecutorService segmentPreloadExecutor,
-      @Nullable Cache<Pair<String, String>, SegmentErrorInfo> errorCache,
-      @Nullable SegmentOperationsThrottler segmentOperationsThrottler);
+            TableConfig tableConfig, Schema schema, SegmentReloadSemaphore segmentReloadSemaphore,
+            ExecutorService segmentReloadExecutor, @Nullable ExecutorService segmentPreloadExecutor,
+            @Nullable Cache<Pair<String, String>, SegmentErrorInfo> errorCache,
+            @Nullable SegmentOperationsThrottler segmentOperationsThrottler,
+            KeyBasedCrypterCacheFactory crypterCacheFactory);
 
   /**
    * Returns the instance id of the server.
@@ -346,4 +349,6 @@ public interface TableDataManager {
    * @return List of {@link StaleSegment} with segment names and reason why it is stale
    */
   List<StaleSegment> getStaleSegments();
+
+  KeyBasedCrypterCache getCrypterCache();
 }

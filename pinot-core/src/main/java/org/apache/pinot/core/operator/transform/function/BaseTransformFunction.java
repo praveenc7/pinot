@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 import org.apache.pinot.core.operator.ColumnContext;
 import org.apache.pinot.core.operator.blocks.ValueBlock;
 import org.apache.pinot.core.operator.transform.TransformResultMetadata;
+import org.apache.pinot.core.query.request.context.QueryContext;
 import org.apache.pinot.segment.spi.index.reader.Dictionary;
 import org.apache.pinot.spi.data.FieldSpec.DataType;
 import org.apache.pinot.spi.utils.ArrayCopyUtils;
@@ -116,9 +117,9 @@ public abstract class BaseTransformFunction implements TransformFunction {
 
   @Override
   public void init(List<TransformFunction> arguments, Map<String, ColumnContext> columnContextMap,
-      boolean nullHandlingEnabled) {
+      QueryContext queryContext) {
     init(arguments, columnContextMap);
-    _nullHandlingEnabled = nullHandlingEnabled;
+    _nullHandlingEnabled = queryContext.isNullHandlingEnabled();
   }
 
   @Override

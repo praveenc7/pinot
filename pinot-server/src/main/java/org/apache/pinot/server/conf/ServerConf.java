@@ -21,6 +21,7 @@ package org.apache.pinot.server.conf;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import org.apache.pinot.segment.spi.crypt.DefaultKeyBasedCrypterCacheFactory;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.spi.utils.CommonConstants.Helix;
@@ -132,6 +133,11 @@ public class ServerConf {
    */
   public List<String> getTransformFunctions() {
     return _serverConf.getProperty(CONFIG_OF_TRANSFORM_FUNCTIONS, Collections.emptyList());
+  }
+
+  public String getCrypterCacheFactoryName() {
+    return _serverConf.getProperty(CONFIG_OF_CRYPTER_CACHE_FACTORY_CLASS_NAME,
+            DefaultKeyBasedCrypterCacheFactory.class.getName());
   }
 
   public boolean emitTableLevelMetrics() {

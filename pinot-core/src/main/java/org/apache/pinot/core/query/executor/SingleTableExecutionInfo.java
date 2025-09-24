@@ -44,6 +44,7 @@ import org.apache.pinot.segment.spi.IndexSegment;
 import org.apache.pinot.segment.spi.MutableSegment;
 import org.apache.pinot.segment.spi.SegmentContext;
 import org.apache.pinot.segment.spi.SegmentMetadata;
+import org.apache.pinot.segment.spi.crypt.KeyBasedCrypterCache;
 import org.apache.pinot.spi.config.table.UpsertConfig;
 import org.apache.pinot.spi.data.Schema;
 import org.slf4j.Logger;
@@ -60,6 +61,7 @@ public class SingleTableExecutionInfo implements TableExecutionInfo {
   private final List<String> _segmentsToQuery;
   private final List<String> _optionalSegments;
   private final List<String> _notAcquiredSegments;
+  private final KeyBasedCrypterCache _crypterCache;
 
   public static SingleTableExecutionInfo create(InstanceDataManager instanceDataManager, String tableNameWithType,
       List<String> segmentsToQuery, List<String> optionalSegments, QueryContext queryContext)
@@ -68,6 +70,7 @@ public class SingleTableExecutionInfo implements TableExecutionInfo {
     if (tableDataManager == null) {
       throw new TableNotFoundException(tableNameWithType);
     }
+    KeyBasedCrypterCache crypterCache = tableDataManager.getCrypterCache();
 
     List<String> notAcquiredSegments = new ArrayList<>();
     List<SegmentDataManager> segmentDataManagers;
@@ -125,7 +128,7 @@ public class SingleTableExecutionInfo implements TableExecutionInfo {
     }
 
     return new SingleTableExecutionInfo(tableDataManager, segmentDataManagers, indexSegments, providedSegmentContexts,
-        segmentsToQuery, optionalSegments, notAcquiredSegments);
+        segmentsToQuery, optionalSegments, notAcquiredSegments, crypterCache);
   }
 
   private static boolean isUpsertTable(TableDataManager tableDataManager) {
@@ -142,7 +145,8 @@ public class SingleTableExecutionInfo implements TableExecutionInfo {
 
   private SingleTableExecutionInfo(TableDataManager tableDataManager, List<SegmentDataManager> segmentDataManagers,
       List<IndexSegment> indexSegments, Map<IndexSegment, SegmentContext> providedSegmentContexts,
-      List<String> segmentsToQuery, List<String> optionalSegments, List<String> notAcquiredSegments) {
+      List<String> segmentsToQuery, List<String> optionalSegments, List<String> notAcquiredSegments,
+                                   KeyBasedCrypterCache crypterCache) {
     _tableDataManager = tableDataManager;
     _segmentDataManagers = segmentDataManagers;
     _indexSegments = indexSegments;
@@ -150,6 +154,7 @@ public class SingleTableExecutionInfo implements TableExecutionInfo {
     _segmentsToQuery = segmentsToQuery;
     _optionalSegments = optionalSegments;
     _notAcquiredSegments = notAcquiredSegments;
+    _crypterCache = crypterCache;
   }
 
   public TableDataManager getTableDataManager() {
@@ -283,6 +288,7 @@ public class SingleTableExecutionInfo implements TableExecutionInfo {
     int numSelectedSegments = selectedSegments.size();
     LOGGER.debug("Matched {} segments after pruning", numSelectedSegments);
     List<SegmentContext> selectedSegmentContexts;
+    queryContext.setCrypterCache(_tableDataManager.getCrypterCache());
     if (providedSegmentContexts == null) {
       selectedSegmentContexts = getSegmentContexts(selectedSegments, queryContext.getQueryOptions());
     } else {

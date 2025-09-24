@@ -992,6 +992,8 @@ public class CommonConstants {
     /* End of query executor related configs */
 
     public static final String CONFIG_OF_TRANSFORM_FUNCTIONS = "pinot.server.transforms";
+    public static final String CONFIG_OF_CRYPTER_CACHE_FACTORY_CLASS_NAME =
+            "pinot.server.crypter.cache.factory.class.name";
     public static final String CONFIG_OF_SERVER_QUERY_REWRITER_CLASS_NAMES = "pinot.server.query.rewriter.class.names";
     public static final String CONFIG_OF_SERVER_QUERY_REGEX_CLASS = "pinot.server.query.regex.class";
     public static final String DEFAULT_SERVER_QUERY_REGEX_CLASS = "JAVA_UTIL";

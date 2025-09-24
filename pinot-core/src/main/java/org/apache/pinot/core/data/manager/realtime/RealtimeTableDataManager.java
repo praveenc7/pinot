@@ -841,7 +841,9 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
     // Get a new index loading config with latest table config and schema to load the segment
     IndexLoadingConfig indexLoadingConfig = fetchIndexLoadingConfig();
     indexLoadingConfig.setSegmentTier(zkMetadata.getTier());
-    addSegment(ImmutableSegmentLoader.load(indexDir, indexLoadingConfig, _segmentOperationsThrottler), zkMetadata);
+    // this call should update the crypter cache if we suopport realtime
+    addSegment(ImmutableSegmentLoader.load(indexDir, indexLoadingConfig, _segmentOperationsThrottler, null),
+            zkMetadata);
     _logger.info("Downloaded and replaced CONSUMING segment: {}", segmentName);
   }
 
@@ -864,8 +866,9 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
     File indexDir = new File(_indexDir, segmentName);
     // Get a new index loading config with latest table config and schema to load the segment
     IndexLoadingConfig indexLoadingConfig = fetchIndexLoadingConfig();
+    // this call should update the crypter cache if we suopport realtime
     ImmutableSegment immutableSegment =
-        ImmutableSegmentLoader.load(indexDir, indexLoadingConfig, _segmentOperationsThrottler);
+        ImmutableSegmentLoader.load(indexDir, indexLoadingConfig, _segmentOperationsThrottler, null);
 
     addSegment(immutableSegment, zkMetadata);
     _logger.info("Replaced CONSUMING segment: {}", segmentName);
