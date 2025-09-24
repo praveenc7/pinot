@@ -16,12 +16,26 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pinot.spi.metrics;
+package org.apache.pinot.plugin.metrics.compound;
+
+import java.util.List;
+import org.apache.pinot.spi.metrics.PinotMetricReporter;
+
 
 /**
- * A reporter which exposes application metric as JMX MBeans in Pinot.
+ * CompoundPinotMetricReporter delegates metric reporting to each of the reporters in the list.
  */
-public interface PinotJmxReporter {
+public class CompoundPinotMetricReporter implements PinotMetricReporter {
+  private final List<PinotMetricReporter> _reporters;
 
-  void start();
+  public CompoundPinotMetricReporter(List<PinotMetricReporter> reporters) {
+    _reporters = reporters;
+  }
+
+  @Override
+  public void start() {
+    for (PinotMetricReporter reporter : _reporters) {
+      reporter.start();
+    }
+  }
 }

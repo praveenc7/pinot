@@ -16,23 +16,17 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pinot.plugin.metrics.compound;
+package org.apache.pinot.plugin.metrics.opentelemetry;
 
-import java.util.List;
-import org.apache.pinot.spi.metrics.PinotJmxReporter;
+import org.apache.pinot.spi.metrics.PinotMetric;
 
+/**
+ * OpenTelemetryMetricsRegistryListener is the listener interface for listening to the metric addition and removal.
+ * It is used to allow Pinot Core to register callbacks when a metric is added or removed.
+ */
+public interface OpenTelemetryMetricsRegistryListener {
 
-public class CompoundPinotJmxReporter implements PinotJmxReporter {
-  private final List<PinotJmxReporter> _reporters;
+  void onMetricAdded(OpenTelemetryMetricName name, PinotMetric metric);
 
-  public CompoundPinotJmxReporter(List<PinotJmxReporter> reporters) {
-    _reporters = reporters;
-  }
-
-  @Override
-  public void start() {
-    for (PinotJmxReporter reporter : _reporters) {
-      reporter.start();
-    }
-  }
+  void onMetricRemoved(OpenTelemetryMetricName name);
 }

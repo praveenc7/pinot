@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.function.Function;
@@ -33,8 +34,8 @@ import org.apache.pinot.spi.annotations.metrics.MetricsFactory;
 import org.apache.pinot.spi.annotations.metrics.PinotMetricsFactory;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.metrics.PinotGauge;
-import org.apache.pinot.spi.metrics.PinotJmxReporter;
 import org.apache.pinot.spi.metrics.PinotMetricName;
+import org.apache.pinot.spi.metrics.PinotMetricReporter;
 import org.apache.pinot.spi.metrics.PinotMetricUtils;
 import org.apache.pinot.spi.metrics.PinotMetricsRegistry;
 import org.apache.pinot.spi.plugin.PluginManager;
@@ -47,11 +48,14 @@ import org.slf4j.LoggerFactory;
  * When it is created, a bunch of factories are used as sub-factories. Whenever a metric is registered in this factory,
  * it actually registers the metric in all the sub-factories.
  *
- * Probably the main reason to use this metrics is to compare the differences between one metric registry and another.
- * For example, Yammer and Dropwizard provide their own timer, but each one provides their own metrics on their timers.
- * Most metrics are the same (p50, p90, p95, etc) but some other may be different.
+ * The main use cases for this metrics registry including:
+ * - to progressively migrate from one metrics plugin to another. In production there must be a lot of dashboards
+ *   and alerts set up based on old metrics, it needs dual reporting for some time to allow progressive migration.
+ * - to compare the differences between different metrics registries. for example, Yammer and Dropwizard provide their
+ *   own timer, but each one provides their own metrics on their timers. Most metrics are the same (p50, p90, p95, etc)
+ *   but some other may be different.
  *
- * Alternative it could be used in production, but it is important to make sure that the JMX MBeans produced by each
+ * If both Yammer and Dropwizard are used, it is important to make sure that the JMX MBeans produced by each
  * sub-registry are different. Otherwise the reported value is undetermined.
  *
  * In order to use this factory, you have to set the following properties in Pinot configuration:
@@ -114,7 +118,8 @@ public class CompoundPinotMetricsFactory implements PinotMetricsFactory {
     Algorithm algorithm = Algorithm.valueOf(algorithmName.toUpperCase(Locale.US));
     _factories = algorithm.streamInstances(metricsConfiguration)
         .filter(factory -> allIgnored.stream().noneMatch(ignored -> ignored.isAssignableFrom(factory.getClass())))
-        .filter(factory -> CompoundPinotMetricsFactory.class.isAssignableFrom(factory.getClass()))
+        // remove the compound factory itself from the list to avoid infinite recursion
+        .filter(factory -> !CompoundPinotMetricsFactory.class.isAssignableFrom(factory.getClass()))
         .collect(Collectors.toList());
 
     if (_factories.isEmpty()) {
@@ -136,38 +141,37 @@ public class CompoundPinotMetricsFactory implements PinotMetricsFactory {
   }
 
   @Override
-  public PinotMetricName makePinotMetricName(Class<?> klass, String name) {
+  public PinotMetricName makePinotMetricName(Class<?> klass, String fullName, String simplifiedName,
+      Map<String, String> attributes) {
     List<PinotMetricName> names = _factories.stream()
-        .map(factory -> factory.makePinotMetricName(klass, name))
+        .map(factory -> factory.makePinotMetricName(klass, fullName, simplifiedName, attributes))
         .collect(Collectors.toList());
-    return new CompoundPinotMetricName(name, names);
+    return new CompoundPinotMetricName(fullName, simplifiedName, attributes, names);
   }
 
-  @Override
-  public <T> PinotGauge<T> makePinotGauge(Function<Void, T> condition) {
+  public <T> PinotGauge<T> makePinotGauge(PinotMetricName pinotMetricName, Function<Void, T> condition) {
     List<PinotGauge<T>> gauges = _factories.stream()
-        .map(factory -> factory.makePinotGauge(condition))
+        .map(factory -> factory.makePinotGauge(pinotMetricName, condition))
         .collect(Collectors.toList());
     return new CompoundPinotGauge<T>(gauges);
   }
 
-  @Override
-  public PinotJmxReporter makePinotJmxReporter(PinotMetricsRegistry metricsRegistry) {
+  public PinotMetricReporter makePinotMetricReporter(PinotMetricsRegistry metricsRegistry) {
     CompoundPinotMetricRegistry registry = (CompoundPinotMetricRegistry) metricsRegistry;
     List<PinotMetricsRegistry> subRegistries = registry.getRegistries();
     Preconditions.checkState(subRegistries.size() == _factories.size(),
         "Number of registries ({}) should be the same than the number of factories ({})",
         subRegistries.size(), _factories.size());
 
-    ArrayList<PinotJmxReporter> subJmx = new ArrayList<>(_factories.size());
+    ArrayList<PinotMetricReporter> subReporter = new ArrayList<>(_factories.size());
     for (int i = 0; i < _factories.size(); i++) {
       PinotMetricsFactory subFactory = _factories.get(i);
       PinotMetricsRegistry subRegistry = subRegistries.get(i);
 
-      subJmx.add(subFactory.makePinotJmxReporter(subRegistry));
+      subReporter.add(subFactory.makePinotMetricReporter(subRegistry));
     }
 
-    return new CompoundPinotJmxReporter(subJmx);
+    return new CompoundPinotMetricReporter(subReporter);
   }
 
   @Override

@@ -21,6 +21,7 @@ package org.apache.pinot.broker.requesthandler;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import java.net.URI;
 import java.util.ArrayList;
@@ -64,6 +65,7 @@ import org.apache.pinot.common.metrics.BrokerMeter;
 import org.apache.pinot.common.metrics.BrokerMetrics;
 import org.apache.pinot.common.metrics.BrokerQueryPhase;
 import org.apache.pinot.common.metrics.BrokerTimer;
+import org.apache.pinot.common.metrics.MetricAttributeConstants;
 import org.apache.pinot.common.request.BrokerRequest;
 import org.apache.pinot.common.request.DataSource;
 import org.apache.pinot.common.request.Expression;
@@ -810,8 +812,15 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
     }
 
     for (int group : brokerResponse.getReplicaGroups()) {
-      _brokerMetrics.addMeteredValue(BrokerMeter.REPLICA_QUERIES, 1,
-          BrokerMetrics.getTagForPreferredGroup(sqlNodeAndOptions.getOptions()), String.valueOf(group));
+      String replicaGroupTag = BrokerMetrics.getTagForPreferredGroup(sqlNodeAndOptions.getOptions());
+      String replicaGroupId = String.valueOf(group);
+
+      List<String> tags = ImmutableList.of(replicaGroupTag, replicaGroupId);
+      Map<String, String> attributes = ImmutableMap.of(
+          MetricAttributeConstants.REPLICA_GROUP_TAG, replicaGroupTag,
+          MetricAttributeConstants.REPLICA_GROUP_ID, replicaGroupId
+      );
+      _brokerMetrics.addMeteredValue(BrokerMeter.REPLICA_QUERIES, 1, tags, attributes);
     }
 
     // Log query and stats

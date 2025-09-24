@@ -116,7 +116,7 @@ public class PinotMetricUtils {
   private static void initializeMetrics(PinotConfiguration configuration) {
     synchronized (PinotMetricUtils.class) {
       List<String> listenerClassNames = configuration.getProperty("metricsRegistryRegistrationListeners",
-          Arrays.asList(JmxReporterMetricsRegistryRegistrationListener.class.getName()));
+          Arrays.asList(MetricReporterRegistryRegistrationListener.class.getName()));
 
       // Build each listener using their default constructor and add them
       for (String listenerClassName : listenerClassNames) {
@@ -215,12 +215,13 @@ public class PinotMetricUtils {
     return _pinotMetricsFactory.getPinotMetricsRegistry();
   }
 
-  public static PinotMetricName makePinotMetricName(Class<?> klass, String name) {
-    return _pinotMetricsFactory.makePinotMetricName(klass, name);
+  public static PinotMetricName makePinotMetricName(Class<?> klass, String fulName,
+      String simplifiedName, Map<String, String> attributes) {
+    return _pinotMetricsFactory.makePinotMetricName(klass, fulName, simplifiedName, attributes);
   }
 
-  public static <T> PinotGauge<T> makePinotGauge(Function<Void, T> condition) {
-    return _pinotMetricsFactory.makePinotGauge(condition);
+  public static <T> PinotGauge<T> makePinotGauge(PinotMetricName pinotMetricName, Function<Void, T> valueSupplier) {
+    return _pinotMetricsFactory.makePinotGauge(pinotMetricName, valueSupplier);
   }
 
   public static <T> PinotGauge<T> makeGauge(PinotMetricsRegistry registry, PinotMetricName name, PinotGauge<T> gauge) {
@@ -241,7 +242,7 @@ public class PinotMetricUtils {
     registry.removeMetric(name);
   }
 
-  public static PinotJmxReporter makePinotJmxReporter(PinotMetricsRegistry metricsRegistry) {
-    return _pinotMetricsFactory.makePinotJmxReporter(metricsRegistry);
+  public static PinotMetricReporter makePinotMetricReporter(PinotMetricsRegistry metricsRegistry) {
+    return _pinotMetricsFactory.makePinotMetricReporter(metricsRegistry);
   }
 }

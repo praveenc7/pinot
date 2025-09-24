@@ -49,11 +49,15 @@ public class CommonConstants {
   public static final String CONFIG_OF_BROKER_EVENT_LISTENER_CLASS_NAME = "factory.className";
   public static final String CONFIG_OF_REQUEST_CONTEXT_TRACKED_HEADER_KEYS = "request.context.tracked.header.keys";
   public static final String DEFAULT_METRICS_FACTORY_CLASS_NAME =
-      //"org.apache.pinot.plugin.metrics.compound.CompoundPinotMetricsFactory";
-      "org.apache.pinot.plugin.metrics.yammer.YammerMetricsFactory";
-  //"org.apache.pinot.plugin.metrics.dropwizard.DropwizardMetricsFactory";
+      // "org.apache.pinot.plugin.metrics.compound.CompoundPinotMetricsFactory";
+      // "org.apache.pinot.plugin.metrics.opentelemetry.OpenTelemetryMetricsFactory";
+       "org.apache.pinot.plugin.metrics.yammer.YammerMetricsFactory";
+      // "org.apache.pinot.plugin.metrics.dropwizard.DropwizardMetricsFactory";
   public static final String DEFAULT_BROKER_EVENT_LISTENER_CLASS_NAME =
       "org.apache.pinot.spi.eventlistener.query.NoOpBrokerQueryEventListener";
+
+  // Additional headers to pass while creating OpenTelemetry exporter
+  public static final String OTEL_EXPORTER_OTLP_METRICS_HEADERS = "otel.exporter.otlp.metrics.headers";
 
   public static final String SWAGGER_AUTHORIZATION_KEY = "oauth";
   public static final String SWAGGER_POM_PROPERTIES_PATH = "META-INF/maven/org.webjars/swagger-ui/pom.properties";

@@ -18,13 +18,16 @@
  */
 package org.apache.pinot.spi.metrics;
 
+import java.util.Map;
+
 /**
  * Metric Name in Pinot.
  */
 public interface PinotMetricName {
 
   /**
-   * Returns the actual metric name.
+   * Returns the actual metric name. Which is the full name with attributes being stringified in it. This is usually
+   * used by metric plugins that do not support attributes natively such as Yammer and Dropwizard.
    */
   Object getMetricName();
 
@@ -46,4 +49,26 @@ public interface PinotMetricName {
    * This could be used to print out the actual metrics name instead of the memory address under this wrapper.
    */
   String toString();
+
+  /**
+   * Returns the simplified metric name that stripped off the attributes. This is usually used by metric plugins that
+   * support MDM (multi-dimensional metrics) natively such as OpenTelemetry. Please refer to the following docs for more
+   * details about MDM and metric/dimension naming conventions:
+   * @see <a href="https://super-dollop-preygyr.pages.github.io/docs/opentelemetry/metrics/core-concepts">
+   *   OpenTelemetry core concepts</a>
+   * @see <a href="https://docs.google.com/document/d/12ZK8ab5zz9tSXZJoHP0e5Mf3Nbz4MOsEu81gdaq-SoA">
+   *   LinkedIn MDM metric/dimension naming conventions</a>
+   */
+  String getSimplifiedMetricName();
+
+  /**
+   * Returns the attributes associated with this metric name. This is usually used by metric plugins that
+   * support MDM (multi-dimensional metrics) natively such as OpenTelemetry. Please refer to the following docs for more
+   * details about MDM and metric/dimension naming conventions:
+   * @see <a href="https://super-dollop-preygyr.pages.github.io/docs/opentelemetry/metrics/core-concepts">
+   *   OpenTelemetry core concepts</a>
+   * @see <a href="https://docs.google.com/document/d/12ZK8ab5zz9tSXZJoHP0e5Mf3Nbz4MOsEu81gdaq-SoA">
+   *   LinkedIn MDM metric/dimension naming conventions</a>
+   */
+  Map<String, String> getAttributes();
 }

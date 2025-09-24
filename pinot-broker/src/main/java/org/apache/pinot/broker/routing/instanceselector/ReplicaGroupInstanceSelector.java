@@ -18,6 +18,8 @@
  */
 package org.apache.pinot.broker.routing.instanceselector;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -32,6 +34,7 @@ import org.apache.pinot.broker.routing.adaptiveserverselector.AdaptiveServerSele
 import org.apache.pinot.broker.routing.adaptiveserverselector.ServerSelectionContext;
 import org.apache.pinot.common.metrics.BrokerMeter;
 import org.apache.pinot.common.metrics.BrokerMetrics;
+import org.apache.pinot.common.metrics.MetricAttributeConstants;
 import org.apache.pinot.common.utils.HashUtil;
 import org.apache.pinot.common.utils.config.QueryOptionsUtils;
 
@@ -135,9 +138,17 @@ public class ReplicaGroupInstanceSelector extends BaseInstanceSelector {
       }
       replicaOffset = (replicaOffset + 1) % numReplicaGroups;
     }
+
     for (Map.Entry<Integer, Integer> entry : replicaGroupToSegmentCount.entrySet()) {
-      _brokerMetrics.addMeteredValue(BrokerMeter.REPLICA_SEG_QUERIES, entry.getValue(),
-          BrokerMetrics.getTagForPreferredGroup(ctx.getQueryOptions()), String.valueOf(entry.getKey()));
+      String replicaGroupTag = BrokerMetrics.getTagForPreferredGroup(ctx.getQueryOptions());
+      String replicaGroupId = String.valueOf(entry.getKey());
+      List<String> tags = ImmutableList.of(replicaGroupTag, replicaGroupId);
+      Map<String, String> attributes = ImmutableMap.of(
+          MetricAttributeConstants.REPLICA_GROUP_TAG, replicaGroupTag,
+          MetricAttributeConstants.REPLICA_GROUP_ID, replicaGroupId
+      );
+
+      _brokerMetrics.addMeteredValue(BrokerMeter.REPLICA_SEG_QUERIES, entry.getValue(), tags, attributes);
     }
     return Pair.of(segmentToSelectedInstanceMap, optionalSegmentToInstanceMap);
   }
@@ -181,8 +192,14 @@ public class ReplicaGroupInstanceSelector extends BaseInstanceSelector {
       }
     }
     for (Map.Entry<Integer, Integer> entry : replicaGroupToSegmentCount.entrySet()) {
-      _brokerMetrics.addMeteredValue(BrokerMeter.REPLICA_SEG_QUERIES, entry.getValue(),
-          BrokerMetrics.getTagForPreferredGroup(ctx.getQueryOptions()), String.valueOf(entry.getKey()));
+      String replicaGroupTag = BrokerMetrics.getTagForPreferredGroup(ctx.getQueryOptions());
+      String replicaGroupId = String.valueOf(entry.getKey());
+      List<String> tags = ImmutableList.of(replicaGroupTag, replicaGroupId);
+      Map<String, String> attributes = ImmutableMap.of(
+          MetricAttributeConstants.REPLICA_GROUP_TAG, replicaGroupTag,
+          MetricAttributeConstants.REPLICA_GROUP_ID, replicaGroupId
+      );
+      _brokerMetrics.addMeteredValue(BrokerMeter.REPLICA_SEG_QUERIES, entry.getValue(), tags, attributes);
     }
     return Pair.of(segmentToSelectedInstanceMap, optionalSegmentToInstanceMap);
   }

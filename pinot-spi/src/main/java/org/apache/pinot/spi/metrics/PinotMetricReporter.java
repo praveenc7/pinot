@@ -18,21 +18,9 @@
  */
 package org.apache.pinot.spi.metrics;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-
 /**
- * Adapter that causes metrics from a metric registry to be published to JMX.
- *
+ * {@link PinotMetricReporter} which exposes/reports Pinot metrics to external monitoring systems.
  */
-public class JmxReporterMetricsRegistryRegistrationListener implements MetricsRegistryRegistrationListener {
-  private static final Logger LOGGER = LoggerFactory.getLogger(JmxReporterMetricsRegistryRegistrationListener.class);
-
-  @Override
-  public void onMetricsRegistryRegistered(PinotMetricsRegistry metricsRegistry) {
-    LOGGER.info("Registering JmxReporterMetricsRegistryRegistrationListener");
-    PinotMetricUtils.makePinotJmxReporter(metricsRegistry).start();
-    LOGGER.info("Number of metrics in metricsRegistry: {}", metricsRegistry.allMetrics().size());
-  }
+public interface PinotMetricReporter {
+  void start();
 }
