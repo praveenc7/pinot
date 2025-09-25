@@ -20,6 +20,7 @@ package org.apache.pinot.spi.metrics;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
 import java.lang.reflect.Constructor;
 import java.util.Arrays;
 import java.util.Collections;
@@ -215,9 +216,20 @@ public class PinotMetricUtils {
     return _pinotMetricsFactory.getPinotMetricsRegistry();
   }
 
-  public static PinotMetricName makePinotMetricName(Class<?> klass, String fulName,
+  /**
+   * Make a PinotMetricName for a simple (or global) metric that has no attributes, the simplifiedName will be the same
+   * as the fullName.
+   */
+  public static PinotMetricName makePinotMetricName(Class<?> klass, String fullName) {
+    return makePinotMetricName(klass, fullName, fullName, ImmutableMap.of());
+  }
+
+  /**
+   * Make a PinotMetricName for a metric with attributes. Caller has to provide both fullName and simplifiedName.
+   */
+  public static PinotMetricName makePinotMetricName(Class<?> klass, String fullName,
       String simplifiedName, Map<String, String> attributes) {
-    return _pinotMetricsFactory.makePinotMetricName(klass, fulName, simplifiedName, attributes);
+    return _pinotMetricsFactory.makePinotMetricName(klass, fullName, simplifiedName, attributes);
   }
 
   public static <T> PinotGauge<T> makePinotGauge(PinotMetricName pinotMetricName, Function<Void, T> valueSupplier) {
