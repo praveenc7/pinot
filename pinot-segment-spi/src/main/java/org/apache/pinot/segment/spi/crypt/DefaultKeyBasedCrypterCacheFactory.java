@@ -18,7 +18,7 @@
  */
 package org.apache.pinot.segment.spi.crypt;
 
-import java.util.List;
+import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.env.PinotConfiguration;
 
 public class DefaultKeyBasedCrypterCacheFactory implements KeyBasedCrypterCacheFactory {
@@ -27,7 +27,9 @@ public class DefaultKeyBasedCrypterCacheFactory implements KeyBasedCrypterCacheF
     }
 
     @Override
-    public KeyBasedCrypterCache create(String encryptionKeyColumnName, List<String> encryptedColumnNames) {
-        return new DefaultKeyBasedCrypterCache();
+    public KeyBasedCrypterCache create(TableConfig tableConfig) {
+        KeyBasedCrypterCache crypterCache = new DefaultKeyBasedCrypterCache();
+        crypterCache.init(tableConfig);
+        return crypterCache;
     }
 }

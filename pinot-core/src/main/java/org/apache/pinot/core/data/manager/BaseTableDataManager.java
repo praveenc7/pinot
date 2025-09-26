@@ -242,8 +242,7 @@ public abstract class BaseTableDataManager implements TableDataManager {
     }
     _logger = LoggerFactory.getLogger(_tableNameWithType + "-" + getClass().getSimpleName());
     if (TableConfigUtils.hasEarEnabled(tableConfig)) {
-      _crypterCache = _crypterCacheFactory.create(TableConfigUtils.getEncryptionKeyColumnName(tableConfig),
-              TableConfigUtils.getEncryptedColumnNames(tableConfig));
+      _crypterCache = _crypterCacheFactory.create(tableConfig);
     }
 
     doInit();

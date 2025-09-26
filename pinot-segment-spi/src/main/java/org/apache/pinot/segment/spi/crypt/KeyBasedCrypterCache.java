@@ -18,23 +18,34 @@
  */
 package org.apache.pinot.segment.spi.crypt;
 
-import java.util.List;
 import org.apache.pinot.segment.spi.ImmutableSegment;
+import org.apache.pinot.spi.config.table.TableConfig;
 
-public interface KeyBasedCrypterCache<K, V> {
+/**
+ * Objects implementing this interface
+ * - Maintain a cache that maps KeyLineageUrns to a pre-constructed crypter object that can be invoked to decrypt
+ *   a column value.
+ * - Provide a method to update the cache while a segment is being loaded.
+ * - Provide a method to get a crypter for a specific key lineage urn.
+ *
+ * @note: We dont have a method to call when segments are unloaded. This is on purpose. At least initially,
+ * it is ok to just restart the servers. Over time (and depending on usage of this feature), we may need methots
+ * to clear the cache, etc.
+ * @param <T> represents the types of crypter objects that can be returned by getCrypter.
+ */
+public interface KeyBasedCrypterCache<T> {
     /**
-     * TODO include the encryption scheme (could be different for each encrypted column)
-     * @param encryptionKeyColumnName
-     * @param encryptedColumnNames
+     * @param tableConfig so that the cache can pick up the column names, encryption type, etc.
      */
-    void init(String encryptionKeyColumnName, List<String> encryptedColumnNames);
+    void init(TableConfig tableConfig);
 
     /**
      *
-     * @param key
-     * @return
+     * @param keyLineageUrn is the KeyLieageUrn returned by the KMS when encrytion key is created.
+     * @return the crypter. The type of the crypter is TBD, but it should be able to decrypt any encrypted column of
+     *          that row.
      */
-    V getCrypter(K key);
+    T getCrypter(String keyLineageUrn);
 
     /**
      * Segments can be loaded in parallel. In general, when this method returns, it implies that the all the values
@@ -45,7 +56,7 @@ public interface KeyBasedCrypterCache<K, V> {
      *
      * TODO Consider if blocking the segment load will be any better.
      *
-     * @param segment
+     * @param segment A segment that is being loaded or replaced. The data is available in the segment.
      */
     void fillSegmentCache(ImmutableSegment segment);
 }

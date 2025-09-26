@@ -18,16 +18,16 @@
  */
 package org.apache.pinot.segment.spi.crypt;
 
-import java.util.List;
 import org.apache.pinot.segment.spi.ImmutableSegment;
+import org.apache.pinot.spi.config.table.TableConfig;
 
-public class DefaultKeyBasedCrypterCache implements KeyBasedCrypterCache<Long, Object> {
+public class DefaultKeyBasedCrypterCache implements KeyBasedCrypterCache<Object> {
     @Override
-    public void init(String encryptionKeyColumnName, List encryptedColumnNames) {
+    public void init(TableConfig tableConfig) {
     }
 
     @Override
-    public Object getCrypter(Long key) {
+    public Object getCrypter(String keyLineageUrn) {
         return null;
     }
 

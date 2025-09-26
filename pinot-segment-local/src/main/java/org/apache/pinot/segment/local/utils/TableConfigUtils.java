@@ -1486,6 +1486,11 @@ public final class TableConfigUtils {
     return null;
   }
 
+  public static String getKeyLineageUrnColumn(TableConfig tableConfig) {
+    Preconditions.checkArgument(hasEarEnabled(tableConfig));
+    return null;
+  }
+
   public static Map<String, DataType> getEncryptedColumns(TableConfig tableConfig) {
     Preconditions.checkArgument(hasEarEnabled(tableConfig));
     return null;
