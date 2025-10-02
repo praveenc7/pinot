@@ -94,6 +94,8 @@ import org.apache.pinot.controller.cursors.ResponseStoreCleaner;
 import org.apache.pinot.controller.helix.RealtimeConsumerMonitor;
 import org.apache.pinot.controller.helix.SegmentStatusChecker;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
+import org.apache.pinot.controller.helix.core.assignment.instance.TenantInstancePartitionGenerator;
+import org.apache.pinot.controller.helix.core.assignment.instance.TenantInstancePartitionGeneratorFactory;
 import org.apache.pinot.controller.helix.core.cleanup.StaleInstancesCleanupTask;
 import org.apache.pinot.controller.helix.core.minion.PinotHelixTaskResourceManager;
 import org.apache.pinot.controller.helix.core.minion.PinotTaskManager;
@@ -207,6 +209,7 @@ public abstract class BaseControllerStarter implements ServiceStartable {
   protected TaskMetricsEmitter _taskMetricsEmitter;
   protected PoolingHttpClientConnectionManager _connectionManager;
   protected TenantRebalancer _tenantRebalancer;
+  protected TenantInstancePartitionGenerator _tenantInstancePartitionGenerator;
   // This executor should be used by all code paths for user initiated rebalances, so that the controller config
   // CONTROLLER_EXECUTOR_REBALANCE_NUM_THREADS is honored.
   protected ExecutorService _rebalancerExecutorService;
@@ -564,6 +567,10 @@ public abstract class BaseControllerStarter implements ServiceStartable {
     _tenantRebalancer =
         new DefaultTenantRebalancer(_tableRebalanceManager, _helixResourceManager, _rebalancerExecutorService);
 
+    // Setup TenantInstancePartitionGenerator
+    _tenantInstancePartitionGenerator =
+        TenantInstancePartitionGeneratorFactory.getInstance(_config, _helixResourceManager);
+
     // Setting up periodic tasks
     List<PeriodicTask> controllerPeriodicTasks = setupControllerPeriodicTasks();
     LOGGER.info("Init controller periodic tasks scheduler");
@@ -614,6 +621,7 @@ public abstract class BaseControllerStarter implements ServiceStartable {
         bind(_sqlQueryExecutor).to(SqlQueryExecutor.class);
         bind(_pinotLLCRealtimeSegmentManager).to(PinotLLCRealtimeSegmentManager.class);
         bind(_tenantRebalancer).to(TenantRebalancer.class);
+        bind(_tenantInstancePartitionGenerator).to(TenantInstancePartitionGenerator.class);
         bind(_tableSizeReader).to(TableSizeReader.class);
         bind(_storageQuotaChecker).to(StorageQuotaChecker.class);
         bind(_diskUtilizationChecker).to(DiskUtilizationChecker.class);

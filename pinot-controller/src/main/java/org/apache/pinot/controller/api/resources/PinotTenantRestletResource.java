@@ -62,6 +62,11 @@ import org.apache.pinot.controller.api.access.Authenticate;
 import org.apache.pinot.controller.api.exception.ControllerApplicationException;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
 import org.apache.pinot.controller.helix.core.PinotResourceManagerResponse;
+import org.apache.pinot.controller.helix.core.assignment.instance.TenantInstancePartitionGenerator;
+import org.apache.pinot.controller.helix.core.assignment.instance.TenantInstancePartitionRequest;
+import org.apache.pinot.controller.helix.core.assignment.instance.TenantInstancePartitionResponse;
+import org.apache.pinot.controller.helix.core.assignment.instance.TenantInstancePartitionType;
+import org.apache.pinot.controller.helix.core.assignment.instance.TenantInstancePartitionValidator;
 import org.apache.pinot.controller.helix.core.rebalance.RebalanceJobConstants;
 import org.apache.pinot.controller.helix.core.rebalance.tenant.TenantRebalanceConfig;
 import org.apache.pinot.controller.helix.core.rebalance.tenant.TenantRebalanceProgressStats;
@@ -127,6 +132,9 @@ public class PinotTenantRestletResource {
 
   @Inject
   TenantRebalancer _tenantRebalancer;
+
+  @Inject
+  TenantInstancePartitionGenerator _tenantInstancePartitionGenerator;
 
   @POST
   @Path("/tenants")
@@ -311,6 +319,7 @@ public class PinotTenantRestletResource {
       @ApiParam(value = "instancePartitionType (OFFLINE|CONSUMING|COMPLETED)", required = true,
           allowableValues = "OFFLINE, CONSUMING, COMPLETED")
       @QueryParam("instancePartitionType") String instancePartitionType) {
+    // TODO: Update this to use TenantInstancePartitionType /tenants/{tenantName}/tenantInstancePartitions API is ready.
     String tenantNameWithType = InstancePartitionsType.valueOf(instancePartitionType)
         .getInstancePartitionsName(tenantName);
     InstancePartitions instancePartitions =
@@ -342,6 +351,7 @@ public class PinotTenantRestletResource {
           allowableValues = "OFFLINE, CONSUMING, COMPLETED")
       @QueryParam("instancePartitionType") String instancePartitionType,
       String instancePartitionsStr) {
+    // TODO: Mark this as deprecated once /tenants/{tenantName}/tenantInstancePartitions API is ready.
     InstancePartitions instancePartitions;
     try {
       instancePartitions = JsonUtils.stringToObject(instancePartitionsStr, InstancePartitions.class);
@@ -726,5 +736,71 @@ public class PinotTenantRestletResource {
     tenantRebalanceJobStatusResponse.setTenantRebalanceProgressStats(tenantRebalanceProgressStats);
     tenantRebalanceJobStatusResponse.setTimeElapsedSinceStartInSeconds(timeSinceStartInSecs);
     return tenantRebalanceJobStatusResponse;
+  }
+
+  @POST
+  @Path("/tenants/{tenantName}/tenantInstancePartitions")
+  @Authorize(targetType = TargetType.CLUSTER, action = Actions.Cluster.UPDATE_INSTANCE_PARTITIONS)
+  @Authenticate(AccessType.UPDATE)
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = "Create/Update tenant instance partitions")
+  @ApiResponses(value = {
+      @ApiResponse(code = 200, message = "Success", response = TenantInstancePartitionResponse.class),
+      @ApiResponse(code = 400, message = "Invalid request parameters"),
+      @ApiResponse(code = 500, message = "Error creating tenant instance partitions")})
+  public TenantInstancePartitionResponse createTenantInstancePartitions(
+      @ApiParam(value = "Tenant name", required = true) @PathParam("tenantName") String tenantName,
+      @ApiParam(value = "Instance partition type (OFFLINE|CONSUMING|COMPLETED)", required = true,
+          allowableValues = "OFFLINE, CONSUMING, COMPLETED")
+      @QueryParam("instancePartitionType") String instancePartitionTypeStr,
+      @ApiParam(value = "Dry run mode - compute without persisting to ZK", defaultValue = "false")
+      @QueryParam("dryRun") @DefaultValue("false") boolean dryRun,
+      @ApiParam(value = "Tenant instance partition request", required = true) TenantInstancePartitionRequest request) {
+     TenantInstancePartitionType instancePartitionType;
+     try {
+       instancePartitionType = TenantInstancePartitionType.fromString(instancePartitionTypeStr);
+     } catch (IllegalArgumentException e) {
+       LOGGER.error("Invalid instancePartitionType: {}", instancePartitionTypeStr);
+       throw new ControllerApplicationException(LOGGER, e.getMessage(), Response.Status.BAD_REQUEST);
+     }
+
+    LOGGER.info("Creating tenant instance partitions for tenant: {}, type: {}, dryRun: {}",
+        tenantName, instancePartitionTypeStr, dryRun);
+
+     TenantInstancePartitionValidator validator =
+         new TenantInstancePartitionValidator(_pinotHelixResourceManager);
+
+     try {
+       validator.validateRequest(tenantName, instancePartitionType, request);
+     } catch (ControllerApplicationException e) {
+       LOGGER.error("Request validation failed for tenant: {}, type: {}: {}",
+           tenantName, instancePartitionTypeStr, e.getMessage());
+       throw e;
+     }
+
+
+    try {
+      // Fetch the old Tenant Instance Partition Names before update.
+      String tenantInstancePartitionName = instancePartitionType.getTenantInstancePartitionName(tenantName);
+      InstancePartitions oldInstancePartitions =
+          InstancePartitionsUtils.fetchInstancePartitions(_pinotHelixResourceManager.getPropertyStore(),
+              tenantInstancePartitionName);
+
+      InstancePartitions newInstancePartitions =
+          _tenantInstancePartitionGenerator.assignInstances(tenantName, instancePartitionType, request, dryRun,
+              oldInstancePartitions);
+
+       return new TenantInstancePartitionResponse(newInstancePartitions, oldInstancePartitions);
+    } catch (Exception e) {
+      LOGGER.error("Failed to generate instance partitions for tenant: {} (type: {}): {}",
+          tenantName, instancePartitionTypeStr, e.getMessage(), e);
+
+      if (e instanceof ControllerApplicationException) {
+        throw (ControllerApplicationException) e;
+      }
+      throw new ControllerApplicationException(LOGGER,
+          "Failed to generate instance partitions: " + e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR, e);
+    }
   }
 }
