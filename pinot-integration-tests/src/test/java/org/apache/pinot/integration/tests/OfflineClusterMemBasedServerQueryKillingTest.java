@@ -34,10 +34,10 @@ import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.log4j.Level;
-import org.apache.log4j.LogManager;
 import org.apache.pinot.core.accounting.PerQueryCPUMemAccountantFactory;
+import org.apache.pinot.spi.accounting.QueryResourceTracker;
 import org.apache.pinot.spi.accounting.ThreadResourceUsageProvider;
+import org.apache.pinot.spi.config.instance.InstanceType;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.data.FieldSpec;
@@ -49,8 +49,13 @@ import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.spi.utils.builder.TableConfigBuilder;
 import org.apache.pinot.util.TestUtils;
 import org.junit.Assert;
+import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
+
+import static org.junit.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertTrue;
 
 
 /**
@@ -97,11 +102,60 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
     return NUM_SERVERS;
   }
 
+  /**
+   * Keeps track of metadata of queries that have been terminated due to OOM.
+   * This is used to verify that the query was killed and the method used to kill the query.
+   */
+  public static class TestAccountantFactory extends PerQueryCPUMemAccountantFactory {
+    @Override
+    public PerQueryCPUMemResourceUsageAccountant init(PinotConfiguration config, String instanceId,
+        InstanceType instanceType) {
+      return new TestAccountant(config, instanceId, instanceType);
+    }
+
+    public static class TestAccountant extends PerQueryCPUMemAccountantFactory.PerQueryCPUMemResourceUsageAccountant {
+      private QueryResourceTracker _queryResourceTracker = null;
+      private long _totalHeapMemoryUsage = 0L;
+      private boolean _hasCallback = false;
+
+      public TestAccountant(PinotConfiguration config, String instanceId, InstanceType instanceType) {
+        super(config, instanceId, instanceType);
+      }
+
+      @Override
+      public void logTerminatedQuery(QueryResourceTracker queryResourceTracker, long totalHeapMemoryUsage,
+          boolean hasCallback) {
+        super.logTerminatedQuery(queryResourceTracker, totalHeapMemoryUsage, hasCallback);
+        _queryResourceTracker = queryResourceTracker;
+        _totalHeapMemoryUsage = totalHeapMemoryUsage;
+        _hasCallback = hasCallback;
+      }
+
+      public void reset() {
+        _queryResourceTracker = null;
+        _totalHeapMemoryUsage = 0L;
+        _hasCallback = false;
+      }
+
+      public QueryResourceTracker getQueryResourceTracker() {
+        return _queryResourceTracker;
+      }
+
+      public long getTotalHeapMemoryUsage() {
+        return _totalHeapMemoryUsage;
+      }
+
+      public boolean hasCallback() {
+        return _hasCallback;
+      }
+    }
+  }
+
+  private TestAccountantFactory.TestAccountant _testAccountant = null;
+
   @BeforeClass
   public void setUp()
       throws Exception {
-    LogManager.getLogger(PerQueryCPUMemAccountantFactory.PerQueryCPUMemResourceUsageAccountant.class)
-        .setLevel(Level.ERROR);
     ThreadResourceUsageProvider.setThreadCpuTimeMeasurementEnabled(true);
     ThreadResourceUsageProvider.setThreadMemoryMeasurementEnabled(true);
 
@@ -111,9 +165,9 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
     startZk();
     startController();
     startServers();
-    while (!Tracing.isAccountantRegistered()) {
-      Thread.sleep(100L);
-    }
+    TestUtils.waitForCondition(aVoid -> Tracing.isAccountantRegistered(), 100L, 60_000L,
+        "Waiting for accountant to be registered");
+    _testAccountant = (TestAccountantFactory.TestAccountant) Tracing.getThreadAccountant();
     startBrokers();
 
 
@@ -136,13 +190,6 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
 
     //Wait for all documents loaded
     waitForAllDocsLoaded(10_000L);
-
-    // Setup logging and resource accounting
-    LogManager.getLogger(OfflineClusterMemBasedServerQueryKillingTest.class).setLevel(Level.INFO);
-    LogManager.getLogger(PerQueryCPUMemAccountantFactory.PerQueryCPUMemResourceUsageAccountant.class)
-        .setLevel(Level.INFO);
-    LogManager.getLogger(ThreadResourceUsageProvider.class).setLevel(Level.INFO);
-    LogManager.getLogger(Tracing.class).setLevel(Level.INFO);
   }
 
   protected void startBrokers()
@@ -155,6 +202,13 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
     startServers(getNumServers());
   }
 
+  @AfterMethod
+  public void resetTestAccountant() {
+    if (_testAccountant != null) {
+      _testAccountant.reset();
+    }
+  }
+
   protected void overrideServerConf(PinotConfiguration serverConf) {
     serverConf.setProperty(CommonConstants.PINOT_QUERY_SCHEDULER_PREFIX + "."
         + CommonConstants.Accounting.CONFIG_OF_ALARMING_LEVEL_HEAP_USAGE_RATIO, 0.0f);
@@ -162,7 +216,7 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
         + CommonConstants.Accounting.CONFIG_OF_CRITICAL_LEVEL_HEAP_USAGE_RATIO, 0.15f);
     serverConf.setProperty(
         CommonConstants.PINOT_QUERY_SCHEDULER_PREFIX + "." + CommonConstants.Accounting.CONFIG_OF_FACTORY_NAME,
-        "org.apache.pinot.core.accounting.PerQueryCPUMemAccountantFactory");
+        TestAccountantFactory.class.getName());
     serverConf.setProperty(CommonConstants.PINOT_QUERY_SCHEDULER_PREFIX + "."
         + CommonConstants.Accounting.CONFIG_OF_ENABLE_THREAD_MEMORY_SAMPLING, true);
     serverConf.setProperty(
@@ -182,7 +236,7 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
         + CommonConstants.Accounting.CONFIG_OF_PANIC_LEVEL_HEAP_USAGE_RATIO, 1.1f);
     brokerConf.setProperty(CommonConstants.PINOT_QUERY_SCHEDULER_PREFIX + "."
             + CommonConstants.Accounting.CONFIG_OF_FACTORY_NAME,
-        "org.apache.pinot.core.accounting.PerQueryCPUMemAccountantFactory");
+        TestAccountantFactory.class.getName());
     brokerConf.setProperty(CommonConstants.PINOT_QUERY_SCHEDULER_PREFIX + "."
         + CommonConstants.Accounting.CONFIG_OF_ENABLE_THREAD_MEMORY_SAMPLING, true);
     brokerConf.setProperty(CommonConstants.PINOT_QUERY_SCHEDULER_PREFIX + "."
@@ -211,23 +265,30 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
         .build();
   }
 
-  @Test(dataProvider = "useBothQueryEngines")
-  public void testDigestOOM(boolean useMultiStageQueryEngine)
+  @Test
+  public void testDigestOOM()
       throws Exception {
-    setUseMultiStageQueryEngine(useMultiStageQueryEngine);
-    notSupportedInV2();
     JsonNode queryResponse = postQuery(OOM_QUERY);
-    String exceptionsNode = queryResponse.get("exceptions").toString();
-    Assert.assertTrue(exceptionsNode, exceptionsNode.contains("\"errorCode\":"
-        + QueryErrorCode.QUERY_CANCELLATION.getId()));
-    Assert.assertTrue(exceptionsNode, exceptionsNode.contains("got killed because"));
+    String exceptions = queryResponse.get("exceptions").toString();
+    assertTrue(exceptions.contains("\"errorCode\":" + QueryErrorCode.QUERY_CANCELLATION.getId()), exceptions);
+    assertTrue(exceptions.contains("got killed on SERVER"), exceptions);
   }
 
-  @Test(dataProvider = "useBothQueryEngines")
-  public void testMemoryAllocationStats(boolean useMultiStageQueryEngine)
+  @Test(enabled = false) // Disabled because this test is flaky in the multi-stage query engine
+  public void testDigestOOMMSE()
       throws Exception {
-    setUseMultiStageQueryEngine(useMultiStageQueryEngine);
-    notSupportedInV2();
+    setUseMultiStageQueryEngine(true);
+    JsonNode queryResponse = postQuery(OOM_QUERY);
+    String exceptionsNode = queryResponse.get("exceptions").toString();
+    assertTrue(exceptionsNode.contains("\"errorCode\":" + QueryErrorCode.INTERNAL.getId()), exceptionsNode);
+    assertTrue(exceptionsNode.contains("Received 1 error"), exceptionsNode);
+    assertTrue(_testAccountant.hasCallback());
+    assertEquals(queryResponse.get("requestId").asText(), _testAccountant.getQueryResourceTracker().getQueryId());
+  }
+
+  @Test
+  public void testMemoryAllocationStats()
+      throws Exception {
     JsonNode queryResponse = postQuery(COUNT_STAR_QUERY);
     long offlineThreadMemAllocatedBytes = queryResponse.get("offlineThreadMemAllocatedBytes").asLong();
     long offlineResponseSerMemAllocatedBytes = queryResponse.get("offlineResponseSerMemAllocatedBytes").asLong();
@@ -235,38 +296,56 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
 
     Assert.assertTrue(offlineThreadMemAllocatedBytes > 0);
     Assert.assertTrue(offlineResponseSerMemAllocatedBytes > 0);
-    Assert.assertEquals(offlineTotalMemAllocatedBytes,
+    assertEquals(offlineTotalMemAllocatedBytes,
         offlineThreadMemAllocatedBytes + offlineResponseSerMemAllocatedBytes);
   }
 
-  @Test(dataProvider = "useBothQueryEngines")
-  public void testSelectionOnlyOOM(boolean useMultiStageQueryEngine)
+  @Test
+  public void testSelectionOnlyOOM()
       throws Exception {
-    setUseMultiStageQueryEngine(useMultiStageQueryEngine);
-    notSupportedInV2();
+    JsonNode queryResponse = postQuery(OOM_QUERY_SELECTION_ONLY);
+    String exceptions = queryResponse.get("exceptions").toString();
+    assertTrue(exceptions.contains("\"errorCode\":" + QueryErrorCode.QUERY_CANCELLATION.getId()), exceptions);
+    assertTrue(exceptions.contains("got killed on SERVER"), exceptions);
+  }
+
+  @Test(enabled = false) // Disabled because this test is flaky in the multi-stage query engine
+  public void testSelectionOnlyOOMMSE()
+      throws Exception {
+    setUseMultiStageQueryEngine(true);
     JsonNode queryResponse = postQuery(OOM_QUERY_SELECTION_ONLY);
 
     String exceptionsNode = queryResponse.get("exceptions").toString();
-    Assert.assertTrue(exceptionsNode, exceptionsNode.contains("\"errorCode\":"
-        + QueryErrorCode.QUERY_CANCELLATION.getId()));
-    Assert.assertTrue(exceptionsNode, exceptionsNode.contains("got killed because"));
+    assertTrue(exceptionsNode.contains("\"errorCode\":" + QueryErrorCode.INTERNAL.getId()), exceptionsNode);
+    assertTrue(exceptionsNode.contains("Received 1 error"), exceptionsNode);
+    assertTrue(_testAccountant.hasCallback());
+    assertEquals(queryResponse.get("requestId").asText(), _testAccountant.getQueryResourceTracker().getQueryId());
   }
 
-  @Test(dataProvider = "useBothQueryEngines")
-  public void testDigestOOM2(boolean useMultiStageQueryEngine)
+  @Test
+  public void testDigestOOM2()
       throws Exception {
-    setUseMultiStageQueryEngine(useMultiStageQueryEngine);
-    notSupportedInV2();
+    JsonNode queryResponse = postQuery(OOM_QUERY_2);
+    String exceptions = queryResponse.get("exceptions").toString();
+    assertTrue(exceptions.contains("\"errorCode\":" + QueryErrorCode.QUERY_CANCELLATION.getId()), exceptions);
+    assertTrue(exceptions.contains("got killed on SERVER"), exceptions);
+  }
+
+  @Test(enabled = false) // Disabled because this test is flaky in the multi-stage query engine
+  public void testDigestOOM2MSE()
+      throws Exception {
+    setUseMultiStageQueryEngine(true);
     JsonNode queryResponse = postQuery(OOM_QUERY_2);
     String exceptionsNode = queryResponse.get("exceptions").toString();
-    Assert.assertTrue(exceptionsNode, exceptionsNode.contains("got killed because"));
+    assertTrue(exceptionsNode.contains("\"errorCode\":" + QueryErrorCode.INTERNAL.getId()), exceptionsNode);
+    assertTrue(exceptionsNode.contains("Received 1 error"), exceptionsNode);
+    assertTrue(_testAccountant.hasCallback());
+    assertEquals(queryResponse.get("requestId").asText(), _testAccountant.getQueryResourceTracker().getQueryId());
   }
 
-  @Test(dataProvider = "useBothQueryEngines")
-  public void testDigestOOMMultipleQueries(boolean useMultiStageQueryEngine)
+  @Test
+  public void testDigestOOMMultipleQueries()
       throws Exception {
-    setUseMultiStageQueryEngine(useMultiStageQueryEngine);
-    notSupportedInV2();
     AtomicReference<JsonNode> queryResponse1 = new AtomicReference<>();
     AtomicReference<JsonNode> queryResponse2 = new AtomicReference<>();
     AtomicReference<JsonNode> queryResponse3 = new AtomicReference<>();
@@ -302,10 +381,10 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
     );
     countDownLatch.await();
     String exceptionsNode = queryResponse1.get().get("exceptions").toString();
-    Assert.assertTrue(exceptionsNode, exceptionsNode.contains("\"errorCode\":503"));
-    Assert.assertTrue(exceptionsNode, exceptionsNode.contains("got killed because"));
-    Assert.assertFalse(exceptionsNode, StringUtils.isEmpty(queryResponse2.get().get("exceptions").toString()));
-    Assert.assertFalse(exceptionsNode, StringUtils.isEmpty(queryResponse3.get().get("exceptions").toString()));
+    assertTrue(exceptionsNode.contains("\"errorCode\":503"), exceptionsNode);
+    assertTrue(exceptionsNode.contains("got killed"), exceptionsNode);
+    assertFalse(StringUtils.isEmpty(queryResponse2.get().get("exceptions").toString()), exceptionsNode);
+    assertFalse(StringUtils.isEmpty(queryResponse3.get().get("exceptions").toString()), exceptionsNode);
   }
 
   private List<File> createAvroFile()

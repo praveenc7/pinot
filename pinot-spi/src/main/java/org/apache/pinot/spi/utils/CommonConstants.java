@@ -76,8 +76,11 @@ public class CommonConstants {
   public static final String DEFAULT_EXECUTORS_FIXED_NUM_THREADS = "-1";
 
   public static final String CONFIG_OF_PINOT_TAR_COMPRESSION_CODEC_NAME = "pinot.tar.compression.codec.name";
+  public static final String QUERY_WORKLOAD = "queryWorkload";
 
   public static final String JFR = "pinot.jfr";
+
+  public static final String RLS_FILTERS = "rlsFilters";
 
   /**
    * The state of the consumer for a given segment
@@ -334,6 +337,11 @@ public class CommonConstants {
     public static final double DEFAULT_BROKER_QUERY_LOG_MAX_RATE_PER_SECOND = 10_000d;
     public static final String CONFIG_OF_BROKER_TIMEOUT_MS = "pinot.broker.timeoutMs";
     public static final long DEFAULT_BROKER_TIMEOUT_MS = 10_000L;
+    public static final String CONFIG_OF_BROKER_ENABLE_ROW_COLUMN_LEVEL_AUTH =
+        "pinot.broker.enable.row.column.level.auth";
+    public static final boolean DEFAULT_BROKER_ENABLE_ROW_COLUMN_LEVEL_AUTH = false;
+    public static final String CONFIG_OF_EXTRA_PASSIVE_TIMEOUT_MS = "pinot.broker.extraPassiveTimeoutMs";
+    public static final long DEFAULT_EXTRA_PASSIVE_TIMEOUT_MS = 100L;
     public static final String CONFIG_OF_BROKER_ID = "pinot.broker.instance.id";
     public static final String CONFIG_OF_BROKER_INSTANCE_TAGS = "pinot.broker.instance.tags";
     public static final String CONFIG_OF_BROKER_HOSTNAME = "pinot.broker.hostname";
@@ -390,6 +398,9 @@ public class CommonConstants {
     // the server side.
     public static final String CONFIG_OF_MSE_ENABLE_GROUP_TRIM = "pinot.broker.mse.enable.group.trim";
     public static final boolean DEFAULT_MSE_ENABLE_GROUP_TRIM = false;
+
+    public static final String CONFIG_OF_MSE_MAX_SERVER_QUERY_THREADS = "pinot.broker.mse.max.server.query.threads";
+    public static final int DEFAULT_MSE_MAX_SERVER_QUERY_THREADS = -1;
 
     // Configure the request handler type used by broker to handler inbound query request.
     // NOTE: the request handler type refers to the communication between Broker and Server.
@@ -486,6 +497,7 @@ public class CommonConstants {
 
       public static class QueryOptionKey {
         public static final String TIMEOUT_MS = "timeoutMs";
+        public static final String EXTRA_PASSIVE_TIMEOUT_MS = "extraPassiveTimeoutMs";
         public static final String SKIP_UPSERT = "skipUpsert";
         public static final String SKIP_UPSERT_VIEW = "skipUpsertView";
         public static final String UPSERT_VIEW_FRESHNESS_MS = "upsertViewFreshnessMs";
@@ -663,6 +675,14 @@ public class CommonConstants {
         // When lite mode is enabled, if this flag is set, we will run all the non-leaf stage operators within the
         // broker itself. That way, the MSE queries will model the scatter gather pattern used by the V1 Engine.
         public static final String RUN_IN_BROKER = "runInBroker";
+
+        /// For MSE queries, when this option is set to true, only use servers for leaf stages as the workers for the
+        /// intermediate stages. This is useful to control the fanout of the query and reduce data shuffling.
+        public static final String USE_LEAF_SERVER_FOR_INTERMEDIATE_STAGE = "useLeafServerForIntermediateStage";
+
+        // Option denoting the workloadName to which the query belongs. This is used to enforce resource budgets for
+        // each workload if "Query Workload Isolation" feature enabled.
+        public static final String WORKLOAD_NAME = "workloadName";
       }
 
       public static class QueryOptionValue {
@@ -916,6 +936,9 @@ public class CommonConstants {
     public static final String MSE_CONFIG_PREFIX = QUERY_EXECUTOR_CONFIG_PREFIX + "." + MSE;
     public static final String CONFIG_OF_MSE_MAX_INITIAL_RESULT_HOLDER_CAPACITY =
         MSE_CONFIG_PREFIX + "." + MAX_INITIAL_RESULT_HOLDER_CAPACITY;
+    public static final String CONFIG_OF_MSE_MAX_EXECUTION_THREADS =
+        MSE_CONFIG_PREFIX + "." + MAX_EXECUTION_THREADS;
+    public static final int DEFAULT_MSE_MAX_EXECUTION_THREADS = -1;
 
     // For group-by queries with order-by clause, the tail groups are trimmed off to reduce the memory footprint. To
     // ensure the accuracy of the result, {@code max(limit * 5, minTrimSize)} groups are retained. When
@@ -978,6 +1001,11 @@ public class CommonConstants {
     public static final String CONFIG_OF_QUERY_EXECUTOR_OPCHAIN_EXECUTOR = MULTISTAGE_EXECUTOR_CONFIG_PREFIX;
     @Deprecated
     public static final String DEFAULT_QUERY_EXECUTOR_OPCHAIN_EXECUTOR = DEFAULT_MULTISTAGE_EXECUTOR_TYPE;
+
+    // Enable SSE & MSE task throttling on critical heap usage.
+    public static final String CONFIG_OF_ENABLE_QUERY_SCHEDULER_THROTTLING_ON_HEAP_USAGE =
+        QUERY_EXECUTOR_CONFIG_PREFIX + ".enableThrottlingOnHeapUsage";
+    public static final boolean DEFAULT_ENABLE_QUERY_SCHEDULER_THROTTLING_ON_HEAP_USAGE = false;
 
     /**
      * The ExecutorServiceProvider to be used for timeseries threads.
@@ -1377,8 +1405,70 @@ public class CommonConstants {
     public static final String CONFIG_OF_QUERY_KILLED_METRIC_ENABLED = "accounting.query.killed.metric.enabled";
     public static final boolean DEFAULT_QUERY_KILLED_METRIC_ENABLED = false;
 
-    public static final String CONFIG_OF_ENABLE_THREAD_SAMPLING_MSE = "accounting.enable.thread.sampling.mse.debug";
-    public static final Boolean DEFAULT_ENABLE_THREAD_SAMPLING_MSE = true;
+    public static final String CONFIG_OF_CANCEL_CALLBACK_CACHE_MAX_SIZE = "accounting.cancel.callback.cache.max.size";
+    public static final int DEFAULT_CANCEL_CALLBACK_CACHE_MAX_SIZE = 500;
+
+    public static final String CONFIG_OF_CANCEL_CALLBACK_CACHE_EXPIRY_SECONDS =
+        "accounting.cancel.callback.cache.expiry.seconds";
+    public static final int DEFAULT_CANCEL_CALLBACK_CACHE_EXPIRY_SECONDS = 1200;
+
+    public static final String CONFIG_OF_THREAD_SELF_TERMINATE =
+        "accounting.thread.self.terminate";
+    public static final boolean DEFAULT_THREAD_SELF_TERMINATE = false;
+
+    /**
+     * QUERY WORKLOAD ISOLATION Configs
+     *
+     * This is a set of configs to enable query workload isolation. Queries are classified into workload based on the
+     * QueryOption - WORKLOAD_NAME. The CPU and Memory cost for a workload are set globally in ZK. The CPU and memory
+     * costs are for a certain time duration, called "enforcementWindow". The workload cost is split into smaller cost
+     * for each instance involved in executing queries of the workload.
+     *
+     *
+     * At each instance (broker,server), there are two parts to workload isolation:
+     * 1. Workload Cost Collection
+     * 2. Workload Cost Enforcement
+     *
+     *
+     * Workload Cost collection happens at various stages of query execution. On server, the resource costs associated
+     * with pruning, planning and execution are collected. On broker, the resource costs associated with compilation &
+     * reduce are collected. WorkloadBudgetManager maintains the budget and usage for each workload in the instance.
+     * Workload Enforcement enforces the budget for a workload if the resource usages are exceeded. The queries in the
+     * workload are killed until the enforcementWindow is refreshed.
+     *
+     * More details in https://tinyurl.com/2p9vuzbd
+     *
+     * Pre-req configs for enabling Query Workload Isolation:
+     *  - CommonConstants.Accounting.CONFIG_OF_FACTORY_NAME  = ResourceUsageAccountantFactory
+     *  - CommonConstants.Accounting.CONFIG_OF_ENABLE_THREAD_CPU_SAMPLING = true
+     *  - CommonConstants.Accounting.CONFIG_OF_ENABLE_THREAD_MEMORY_SAMPLING = true
+     *  - CommonConstants.Accounting.CONFIG_OF_ENABLE_THREAD_SAMPLING_MSE = true
+     *  - Instance Config: enableThreadCpuTimeMeasurement = true
+     *  - Instance Config: enableThreadAllocatedBytesMeasurement = true
+     */
+
+    public static final String CONFIG_OF_WORKLOAD_ENABLE_COST_COLLECTION =
+        "accounting.workload.enable.cost.collection";
+    public static final boolean DEFAULT_WORKLOAD_ENABLE_COST_COLLECTION = false;
+
+    public static final String CONFIG_OF_WORKLOAD_ENABLE_COST_ENFORCEMENT =
+        "accounting.workload.enable.cost.enforcement";
+    public static final boolean DEFAULT_WORKLOAD_ENABLE_COST_ENFORCEMENT = false;
+
+    public static final String CONFIG_OF_WORKLOAD_ENFORCEMENT_WINDOW_MS =
+        "accounting.workload.enforcement.window.ms";
+    public static final long DEFAULT_WORKLOAD_ENFORCEMENT_WINDOW_MS = 60_000L;
+
+    public static final String CONFIG_OF_WORKLOAD_SLEEP_TIME_MS =
+        "accounting.workload.sleep.time.ms";
+    public static final int DEFAULT_WORKLOAD_SLEEP_TIME_MS = 1;
+
+    public static final String DEFAULT_WORKLOAD_NAME = "default";
+    public static final String CONFIG_OF_SECONDARY_WORKLOAD_NAME = "accounting.secondary.workload.name";
+    public static final String DEFAULT_SECONDARY_WORKLOAD_NAME = "defaultSecondary";
+    public static final String CONFIG_OF_SECONDARY_WORKLOAD_CPU_PERCENTAGE =
+        "accounting.secondary.workload.cpu.percentage";
+    public static final double DEFAULT_SECONDARY_WORKLOAD_CPU_PERCENTAGE = 0.0;
   }
 
   public static class ExecutorService {

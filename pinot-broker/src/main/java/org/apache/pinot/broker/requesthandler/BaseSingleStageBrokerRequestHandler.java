@@ -26,6 +26,7 @@ import com.google.common.collect.ImmutableMap;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -99,7 +100,10 @@ import org.apache.pinot.query.routing.table.ImplicitHybridTableRouteProvider;
 import org.apache.pinot.query.routing.table.LogicalTableRouteProvider;
 import org.apache.pinot.query.routing.table.TableRouteProvider;
 import org.apache.pinot.segment.local.function.GroovyFunctionEvaluator;
+import org.apache.pinot.spi.accounting.ThreadExecutionContext;
+import org.apache.pinot.spi.accounting.ThreadResourceUsageAccountant;
 import org.apache.pinot.spi.auth.AuthorizationResult;
+import org.apache.pinot.spi.auth.TableRowColAccessResult;
 import org.apache.pinot.spi.auth.broker.RequesterIdentity;
 import org.apache.pinot.spi.config.table.FieldConfig;
 import org.apache.pinot.spi.config.table.QueryConfig;
@@ -124,6 +128,8 @@ import org.apache.pinot.sql.FilterKind;
 import org.apache.pinot.sql.parsers.CalciteSqlCompiler;
 import org.apache.pinot.sql.parsers.CalciteSqlParser;
 import org.apache.pinot.sql.parsers.SqlNodeAndOptions;
+import org.apache.pinot.sql.parsers.rewriter.RlsFiltersRewriter;
+import org.apache.pinot.sql.parsers.rewriter.RlsUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -166,8 +172,8 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
 
   public BaseSingleStageBrokerRequestHandler(PinotConfiguration config, String brokerId,
       BrokerRoutingManager routingManager, AccessControlFactory accessControlFactory,
-      QueryQuotaManager queryQuotaManager, TableCache tableCache) {
-    super(config, brokerId, routingManager, accessControlFactory, queryQuotaManager, tableCache);
+      QueryQuotaManager queryQuotaManager, TableCache tableCache, ThreadResourceUsageAccountant accountant) {
+    super(config, brokerId, routingManager, accessControlFactory, queryQuotaManager, tableCache, accountant);
     _disableGroovy = _config.getProperty(Broker.DISABLE_GROOVY, Broker.DEFAULT_DISABLE_GROOVY);
     _useApproximateFunction = _config.getProperty(Broker.USE_APPROXIMATE_FUNCTION, false);
     _defaultHllLog2m = _config.getProperty(CommonConstants.Helix.DEFAULT_HYPERLOGLOG_LOG2M_KEY,
@@ -319,13 +325,15 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
     _queryLogger.log(requestId, query);
 
     //Start instrumentation context. This must not be moved further below interspersed into the code.
-    Tracing.ThreadAccountantOps.setupRunner(String.valueOf(requestId));
+    String workloadName = QueryOptionsUtils.getWorkloadName(sqlNodeAndOptions.getOptions());
+    _resourceUsageAccountant.setupRunner(QueryThreadContext.getCid(), CommonConstants.Accounting.ANCHOR_TASK_ID,
+        ThreadExecutionContext.TaskType.SSE, workloadName);
 
     try {
       return doHandleRequest(requestId, query, sqlNodeAndOptions, request, requesterIdentity, requestContext,
           httpHeaders, accessControl);
     } finally {
-      Tracing.ThreadAccountantOps.clear();
+      _resourceUsageAccountant.clear();
     }
   }
 
@@ -393,6 +401,8 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
     // full request compile time = compilationTimeNs + parserTimeNs
     _brokerMetrics.addPhaseTiming(rawTableName, BrokerQueryPhase.REQUEST_COMPILATION,
         (compilationEndTimeNs - compilationStartTimeNs) + sqlNodeAndOptions.getParseTimeNs());
+    // Accounts for resource usage of the compilation phase, since compilation for some queries can be expensive.
+    Tracing.ThreadAccountantOps.sampleAndCheckInterruption(_resourceUsageAccountant);
 
     // Second-stage table-level access control
     // TODO: Modify AccessControl interface to directly take PinotQuery
@@ -431,10 +441,33 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
 
       _brokerMetrics.addPhaseTiming(rawTableName, BrokerQueryPhase.AUTHORIZATION,
           System.nanoTime() - compilationEndTimeNs);
+      // Accounts for resource usage of the authorization phase.
+      Tracing.ThreadAccountantOps.sampleAndCheckInterruption(_resourceUsageAccountant);
 
       if (!authorizationResult.hasAccess()) {
         throwAccessDeniedError(requestId, query, requestContext, tableName, authorizationResult);
       }
+
+      TableRowColAccessResult rlsFilters = accessControl.getRowColFilters(requesterIdentity, tableName);
+
+      //rewrite query
+      Map<String, String> queryOptions =
+          pinotQuery.getQueryOptions() == null ? new HashMap<>() : pinotQuery.getQueryOptions();
+
+      rlsFilters.getRLSFilters().ifPresent(rowFilters -> {
+        String combinedFilters =
+            rowFilters.stream().map(filter -> "( " + filter + " )").collect(Collectors.joining(" AND "));
+        String rowFiltersKey = RlsUtils.buildRlsFilterKey(rawTableName);
+        queryOptions.put(rowFiltersKey, combinedFilters);
+        pinotQuery.setQueryOptions(queryOptions);
+        try {
+          CalciteSqlParser.queryRewrite(pinotQuery, RlsFiltersRewriter.class);
+        } catch (Exception e) {
+          LOGGER.error(
+              "Unable to apply RLS filter: {}. Row-level security filtering will be disabled for this query.",
+              RlsFiltersRewriter.class.getName(), e);
+        }
+      });
 
       // Validate QPS quota
       if (!_queryQuotaManager.acquireDatabase(database)) {
@@ -654,6 +687,9 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
     long routingEndTimeNs = System.nanoTime();
     _brokerMetrics.addPhaseTiming(rawTableName, BrokerQueryPhase.QUERY_ROUTING,
         routingEndTimeNs - routingStartTimeNs);
+    // Account the resource used for routing phase, since for single stage queries with multiple segments, routing
+    // can be expensive.
+    Tracing.ThreadAccountantOps.sampleAndCheckInterruption(_resourceUsageAccountant);
 
     // Set timeout in the requests
     long timeSpentMs = TimeUnit.NANOSECONDS.toMillis(routingEndTimeNs - compilationStartTimeNs);

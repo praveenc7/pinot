@@ -922,6 +922,11 @@ public class ControllerTest {
     sendGetRequest(getControllerRequestURLBuilder().forPeriodTaskRun(taskName, tableName, tableType));
   }
 
+  public void updateClusterConfig(Map<String, String> clusterConfig)
+      throws IOException {
+    getControllerRequestClient().updateClusterConfig(clusterConfig);
+  }
+
   public void pauseTable(String tableName)
       throws IOException {
     sendPostRequest(getControllerRequestURLBuilder().forPauseConsumption(tableName));

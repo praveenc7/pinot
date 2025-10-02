@@ -81,6 +81,7 @@ import org.apache.pinot.query.runtime.MultiStageStatsTreeBuilder;
 import org.apache.pinot.query.runtime.plan.MultiStageQueryStats;
 import org.apache.pinot.query.service.dispatch.QueryDispatcher;
 import org.apache.pinot.spi.accounting.ThreadExecutionContext;
+import org.apache.pinot.spi.accounting.ThreadResourceUsageAccountant;
 import org.apache.pinot.spi.auth.TableAuthorizationResult;
 import org.apache.pinot.spi.auth.broker.RequesterIdentity;
 import org.apache.pinot.spi.env.PinotConfiguration;
@@ -91,6 +92,7 @@ import org.apache.pinot.spi.trace.RequestContext;
 import org.apache.pinot.spi.trace.Tracing;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.sql.parsers.SqlNodeAndOptions;
+import org.apache.pinot.sql.parsers.rewriter.RlsUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -109,11 +111,13 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
   private final boolean _explainAskingServerDefault;
   private final MultiStageQueryThrottler _queryThrottler;
   private final ExecutorService _queryCompileExecutor;
+  protected final long _extraPassiveTimeoutMs;
 
   public MultiStageBrokerRequestHandler(PinotConfiguration config, String brokerId, BrokerRoutingManager routingManager,
       AccessControlFactory accessControlFactory, QueryQuotaManager queryQuotaManager, TableCache tableCache,
-      MultiStageQueryThrottler queryThrottler, FailureDetector failureDetector) {
-    super(config, brokerId, routingManager, accessControlFactory, queryQuotaManager, tableCache);
+      MultiStageQueryThrottler queryThrottler, FailureDetector failureDetector,
+      ThreadResourceUsageAccountant accountant) {
+    super(config, brokerId, routingManager, accessControlFactory, queryQuotaManager, tableCache, accountant);
     String hostname = config.getProperty(CommonConstants.MultiStageQueryRunner.KEY_OF_QUERY_RUNNER_HOSTNAME);
     int port = Integer.parseInt(config.getProperty(CommonConstants.MultiStageQueryRunner.KEY_OF_QUERY_RUNNER_PORT));
     _workerManager = new WorkerManager(_brokerId, hostname, port, _routingManager);
@@ -121,6 +125,10 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
         CommonConstants.Helix.CONFIG_OF_MULTI_STAGE_ENGINE_TLS_ENABLED,
         CommonConstants.Helix.DEFAULT_MULTI_STAGE_ENGINE_TLS_ENABLED) ? TlsUtils.extractTlsConfig(config,
         CommonConstants.Broker.BROKER_TLS_PREFIX) : null;
+
+    _extraPassiveTimeoutMs = config.getProperty(
+        CommonConstants.Broker.CONFIG_OF_EXTRA_PASSIVE_TIMEOUT_MS,
+        CommonConstants.Broker.DEFAULT_EXTRA_PASSIVE_TIMEOUT_MS);
 
     failureDetector.registerUnhealthyServerRetrier(this::retryUnhealthyServer);
     long cancelMillis = config.getProperty(
@@ -254,7 +262,11 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
       throws QueryException, WebApplicationException {
     _queryLogger.log(requestId, query);
 
-    long queryTimeoutMs = getTimeout(sqlNodeAndOptions.getOptions());
+    Map<String, String> options = sqlNodeAndOptions.getOptions();
+    long queryTimeoutMs = getTimeout(options);
+    QueryThreadContext.setActiveDeadlineMs(System.currentTimeMillis() + queryTimeoutMs);
+    QueryThreadContext.setPassiveDeadlineMs(System.currentTimeMillis() + queryTimeoutMs + getPassiveTimeout(options));
+
     Timer queryTimer = new Timer(queryTimeoutMs, TimeUnit.MILLISECONDS);
 
     try (QueryEnvironment.CompiledQuery compiledQuery =
@@ -304,6 +316,16 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
       if (!tableAuthorizationResult.hasAccess()) {
         throwTableAccessError(tableAuthorizationResult);
       }
+      AccessControl accessControl = _accessControlFactory.create();
+      for (String tableName : tables) {
+        accessControl.getRowColFilters(requesterIdentity, tableName).getRLSFilters()
+            .ifPresent(rowFilters -> {
+              String combinedFilters =
+                  rowFilters.stream().map(filter -> "( " + filter + " )").collect(Collectors.joining(" AND "));
+              String key = RlsUtils.buildRlsFilterKey(tableName);
+              compiledQuery.getOptions().put(key, combinedFilters);
+            });
+      }
     }
   }
 
@@ -339,6 +361,11 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
   private long getTimeout(Map<String, String> queryOptions) {
     Long timeoutMsFromQueryOption = QueryOptionsUtils.getTimeoutMs(queryOptions);
     return timeoutMsFromQueryOption != null ? timeoutMsFromQueryOption : _brokerTimeoutMs;
+  }
+
+  private long getPassiveTimeout(Map<String, String> queryOptions) {
+    Long passiveTimeoutMsFromQueryOption = QueryOptionsUtils.getPassiveTimeoutMs(queryOptions);
+    return passiveTimeoutMsFromQueryOption != null ? passiveTimeoutMsFromQueryOption : _extraPassiveTimeoutMs;
   }
 
 
@@ -427,7 +454,9 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
     onQueryStart(requestId, clientRequestId, query.getTextQuery());
 
     try {
-      Tracing.ThreadAccountantOps.setupRunner(String.valueOf(requestId), ThreadExecutionContext.TaskType.MSE);
+      String workloadName = QueryOptionsUtils.getWorkloadName(query.getOptions());
+      _resourceUsageAccountant.setupRunner(QueryThreadContext.getCid(), CommonConstants.Accounting.ANCHOR_TASK_ID,
+          ThreadExecutionContext.TaskType.MSE, workloadName);
 
       long executionStartTimeNs = System.nanoTime();
       QueryDispatcher.QueryResult queryResults;

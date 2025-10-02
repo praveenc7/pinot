@@ -38,4 +38,5 @@ public class MetricAttributeConstants {
   public static final String REPLICA_GROUP_TAG = "ReplicaGroupTag";
   public static final String REPLICA_GROUP_ID = "ReplicaGroupId";
   public static final String PINOT_METRIC_NAME = "PinotMetricName";
+  public static final String WORKLOAD_NAME = "WorkloadName";
 }

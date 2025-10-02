@@ -113,6 +113,12 @@ public class QueryOptionsUtils {
   }
 
   @Nullable
+  public static Long getPassiveTimeoutMs(Map<String, String> queryOptions) {
+    String passiveTimeoutMsString = queryOptions.get(QueryOptionKey.EXTRA_PASSIVE_TIMEOUT_MS);
+    return checkedParseLong(QueryOptionKey.EXTRA_PASSIVE_TIMEOUT_MS, passiveTimeoutMsString, 0);
+  }
+
+  @Nullable
   public static Long getMaxServerResponseSizeBytes(Map<String, String> queryOptions) {
     String responseSize = queryOptions.get(QueryOptionKey.MAX_SERVER_RESPONSE_SIZE_BYTES);
     return checkedParseLongPositive(QueryOptionKey.MAX_SERVER_RESPONSE_SIZE_BYTES, responseSize);
@@ -496,5 +502,10 @@ public class QueryOptionsUtils {
       long minValue) {
     return new IllegalArgumentException(
         String.format("%s must be a number between %d and 2^63-1, got: %s", optionName, minValue, optionValue));
+  }
+
+  public static String getWorkloadName(Map<String, String> queryOptions) {
+    return queryOptions.get(QueryOptionKey.WORKLOAD_NAME) != null ? queryOptions.get(QueryOptionKey.WORKLOAD_NAME)
+        : CommonConstants.Accounting.DEFAULT_WORKLOAD_NAME;
   }
 }

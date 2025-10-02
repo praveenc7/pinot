@@ -60,6 +60,7 @@ import org.apache.pinot.core.transport.ServerRoutingInstance;
 import org.apache.pinot.core.util.GroupByUtils;
 import org.apache.pinot.core.util.trace.TraceRunnable;
 import org.apache.pinot.spi.accounting.ThreadExecutionContext;
+import org.apache.pinot.spi.accounting.ThreadResourceUsageAccountant;
 import org.apache.pinot.spi.exception.EarlyTerminationException;
 import org.apache.pinot.spi.exception.QueryErrorCode;
 import org.apache.pinot.spi.trace.Tracing;
@@ -79,8 +80,9 @@ public class GroupByDataTableReducer implements DataTableReducer {
   private final int _numAggregationFunctions;
   private final int _numGroupByExpressions;
   private final int _numColumns;
+  private final ThreadResourceUsageAccountant _resourceUsageAccountant;
 
-  public GroupByDataTableReducer(QueryContext queryContext) {
+  public GroupByDataTableReducer(QueryContext queryContext, ThreadResourceUsageAccountant accountant) {
     _queryContext = queryContext;
     _aggregationFunctions = queryContext.getAggregationFunctions();
     assert _aggregationFunctions != null;
@@ -89,6 +91,7 @@ public class GroupByDataTableReducer implements DataTableReducer {
     assert groupByExpressions != null;
     _numGroupByExpressions = groupByExpressions.size();
     _numColumns = _numAggregationFunctions + _numGroupByExpressions;
+    _resourceUsageAccountant = accountant;
   }
 
   /**
@@ -261,7 +264,7 @@ public class GroupByDataTableReducer implements DataTableReducer {
       futures[i] = reducerContext.getExecutorService().submit(new TraceRunnable() {
         @Override
         public void runJob() {
-          Tracing.ThreadAccountantOps.setupWorker(taskId, parentContext);
+          _resourceUsageAccountant.setupWorker(taskId, ThreadExecutionContext.TaskType.SSE, parentContext);
           try {
             for (DataTable dataTable : reduceGroup) {
               boolean nullHandlingEnabled = _queryContext.isNullHandlingEnabled();
@@ -356,7 +359,7 @@ public class GroupByDataTableReducer implements DataTableReducer {
     try {
       long timeOutMs = reducerContext.getReduceTimeOutMs() - (System.currentTimeMillis() - start);
       if (!countDownLatch.await(timeOutMs, TimeUnit.MILLISECONDS)) {
-        throw new TimeoutException("Timed out in broker reduce phase");
+        throw new TimeoutException("Timed out on broker reduce phase");
       }
       Throwable t = exception.get();
       if (t != null) {
