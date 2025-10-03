@@ -46,6 +46,9 @@ import org.apache.pinot.query.runtime.plan.OpChainExecutionContext;
 @SuppressWarnings("unchecked")
 public class HashJoinOperator extends BaseJoinOperator {
   private static final String EXPLAIN_NAME = "HASH_JOIN";
+  private static final String ADD_ROWS_TO_RIGHT_TABLE_SCOPE = "HashJoinOperator#addRowsToRightTable";
+  private static final String BUILD_JOINED_ROWS_SCOPE = "HashJoinOperator#buildJoinedRows";
+  private static final String BUILD_NON_MATCH_RIGHT_ROWS_SCOPE = "HashJoinOperator#buildNonMatchRightRows";
 
   // Placeholder for BitSet in _matchedRightRows when all keys are unique in the right table.
   private static final BitSet BIT_SET_PLACEHOLDER = new BitSet(0);
@@ -61,7 +64,7 @@ public class HashJoinOperator extends BaseJoinOperator {
   private Map<Object, BitSet> _matchedRightRows;
 
   public HashJoinOperator(OpChainExecutionContext context, MultiStageOperator leftInput, DataSchema leftSchema,
-      MultiStageOperator rightInput, JoinNode node) {
+                          MultiStageOperator rightInput, JoinNode node) {
     super(context, leftInput, leftSchema, rightInput, node);
     List<Integer> leftKeys = node.getLeftKeys();
     Preconditions.checkState(!leftKeys.isEmpty(), "Hash join operator requires join keys");
@@ -98,6 +101,7 @@ public class HashJoinOperator extends BaseJoinOperator {
   protected void addRowsToRightTable(List<Object[]> rows) {
     assert _rightTable != null : "Right table should not be null when adding rows";
     for (Object[] row : rows) {
+      checkTerminationAndSampleUsagePeriodically(_rightTable.size(), ADD_ROWS_TO_RIGHT_TABLE_SCOPE);
       _rightTable.addRow(_rightKeySelector.getKey(row), row);
     }
   }
@@ -148,6 +152,7 @@ public class HashJoinOperator extends BaseJoinOperator {
           if (isMaxRowsLimitReached(rows.size())) {
             break;
           }
+          checkTerminationAndSampleUsagePeriodically(rows.size(), BUILD_JOINED_ROWS_SCOPE);
           rows.add(resultRow);
           if (_matchedRightRows != null) {
             _matchedRightRows.put(key, BIT_SET_PLACEHOLDER);
@@ -182,6 +187,7 @@ public class HashJoinOperator extends BaseJoinOperator {
               maxRowsLimitReached = true;
               break;
             }
+            checkTerminationAndSampleUsagePeriodically(rows.size(), BUILD_JOINED_ROWS_SCOPE);
             rows.add(resultRow);
             hasMatchForLeftRow = true;
             if (_matchedRightRows != null) {
@@ -206,6 +212,7 @@ public class HashJoinOperator extends BaseJoinOperator {
       if (isMaxRowsLimitReached(rows.size())) {
         return;
       }
+      checkTerminationAndSampleUsagePeriodically(rows.size(), BUILD_JOINED_ROWS_SCOPE);
       rows.add(joinRow(leftRow, null));
     }
   }
@@ -219,6 +226,7 @@ public class HashJoinOperator extends BaseJoinOperator {
       Object key = _leftKeySelector.getKey(leftRow);
       // SEMI-JOIN only checks existence of the key
       if (_rightTable.containsKey(key)) {
+        checkTerminationAndSampleUsagePeriodically(rows.size(), BUILD_JOINED_ROWS_SCOPE);
         rows.add(leftRow);
       }
     }
@@ -235,6 +243,7 @@ public class HashJoinOperator extends BaseJoinOperator {
       Object key = _leftKeySelector.getKey(leftRow);
       // ANTI-JOIN only checks non-existence of the key
       if (!_rightTable.containsKey(key)) {
+        checkTerminationAndSampleUsagePeriodically(rows.size(), BUILD_JOINED_ROWS_SCOPE);
         rows.add(leftRow);
       }
     }
@@ -251,6 +260,7 @@ public class HashJoinOperator extends BaseJoinOperator {
       for (Map.Entry<Object, Object> entry : _rightTable.entrySet()) {
         Object[] rightRow = (Object[]) entry.getValue();
         if (!_matchedRightRows.containsKey(entry.getKey())) {
+          checkTerminationAndSampleUsagePeriodically(rows.size(), BUILD_NON_MATCH_RIGHT_ROWS_SCOPE);
           rows.add(joinRow(null, rightRow));
         }
       }
@@ -260,12 +270,14 @@ public class HashJoinOperator extends BaseJoinOperator {
         BitSet matchedIndices = _matchedRightRows.get(entry.getKey());
         if (matchedIndices == null) {
           for (Object[] rightRow : rightRows) {
+            checkTerminationAndSampleUsagePeriodically(rows.size(), BUILD_NON_MATCH_RIGHT_ROWS_SCOPE);
             rows.add(joinRow(null, rightRow));
           }
         } else {
           int numRightRows = rightRows.size();
           int unmatchedIndex = 0;
           while ((unmatchedIndex = matchedIndices.nextClearBit(unmatchedIndex)) < numRightRows) {
+            checkTerminationAndSampleUsagePeriodically(rows.size(), BUILD_NON_MATCH_RIGHT_ROWS_SCOPE);
             rows.add(joinRow(null, rightRows.get(unmatchedIndex++)));
           }
         }

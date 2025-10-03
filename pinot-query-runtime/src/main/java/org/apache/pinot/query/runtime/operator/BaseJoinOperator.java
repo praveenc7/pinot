@@ -88,7 +88,7 @@ public abstract class BaseJoinOperator extends MultiStageOperator {
   protected MseBlock.Eos _eos;
 
   public BaseJoinOperator(OpChainExecutionContext context, MultiStageOperator leftInput, DataSchema leftSchema,
-      MultiStageOperator rightInput, JoinNode node) {
+                          MultiStageOperator rightInput, JoinNode node) {
     super(context);
     _leftInput = leftInput;
     _rightInput = rightInput;
@@ -122,7 +122,7 @@ public abstract class BaseJoinOperator extends MultiStageOperator {
   }
 
   protected static JoinOverFlowMode getJoinOverflowMode(Map<String, String> contextMetadata,
-      @Nullable PlanNode.NodeHint nodeHint) {
+                                                        @Nullable PlanNode.NodeHint nodeHint) {
     if (nodeHint != null) {
       Map<String, String> joinOptions = nodeHint.getHintOptions().get(PinotHintOptions.JOIN_HINT_OPTIONS);
       if (joinOptions != null) {
@@ -202,7 +202,7 @@ public abstract class BaseJoinOperator extends MultiStageOperator {
 
       addRowsToRightTable(rows);
       numRows += rows.size();
-      sampleAndCheckInterruption();
+      checkTerminationAndSampleUsage();
       rightBlock = _rightInput.nextBlock();
     }
 
@@ -248,7 +248,7 @@ public abstract class BaseJoinOperator extends MultiStageOperator {
         }
       }
       List<Object[]> rows = buildJoinedRows((MseBlock.Data) leftBlock);
-      sampleAndCheckInterruption();
+      checkTerminationAndSampleUsage();
       if (!rows.isEmpty()) {
         return new RowHeapDataBlock(rows, _resultSchema);
       }

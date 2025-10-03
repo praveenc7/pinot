@@ -40,8 +40,7 @@ import org.apache.pinot.query.runtime.blocks.MseBlock;
 import org.apache.pinot.query.runtime.plan.MultiStageQueryStats;
 import org.apache.pinot.query.runtime.plan.OpChainExecutionContext;
 import org.apache.pinot.query.runtime.plan.pipeline.PipelineBreakerOperator;
-import org.apache.pinot.spi.exception.EarlyTerminationException;
-import org.apache.pinot.spi.exception.QueryErrorCode;
+import org.apache.pinot.spi.query.QueryThreadContext;
 import org.apache.pinot.spi.trace.InvocationScope;
 import org.apache.pinot.spi.trace.Tracing;
 import org.slf4j.Logger;
@@ -73,34 +72,23 @@ public abstract class MultiStageOperator
 
   public abstract void registerExecution(long time, int numRows);
 
-  /// This method should be called periodically by the operator to check whether the execution should be interrupted.
-  ///
-  /// This could happen when the request deadline is reached, or the thread accountant decides to interrupt the query
-  /// due to resource constraints.
-  ///
-  /// Normally, callers should call [#sampleAndCheckInterruption(long deadlineMs)] passing the correct deadline, but
-  /// given most operators use either the active or the passive deadline, this method is provided as a convenience
-  /// method. By default, it uses the active deadline, which is the one that should be used for most operators, but
-  /// if the operator does not actively process data (ie both mailbox operators), it should override this method to
-  /// use the passive deadline instead.
-  /// See for example [MailboxSendOperator][org.apache.pinot.query.runtime.operator.MailboxSendOperator]).
-  protected void sampleAndCheckInterruption() {
-    sampleAndCheckInterruption(_context.getActiveDeadlineMs());
+  protected void checkTermination() {
+    QueryThreadContext.checkTermination(this::getExplainName, getDeadlineMs());
   }
 
-  /// This method should be called periodically by the operator to check whether the execution should be interrupted.
-  ///
-  /// This could happen when the request deadline is reached, or the thread accountant decides to interrupt the query
-  /// due to resource constraints.
-  protected void sampleAndCheckInterruption(long deadlineMs) {
-    if (System.currentTimeMillis() >= deadlineMs) {
-      earlyTerminate();
-      throw QueryErrorCode.EXECUTION_TIMEOUT.asException("Timing out on " + getExplainName());
-    }
-    Tracing.ThreadAccountantOps.sample();
-    if (Tracing.ThreadAccountantOps.isInterrupted()) {
-      earlyTerminate();
-    }
+  protected void checkTerminationAndSampleUsage() {
+    QueryThreadContext.checkTerminationAndSampleUsage(this::getExplainName, getDeadlineMs());
+  }
+
+  protected void checkTerminationAndSampleUsagePeriodically(int numRecordsProcessed, String scope) {
+    QueryThreadContext.checkTerminationAndSampleUsagePeriodically(numRecordsProcessed, scope, getDeadlineMs());
+  }
+
+  /// By default, it uses the active deadline, which is the one that should be used for most operators, but if the
+  /// operator does not actively process data (ie both mailbox operators), it should override this method to use the
+  /// passive deadline instead.
+  protected long getDeadlineMs() {
+    return _context.getActiveDeadlineMs();
   }
 
   /**
@@ -110,9 +98,6 @@ public abstract class MultiStageOperator
    */
   @Override
   public MseBlock nextBlock() {
-    if (Tracing.ThreadAccountantOps.isInterrupted()) {
-      throw new EarlyTerminationException("Interrupted while processing next block");
-    }
     if (logger().isDebugEnabled()) {
       logger().debug("Operator {}: Reading next block", _operatorId);
     }
@@ -120,6 +105,7 @@ public abstract class MultiStageOperator
       MseBlock nextBlock;
       Stopwatch executeStopwatch = Stopwatch.createStarted();
       try {
+        checkTermination();
         nextBlock = getNextBlock();
       } catch (Exception e) {
         nextBlock = ErrorMseBlock.fromException(e);

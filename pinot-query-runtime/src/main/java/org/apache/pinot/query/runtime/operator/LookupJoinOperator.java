@@ -69,7 +69,7 @@ public class LookupJoinOperator extends MultiStageOperator {
   private final StatMap<StatKey> _statMap = new StatMap<>(StatKey.class);
 
   public LookupJoinOperator(OpChainExecutionContext context, MultiStageOperator leftInput,
-      MultiStageOperator rightInput, JoinNode node) {
+                            MultiStageOperator rightInput, JoinNode node) {
     super(context);
     _leftInput = leftInput;
     Preconditions.checkState(rightInput instanceof LeafOperator, "Right input must be leaf operator");
@@ -135,7 +135,7 @@ public class LookupJoinOperator extends MultiStageOperator {
         return leftBlock;
       }
       List<Object[]> rows = buildJoinedRows((MseBlock.Data) leftBlock);
-      sampleAndCheckInterruption();
+      checkTerminationAndSampleUsage();
       if (!rows.isEmpty()) {
         return new RowHeapDataBlock(rows, _resultSchema);
       }

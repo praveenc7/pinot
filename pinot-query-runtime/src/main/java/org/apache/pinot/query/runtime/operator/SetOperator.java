@@ -53,7 +53,7 @@ public abstract class SetOperator extends MultiStageOperator {
   protected final StatMap<StatKey> _statMap = new StatMap<>(StatKey.class);
 
   public SetOperator(OpChainExecutionContext opChainExecutionContext, List<MultiStageOperator> inputOperators,
-      DataSchema dataSchema) {
+                     DataSchema dataSchema) {
     super(opChainExecutionContext);
     _dataSchema = dataSchema;
     _inputOperators = inputOperators;
@@ -113,7 +113,7 @@ public abstract class SetOperator extends MultiStageOperator {
       for (Object[] row : dataBlock.asRowHeap().getRows()) {
         _rightRowSet.add(new Record(row));
       }
-      sampleAndCheckInterruption();
+      checkTerminationAndSampleUsage();
       block = _rightChildOperator.nextBlock();
     }
     MseBlock.Eos eosBlock = (MseBlock.Eos) block;
@@ -141,7 +141,7 @@ public abstract class SetOperator extends MultiStageOperator {
           rows.add(row);
         }
       }
-      sampleAndCheckInterruption();
+      checkTerminationAndSampleUsage();
       if (!rows.isEmpty()) {
         return new RowHeapDataBlock(rows, _dataSchema);
       }

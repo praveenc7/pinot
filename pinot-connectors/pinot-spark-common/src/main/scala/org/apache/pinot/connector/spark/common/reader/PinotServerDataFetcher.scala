@@ -27,6 +27,7 @@ import org.apache.pinot.connector.spark.common.{Logging, PinotDataSourceReadOpti
 import org.apache.pinot.core.routing.ServerRouteInfo
 import org.apache.pinot.core.transport.server.routing.stats.ServerRoutingStatsManager
 import org.apache.pinot.core.transport.{AsyncQueryResponse, QueryRouter, ServerInstance}
+import org.apache.pinot.spi.accounting.ThreadAccountantUtils
 import org.apache.pinot.spi.config.table.TableType
 import org.apache.pinot.spi.env.PinotConfiguration
 import org.apache.pinot.spi.metrics.PinotMetricUtils
@@ -49,8 +50,7 @@ private[reader] class PinotServerDataFetcher(
   private val brokerMetrics = new BrokerMetrics(metricsRegistry)
   private val pinotConfig = new PinotConfiguration()
   private val serverRoutingStatsManager = new ServerRoutingStatsManager(pinotConfig, brokerMetrics)
-  private val queryRouter = new QueryRouter(brokerId, brokerMetrics, serverRoutingStatsManager)
-  // TODO add support for TLS-secured server
+  private val queryRouter = new QueryRouter(brokerId, null, null, serverRoutingStatsManager, ThreadAccountantUtils.getNoOpAccountant())
 
   def fetchData(): List[DataTable] = {
     val routingTableForRequest = createRoutingTableForRequest()

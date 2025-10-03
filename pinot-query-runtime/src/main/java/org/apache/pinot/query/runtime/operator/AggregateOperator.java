@@ -263,7 +263,7 @@ public class AggregateOperator extends MultiStageOperator {
     MseBlock block = _input.nextBlock();
     while (block.isData()) {
       _groupByExecutor.processBlock((MseBlock.Data) block);
-      sampleAndCheckInterruption();
+      checkTerminationAndSampleUsage();
       block = _input.nextBlock();
     }
     return (MseBlock.Eos) block;
@@ -279,7 +279,7 @@ public class AggregateOperator extends MultiStageOperator {
     MseBlock block = _input.nextBlock();
     while (block.isData()) {
       _aggregationExecutor.processBlock((MseBlock.Data) block);
-      sampleAndCheckInterruption();
+      checkTerminationAndSampleUsage();
       block = _input.nextBlock();
     }
     return (MseBlock.Eos) block;
@@ -361,7 +361,7 @@ public class AggregateOperator extends MultiStageOperator {
   }
 
   static Map<ExpressionContext, BlockValSet> getBlockValSetMap(AggregationFunction<?, ?> aggFunction,
-      MseBlock.Data block) {
+                                                               MseBlock.Data block) {
     List<ExpressionContext> expressions = aggFunction.getInputExpressions();
     int numExpressions = expressions.size();
     if (numExpressions == 0) {
@@ -394,7 +394,8 @@ public class AggregateOperator extends MultiStageOperator {
   }
 
   static Map<ExpressionContext, BlockValSet> getFilteredBlockValSetMap(AggregationFunction<?, ?> aggFunction,
-      MseBlock.Data block, int numMatchedRows, RoaringBitmap matchedBitmap) {
+                                                                       MseBlock.Data block, int numMatchedRows,
+                                                                       RoaringBitmap matchedBitmap) {
     List<ExpressionContext> expressions = aggFunction.getInputExpressions();
     int numExpressions = expressions.size();
     if (numExpressions == 0) {

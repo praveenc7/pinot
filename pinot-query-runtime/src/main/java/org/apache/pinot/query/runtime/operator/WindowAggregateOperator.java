@@ -112,7 +112,7 @@ public class WindowAggregateOperator extends MultiStageOperator {
   private MseBlock.Eos _eosBlock;
 
   public WindowAggregateOperator(OpChainExecutionContext context, MultiStageOperator input, DataSchema inputSchema,
-      WindowNode node) {
+                                 WindowNode node) {
     super(context);
 
     _input = input;
@@ -230,10 +230,11 @@ public class WindowAggregateOperator extends MultiStageOperator {
       for (Object[] row : container) {
         // TODO: Revisit null direction handling for all query types
         Key key = AggregationUtils.extractRowKey(row, _keys);
+        checkTerminationAndSampleUsagePeriodically(_numRows, EXPLAIN_NAME);
         partitionRows.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
       }
       _numRows += containerSize;
-      sampleAndCheckInterruption();
+      checkTerminationAndSampleUsage();
       block = _input.nextBlock();
     }
     MseBlock.Eos eosBlock = (MseBlock.Eos) block;
@@ -253,6 +254,7 @@ public class WindowAggregateOperator extends MultiStageOperator {
       for (WindowFunction windowFunction : _windowFunctions) {
         List<Object> processRows = windowFunction.processRows(rowList);
         assert processRows.size() == rowList.size();
+        checkTerminationAndSampleUsagePeriodically(windowFunctionResults.size(), EXPLAIN_NAME);
         windowFunctionResults.add(processRows);
       }
 
@@ -265,6 +267,7 @@ public class WindowAggregateOperator extends MultiStageOperator {
         }
         // Convert the results from WindowFunction to the desired type
         TypeUtils.convertRow(row, resultStoredTypes);
+        checkTerminationAndSampleUsagePeriodically(rows.size(), EXPLAIN_NAME);
         rows.add(row);
       }
     }

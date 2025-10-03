@@ -34,6 +34,7 @@ import org.apache.pinot.common.request.InstanceRequest;
 import org.apache.pinot.common.utils.config.QueryOptionsUtils;
 import org.apache.pinot.core.routing.ServerRouteInfo;
 import org.apache.pinot.core.transport.server.routing.stats.ServerRoutingStatsManager;
+import org.apache.pinot.spi.accounting.ThreadAccountant;
 import org.apache.pinot.spi.config.table.TableType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,37 +50,25 @@ public class QueryRouter {
   private static final Logger LOGGER = LoggerFactory.getLogger(QueryRouter.class);
 
   private final String _brokerId;
-  private final BrokerMetrics _brokerMetrics;
   private final ServerChannels _serverChannels;
   private final ServerChannels _serverChannelsTls;
-  private final ConcurrentHashMap<Long, AsyncQueryResponse> _asyncQueryResponseMap = new ConcurrentHashMap<>();
   private final ServerRoutingStatsManager _serverRoutingStatsManager;
 
-  /**
-   * Creates an unsecured query router.
-   * @param brokerId broker id
-   * @param brokerMetrics broker metrics
-   * @param serverRoutingStatsManager
-   */
-  public QueryRouter(String brokerId, BrokerMetrics brokerMetrics,
-      ServerRoutingStatsManager serverRoutingStatsManager) {
-    this(brokerId, brokerMetrics, null, null, serverRoutingStatsManager);
-  }
+  private final BrokerMetrics _brokerMetrics = BrokerMetrics.get();
+  private final ConcurrentHashMap<Long, AsyncQueryResponse> _asyncQueryResponseMap = new ConcurrentHashMap<>();
 
   /**
    * Creates a query router with TLS config.
    *
    * @param brokerId broker id
-   * @param brokerMetrics broker metrics
    * @param nettyConfig configurations for netty library
    * @param tlsConfig TLS config
    */
-  public QueryRouter(String brokerId, BrokerMetrics brokerMetrics, @Nullable NettyConfig nettyConfig,
-      @Nullable TlsConfig tlsConfig, ServerRoutingStatsManager serverRoutingStatsManager) {
+  public QueryRouter(String brokerId, @Nullable NettyConfig nettyConfig, @Nullable TlsConfig tlsConfig,
+      ServerRoutingStatsManager serverRoutingStatsManager, ThreadAccountant threadAccountant) {
     _brokerId = brokerId;
-    _brokerMetrics = brokerMetrics;
-    _serverChannels = new ServerChannels(this, brokerMetrics, nettyConfig, null);
-    _serverChannelsTls = tlsConfig != null ? new ServerChannels(this, brokerMetrics, nettyConfig, tlsConfig) : null;
+    _serverChannels = new ServerChannels(this, nettyConfig, null, threadAccountant);
+    _serverChannelsTls = tlsConfig != null ? new ServerChannels(this, nettyConfig, tlsConfig, threadAccountant) : null;
     _serverRoutingStatsManager = serverRoutingStatsManager;
   }
 

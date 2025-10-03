@@ -40,8 +40,6 @@ import org.apache.pinot.query.timeboundary.TimeBoundaryStrategy;
 import org.apache.pinot.spi.config.table.QueryConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
-import org.apache.pinot.spi.query.QueryThreadContext;
-import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.spi.utils.builder.TableNameBuilder;
 
 
@@ -121,16 +119,8 @@ public class LogicalTableRouteInfo extends BaseTableRouteInfo {
 
   private InstanceRequest getInstanceRequest(long requestId, String brokerId, BrokerRequest brokerRequest,
       List<TableSegmentsInfo> tableSegmentsInfoList) {
-    InstanceRequest instanceRequest = new InstanceRequest();
-    instanceRequest.setRequestId(requestId);
-    instanceRequest.setCid(QueryThreadContext.getCid());
-    instanceRequest.setQuery(brokerRequest);
-    Map<String, String> queryOptions = brokerRequest.getPinotQuery().getQueryOptions();
-    if (queryOptions != null) {
-      instanceRequest.setEnableTrace(Boolean.parseBoolean(queryOptions.get(CommonConstants.Broker.Request.TRACE)));
-    }
+    InstanceRequest instanceRequest = TableRouteInfo.createInstanceRequest(brokerRequest, brokerId, requestId);
     instanceRequest.setTableSegmentsInfoList(tableSegmentsInfoList);
-    instanceRequest.setBrokerId(brokerId);
     return instanceRequest;
   }
 

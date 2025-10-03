@@ -45,7 +45,7 @@ import org.apache.pinot.core.data.table.Table;
 import org.apache.pinot.core.query.aggregation.function.AggregationFunction;
 import org.apache.pinot.core.query.aggregation.groupby.AggregationGroupByResult;
 import org.apache.pinot.core.query.request.context.QueryContext;
-import org.apache.pinot.spi.trace.Tracing;
+import org.apache.pinot.spi.query.QueryThreadContext;
 import org.apache.pinot.spi.utils.ByteArray;
 import org.roaringbitmap.RoaringBitmap;
 
@@ -70,7 +70,7 @@ public class GroupByResultsBlock extends BaseResultsBlock {
    * For segment level group-by results.
    */
   public GroupByResultsBlock(DataSchema dataSchema, AggregationGroupByResult aggregationGroupByResult,
-      QueryContext queryContext) {
+                             QueryContext queryContext) {
     _dataSchema = dataSchema;
     _aggregationGroupByResult = aggregationGroupByResult;
     _intermediateRecords = null;
@@ -82,7 +82,7 @@ public class GroupByResultsBlock extends BaseResultsBlock {
    * For segment level group-by results.
    */
   public GroupByResultsBlock(DataSchema dataSchema, Collection<IntermediateRecord> intermediateRecords,
-      QueryContext queryContext) {
+                             QueryContext queryContext) {
     _dataSchema = dataSchema;
     _aggregationGroupByResult = null;
     _intermediateRecords = intermediateRecords;
@@ -218,7 +218,8 @@ public class GroupByResultsBlock extends BaseResultsBlock {
       }
       int rowId = 0;
       while (iterator.hasNext()) {
-        Tracing.ThreadAccountantOps.sampleAndCheckInterruptionPeriodically(numRowsAdded);
+        QueryThreadContext.checkTerminationAndSampleUsagePeriodically(numRowsAdded,
+            "GroupByResultsBlock#getDataTable");
         dataTableBuilder.startRow();
         Object[] values = iterator.next().getValues();
         for (int i = 0; i < numColumns; i++) {
@@ -247,7 +248,8 @@ public class GroupByResultsBlock extends BaseResultsBlock {
       }
     } else {
       while (iterator.hasNext()) {
-        Tracing.ThreadAccountantOps.sampleAndCheckInterruptionPeriodically(numRowsAdded);
+        QueryThreadContext.checkTerminationAndSampleUsagePeriodically(numRowsAdded,
+            "GroupByResultsBlock#getDataTable");
         dataTableBuilder.startRow();
         Object[] values = iterator.next().getValues();
         for (int i = 0; i < numColumns; i++) {
@@ -268,7 +270,7 @@ public class GroupByResultsBlock extends BaseResultsBlock {
   }
 
   private void setDataTableColumn(ColumnDataType storedColumnDataType, DataTableBuilder dataTableBuilder,
-      int columnIndex, Object value)
+                                  int columnIndex, Object value)
       throws IOException {
     switch (storedColumnDataType) {
       case INT:

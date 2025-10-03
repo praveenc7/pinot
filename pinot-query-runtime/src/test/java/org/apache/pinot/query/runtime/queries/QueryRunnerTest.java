@@ -40,6 +40,7 @@ import org.apache.pinot.spi.data.Schema;
 import org.apache.pinot.spi.data.readers.GenericRow;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.utils.CommonConstants;
+import org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey;
 import org.apache.pinot.spi.utils.JsonUtils;
 import org.apache.pinot.spi.utils.builder.TableNameBuilder;
 import org.assertj.core.api.Assertions;
@@ -49,8 +50,6 @@ import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
-
-import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.*;
 
 
 /**
@@ -343,8 +342,11 @@ public class QueryRunnerTest extends QueryRunnerTestBase {
 
     // Positive int keys (only included ones that will be parsed for this query)
     for (String key : new String[]{
-        MAX_EXECUTION_THREADS, NUM_GROUPS_LIMIT, MAX_INITIAL_RESULT_HOLDER_CAPACITY, MAX_STREAMING_PENDING_BLOCKS,
-        MAX_ROWS_IN_JOIN
+        QueryOptionKey.MAX_EXECUTION_THREADS,
+        QueryOptionKey.NUM_GROUPS_LIMIT,
+        QueryOptionKey.MAX_INITIAL_RESULT_HOLDER_CAPACITY,
+        QueryOptionKey.MAX_STREAMING_PENDING_BLOCKS,
+        QueryOptionKey.MAX_ROWS_IN_JOIN
     }) {
       for (String value : new String[]{"-10000000000", "-2147483648", "-1", "0", "2147483648", "10000000000"}) {
         testCases.add(new Object[]{

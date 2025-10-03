@@ -35,6 +35,7 @@ import org.apache.pinot.core.transport.ServerRoutingInstance;
 import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.exception.QueryErrorCode;
+import org.apache.pinot.spi.query.QueryThreadContext;
 import org.apache.pinot.spi.utils.CommonConstants.Broker;
 import org.apache.pinot.sql.parsers.CalciteSqlCompiler;
 import org.testng.annotations.Test;
@@ -69,14 +70,19 @@ public class BrokerReduceServiceTest {
       ServerRoutingInstance instance = new ServerRoutingInstance("localhost", i, TableType.OFFLINE);
       dataTableMap.put(instance, dataTable);
     }
-    long reduceTimeoutMs = 1;
-    BrokerResponseNative brokerResponse =
-        brokerReduceService.reduceOnDataTable(brokerRequest, brokerRequest, dataTableMap, reduceTimeoutMs,
-            mock(BrokerMetrics.class));
+    BrokerResponseNative brokerResponse = reduce(brokerReduceService, brokerRequest, dataTableMap, 1L);
     brokerReduceService.shutDown();
 
     List<QueryProcessingException> exceptions = brokerResponse.getExceptions();
     assertEquals(exceptions.size(), 1);
     assertEquals(exceptions.get(0).getErrorCode(), QueryErrorCode.BROKER_TIMEOUT.getId());
+  }
+
+  private BrokerResponseNative reduce(BrokerReduceService brokerReduceService, BrokerRequest brokerRequest,
+      Map<ServerRoutingInstance, DataTable> dataTableMap, long reduceTimeoutMs) {
+    try (QueryThreadContext ignore = QueryThreadContext.openForSseTest()) {
+      return brokerReduceService.reduceOnDataTable(brokerRequest, brokerRequest, dataTableMap, reduceTimeoutMs,
+          mock(BrokerMetrics.class));
+    }
   }
 }

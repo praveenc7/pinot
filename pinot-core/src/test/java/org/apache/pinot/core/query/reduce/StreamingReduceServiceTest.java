@@ -91,6 +91,7 @@ public class StreamingReduceServiceTest {
         (cause) -> cause instanceof TimeoutException));
   }
 
+
   private static boolean verifyException(Callable<Void> verifyTarget, Predicate<Throwable> verifyCause) {
     boolean exceptionVerified = false;
     if (verifyTarget == null || verifyCause == null) {

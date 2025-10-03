@@ -28,7 +28,6 @@ import java.util.concurrent.TimeUnit;
 import javax.annotation.concurrent.ThreadSafe;
 import org.apache.pinot.broker.broker.AccessControlFactory;
 import org.apache.pinot.broker.queryquota.QueryQuotaManager;
-import org.apache.pinot.broker.routing.BrokerRoutingManager;
 import org.apache.pinot.common.config.GrpcConfig;
 import org.apache.pinot.common.config.provider.TableCache;
 import org.apache.pinot.common.failuredetector.FailureDetector;
@@ -38,11 +37,12 @@ import org.apache.pinot.common.response.broker.BrokerResponseNative;
 import org.apache.pinot.common.utils.grpc.ServerGrpcQueryClient;
 import org.apache.pinot.common.utils.grpc.ServerGrpcRequestBuilder;
 import org.apache.pinot.core.query.reduce.StreamingReduceService;
+import org.apache.pinot.core.routing.RoutingManager;
 import org.apache.pinot.core.routing.ServerRouteInfo;
 import org.apache.pinot.core.transport.ServerInstance;
 import org.apache.pinot.core.transport.ServerRoutingInstance;
 import org.apache.pinot.core.transport.TableRouteInfo;
-import org.apache.pinot.spi.accounting.ThreadResourceUsageAccountant;
+import org.apache.pinot.spi.accounting.ThreadAccountant;
 import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.query.QueryThreadContext;
@@ -63,10 +63,12 @@ public class GrpcBrokerRequestHandler extends BaseSingleStageBrokerRequestHandle
   private final FailureDetector _failureDetector;
 
   // TODO: Support TLS
-  public GrpcBrokerRequestHandler(PinotConfiguration config, String brokerId, BrokerRoutingManager routingManager,
+  public GrpcBrokerRequestHandler(PinotConfiguration config, String brokerId,
+      BrokerRequestIdGenerator requestIdGenerator, RoutingManager routingManager,
       AccessControlFactory accessControlFactory, QueryQuotaManager queryQuotaManager, TableCache tableCache,
-      FailureDetector failureDetector, ThreadResourceUsageAccountant accountant) {
-    super(config, brokerId, routingManager, accessControlFactory, queryQuotaManager, tableCache, accountant);
+      FailureDetector failureDetector, ThreadAccountant threadAccountant) {
+    super(config, brokerId, requestIdGenerator, routingManager, accessControlFactory, queryQuotaManager, tableCache,
+        threadAccountant);
     _streamingReduceService = new StreamingReduceService(config);
     _streamingQueryClient = new PinotServerStreamingQueryClient(GrpcConfig.buildGrpcQueryConfig(config));
     _failureDetector = failureDetector;
@@ -87,8 +89,9 @@ public class GrpcBrokerRequestHandler extends BaseSingleStageBrokerRequestHandle
 
   @Override
   protected BrokerResponseNative processBrokerRequest(long requestId, BrokerRequest originalBrokerRequest,
-      BrokerRequest serverBrokerRequest, TableRouteInfo route, long timeoutMs,
-      ServerStats serverStats, RequestContext requestContext)
+                                                      BrokerRequest serverBrokerRequest, TableRouteInfo route,
+                                                      long timeoutMs,
+                                                      ServerStats serverStats, RequestContext requestContext)
       throws Exception {
     BrokerRequest offlineBrokerRequest = route.getOfflineBrokerRequest();
     BrokerRequest realtimeBrokerRequest = route.getRealtimeBrokerRequest();
@@ -129,7 +132,7 @@ public class GrpcBrokerRequestHandler extends BaseSingleStageBrokerRequestHandle
       List<String> segments = routingEntry.getValue().getSegments();
       // TODO: enable throttling on per host bases.
       try {
-        String cid = QueryThreadContext.getCid() == null ? QueryThreadContext.getCid() : Long.toString(requestId);
+        String cid = QueryThreadContext.get().getExecutionContext().getCid();
         Iterator<Server.ServerResponse> streamingResponse = _streamingQueryClient.submit(serverInstance,
             new ServerGrpcRequestBuilder()
                 .setRequestId(requestId)

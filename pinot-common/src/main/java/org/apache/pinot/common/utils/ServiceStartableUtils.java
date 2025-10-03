@@ -26,7 +26,6 @@ import org.apache.helix.zookeeper.datamodel.serializer.ZNRecordSerializer;
 import org.apache.helix.zookeeper.impl.client.ZkClient;
 import org.apache.pinot.segment.spi.index.ForwardIndexConfig;
 import org.apache.pinot.spi.env.PinotConfiguration;
-import org.apache.pinot.spi.query.QueryThreadContext;
 import org.apache.pinot.spi.services.ServiceRole;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.slf4j.Logger;
@@ -93,8 +92,6 @@ public class ServiceStartableUtils {
           addConfigIfNotExists(instanceConfig, key, value);
         }
       }
-
-      QueryThreadContext.onStartup(instanceConfig);
     } finally {
       ZkStarter.closeAsync(zkClient);
     }

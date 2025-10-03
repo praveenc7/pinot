@@ -28,6 +28,8 @@ import org.apache.pinot.core.routing.ServerRouteInfo;
 import org.apache.pinot.core.routing.TimeBoundaryInfo;
 import org.apache.pinot.spi.config.table.QueryConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
+import org.apache.pinot.spi.query.QueryThreadContext;
+import org.apache.pinot.spi.utils.CommonConstants;
 
 
 /**
@@ -214,4 +216,21 @@ public interface TableRouteInfo {
    * @return A map of ServerRoutingInstance and InstanceRequest
    */
   Map<ServerRoutingInstance, InstanceRequest> getRequestMap(long requestId, String brokerId, boolean preferTls);
+
+  static InstanceRequest createInstanceRequest(BrokerRequest brokerRequest, String brokerId, long requestId) {
+    InstanceRequest instanceRequest = new InstanceRequest();
+    instanceRequest.setBrokerId(brokerId);
+    instanceRequest.setRequestId(requestId);
+    // NOTE: In production code, threadContext should never be null. It might be null in tests when QueryThreadContext
+    //       is not set up.
+    QueryThreadContext threadContext = QueryThreadContext.getIfAvailable();
+    String cid = threadContext != null ? threadContext.getExecutionContext().getCid() : null;
+    instanceRequest.setCid(cid);
+    instanceRequest.setQuery(brokerRequest);
+    Map<String, String> queryOptions = brokerRequest.getPinotQuery().getQueryOptions();
+    if (queryOptions != null) {
+      instanceRequest.setEnableTrace(Boolean.parseBoolean(queryOptions.get(CommonConstants.Broker.Request.TRACE)));
+    }
+    return instanceRequest;
+  }
 }

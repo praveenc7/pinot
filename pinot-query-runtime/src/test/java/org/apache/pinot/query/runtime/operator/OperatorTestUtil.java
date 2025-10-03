@@ -28,6 +28,7 @@ import org.apache.pinot.common.datatable.StatMap;
 import org.apache.pinot.common.utils.DataSchema;
 import org.apache.pinot.query.mailbox.MailboxService;
 import org.apache.pinot.query.mailbox.ReceivingMailbox;
+import org.apache.pinot.query.planner.physical.DispatchablePlanFragment;
 import org.apache.pinot.query.routing.StageMetadata;
 import org.apache.pinot.query.routing.StagePlan;
 import org.apache.pinot.query.routing.WorkerMetadata;
@@ -39,6 +40,7 @@ import org.apache.pinot.query.runtime.plan.OpChainExecutionContext;
 import org.apache.pinot.query.runtime.plan.server.ServerPlanRequestContext;
 import org.apache.pinot.query.testutils.MockDataBlockOperatorFactory;
 import org.apache.pinot.segment.spi.memory.DataBuffer;
+import org.apache.pinot.spi.query.QueryExecutionContext;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.testng.Assert;
 
@@ -109,8 +111,8 @@ public class OperatorTestUtil {
 
   public static OpChainExecutionContext getOpChainContext(MailboxService mailboxService, long deadlineMs,
       StageMetadata stageMetadata) {
-    return new OpChainExecutionContext(mailboxService, 0, deadlineMs, ImmutableMap.of(), stageMetadata,
-        stageMetadata.getWorkerMetadataList().get(0), null, null, true);
+    return new OpChainExecutionContext(mailboxService, 0, "cid", deadlineMs, deadlineMs, "brokerId", Map.of(),
+        stageMetadata, stageMetadata.getWorkerMetadataList().get(0), null, true);
   }
 
   public static OpChainExecutionContext getTracingContext() {
@@ -129,13 +131,13 @@ public class OperatorTestUtil {
     MailboxService mailboxService = mock(MailboxService.class);
     when(mailboxService.getHostname()).thenReturn("localhost");
     when(mailboxService.getPort()).thenReturn(1234);
-    WorkerMetadata workerMetadata = new WorkerMetadata(0, ImmutableMap.of(), ImmutableMap.of());
-    StageMetadata stageMetadata = new StageMetadata(0, ImmutableList.of(workerMetadata), ImmutableMap.of());
-    OpChainExecutionContext opChainExecutionContext = new OpChainExecutionContext(mailboxService, 123L, Long.MAX_VALUE,
-        opChainMetadata, stageMetadata, workerMetadata, null, null, true);
-
+    WorkerMetadata workerMetadata = new WorkerMetadata(0, Map.of(), Map.of());
+    StageMetadata stageMetadata =
+        new StageMetadata(0, List.of(workerMetadata), Map.of(DispatchablePlanFragment.TABLE_NAME_KEY, "testTable"));
+    OpChainExecutionContext opChainExecutionContext =
+        OpChainExecutionContext.fromQueryContext(mailboxService, opChainMetadata, stageMetadata, workerMetadata, null,
+            true, QueryExecutionContext.forMseTest());
     StagePlan stagePlan = new StagePlan(null, stageMetadata);
-
     opChainExecutionContext.setLeafStageContext(
         new ServerPlanRequestContext(stagePlan, null, null, null));
     return opChainExecutionContext;

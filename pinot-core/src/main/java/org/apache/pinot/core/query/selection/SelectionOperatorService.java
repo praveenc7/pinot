@@ -26,7 +26,7 @@ import org.apache.pinot.common.response.broker.ResultTable;
 import org.apache.pinot.common.utils.DataSchema;
 import org.apache.pinot.core.query.request.context.QueryContext;
 import org.apache.pinot.core.query.utils.OrderByComparatorFactory;
-import org.apache.pinot.spi.trace.Tracing;
+import org.apache.pinot.spi.query.QueryThreadContext;
 import org.roaringbitmap.RoaringBitmap;
 
 
@@ -97,13 +97,15 @@ public class SelectionOperatorService {
             }
           }
           SelectionOperatorUtils.addToPriorityQueue(row, _rows, _numRowsToKeep);
-          Tracing.ThreadAccountantOps.sampleAndCheckInterruptionPeriodically(rowId);
+          QueryThreadContext.checkTerminationAndSampleUsagePeriodically(rowId,
+              "SelectionOperatorService#reduceWithOrdering");
         }
       } else {
         for (int rowId = 0; rowId < numRows; rowId++) {
           Object[] row = SelectionOperatorUtils.extractRowFromDataTable(dataTable, rowId);
           SelectionOperatorUtils.addToPriorityQueue(row, _rows, _numRowsToKeep);
-          Tracing.ThreadAccountantOps.sampleAndCheckInterruptionPeriodically(rowId);
+          QueryThreadContext.checkTerminationAndSampleUsagePeriodically(rowId,
+              "SelectionOperatorService#reduceWithOrdering");
         }
       }
     }

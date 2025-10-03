@@ -48,7 +48,6 @@ import org.apache.pinot.broker.api.AccessControl;
 import org.apache.pinot.broker.broker.AccessControlFactory;
 import org.apache.pinot.broker.querylog.QueryLogger;
 import org.apache.pinot.broker.queryquota.QueryQuotaManager;
-import org.apache.pinot.broker.routing.BrokerRoutingManager;
 import org.apache.pinot.common.config.TlsConfig;
 import org.apache.pinot.common.config.provider.TableCache;
 import org.apache.pinot.common.failuredetector.FailureDetector;
@@ -67,6 +66,7 @@ import org.apache.pinot.common.utils.NamedThreadFactory;
 import org.apache.pinot.common.utils.Timer;
 import org.apache.pinot.common.utils.config.QueryOptionsUtils;
 import org.apache.pinot.common.utils.tls.TlsUtils;
+import org.apache.pinot.core.routing.RoutingManager;
 import org.apache.pinot.core.transport.ServerInstance;
 import org.apache.pinot.query.ImmutableQueryEnvironment;
 import org.apache.pinot.query.QueryEnvironment;
@@ -80,16 +80,15 @@ import org.apache.pinot.query.routing.WorkerManager;
 import org.apache.pinot.query.runtime.MultiStageStatsTreeBuilder;
 import org.apache.pinot.query.runtime.plan.MultiStageQueryStats;
 import org.apache.pinot.query.service.dispatch.QueryDispatcher;
-import org.apache.pinot.spi.accounting.ThreadExecutionContext;
-import org.apache.pinot.spi.accounting.ThreadResourceUsageAccountant;
+import org.apache.pinot.spi.accounting.ThreadAccountant;
 import org.apache.pinot.spi.auth.TableAuthorizationResult;
 import org.apache.pinot.spi.auth.broker.RequesterIdentity;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.exception.QueryErrorCode;
 import org.apache.pinot.spi.exception.QueryException;
+import org.apache.pinot.spi.query.QueryExecutionContext;
 import org.apache.pinot.spi.query.QueryThreadContext;
 import org.apache.pinot.spi.trace.RequestContext;
-import org.apache.pinot.spi.trace.Tracing;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.sql.parsers.SqlNodeAndOptions;
 import org.apache.pinot.sql.parsers.rewriter.RlsUtils;
@@ -113,16 +112,16 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
   private final ExecutorService _queryCompileExecutor;
   protected final long _extraPassiveTimeoutMs;
 
-  public MultiStageBrokerRequestHandler(PinotConfiguration config, String brokerId, BrokerRoutingManager routingManager,
+  public MultiStageBrokerRequestHandler(PinotConfiguration config, String brokerId,
+      BrokerRequestIdGenerator requestIdGenerator, RoutingManager routingManager,
       AccessControlFactory accessControlFactory, QueryQuotaManager queryQuotaManager, TableCache tableCache,
-      MultiStageQueryThrottler queryThrottler, FailureDetector failureDetector,
-      ThreadResourceUsageAccountant accountant) {
-    super(config, brokerId, routingManager, accessControlFactory, queryQuotaManager, tableCache, accountant);
+      MultiStageQueryThrottler queryThrottler, FailureDetector failureDetector, ThreadAccountant threadAccountant) {
+    super(config, brokerId, requestIdGenerator, routingManager, accessControlFactory, queryQuotaManager, tableCache,
+        threadAccountant);
     String hostname = config.getProperty(CommonConstants.MultiStageQueryRunner.KEY_OF_QUERY_RUNNER_HOSTNAME);
     int port = Integer.parseInt(config.getProperty(CommonConstants.MultiStageQueryRunner.KEY_OF_QUERY_RUNNER_PORT));
     _workerManager = new WorkerManager(_brokerId, hostname, port, _routingManager);
-    TlsConfig tlsConfig = config.getProperty(
-        CommonConstants.Helix.CONFIG_OF_MULTI_STAGE_ENGINE_TLS_ENABLED,
+    TlsConfig tlsConfig = config.getProperty(CommonConstants.Helix.CONFIG_OF_MULTI_STAGE_ENGINE_TLS_ENABLED,
         CommonConstants.Helix.DEFAULT_MULTI_STAGE_ENGINE_TLS_ENABLED) ? TlsUtils.extractTlsConfig(config,
         CommonConstants.Broker.BROKER_TLS_PREFIX) : null;
 
@@ -161,12 +160,6 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
   public void shutDown() {
     _queryCompileExecutor.shutdown();
     _queryDispatcher.shutdown();
-  }
-
-  @Override
-  protected void onQueryStart(long requestId, String clientRequestId, String query, Object... extras) {
-    super.onQueryStart(requestId, clientRequestId, query, extras);
-    QueryThreadContext.setQueryEngine("mse");
   }
 
   @Override
@@ -262,16 +255,25 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
       throws QueryException, WebApplicationException {
     _queryLogger.log(requestId, query);
 
+    String cid = extractClientRequestId(sqlNodeAndOptions);
+    if (cid == null) {
+      cid = Long.toString(requestId);
+    }
     Map<String, String> options = sqlNodeAndOptions.getOptions();
-    long queryTimeoutMs = getTimeout(options);
-    QueryThreadContext.setActiveDeadlineMs(System.currentTimeMillis() + queryTimeoutMs);
-    QueryThreadContext.setPassiveDeadlineMs(System.currentTimeMillis() + queryTimeoutMs + getPassiveTimeout(options));
+    String workloadName = QueryOptionsUtils.getWorkloadName(sqlNodeAndOptions.getOptions());
+    long startTimeMs = requestContext.getRequestArrivalTimeMillis();
+    long timeoutMs = getTimeoutMs(options);
+    Timer queryTimer = new Timer(timeoutMs, TimeUnit.MILLISECONDS);
+    long activeDeadlineMs = startTimeMs + timeoutMs;
+    long passiveDeadlineMs = activeDeadlineMs + getExtraPassiveTimeoutMs(options);
 
-    Timer queryTimer = new Timer(queryTimeoutMs, TimeUnit.MILLISECONDS);
-
-    try (QueryEnvironment.CompiledQuery compiledQuery =
-        compileQuery(requestId, query, sqlNodeAndOptions, httpHeaders, queryTimer)) {
-
+    QueryExecutionContext executionContext =
+        new QueryExecutionContext(QueryExecutionContext.QueryType.MSE, requestId, cid, workloadName, startTimeMs,
+            activeDeadlineMs, passiveDeadlineMs, _brokerId, _brokerId);
+    QueryThreadContext.MseWorkerInfo mseWorkerInfo = new QueryThreadContext.MseWorkerInfo(0, 0);
+    try (QueryThreadContext ignore = QueryThreadContext.open(executionContext, mseWorkerInfo, _threadAccountant);
+        QueryEnvironment.CompiledQuery compiledQuery = compileQuery(requestId, query, sqlNodeAndOptions, httpHeaders,
+            queryTimer)) {
       checkAuthorization(requesterIdentity, requestContext, httpHeaders, compiledQuery);
 
       if (sqlNodeAndOptions.getSqlNode().getKind() == SqlKind.EXPLAIN) {
@@ -358,14 +360,14 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
         .build();
   }
 
-  private long getTimeout(Map<String, String> queryOptions) {
+  private long getTimeoutMs(Map<String, String> queryOptions) {
     Long timeoutMsFromQueryOption = QueryOptionsUtils.getTimeoutMs(queryOptions);
     return timeoutMsFromQueryOption != null ? timeoutMsFromQueryOption : _brokerTimeoutMs;
   }
 
-  private long getPassiveTimeout(Map<String, String> queryOptions) {
-    Long passiveTimeoutMsFromQueryOption = QueryOptionsUtils.getPassiveTimeoutMs(queryOptions);
-    return passiveTimeoutMsFromQueryOption != null ? passiveTimeoutMsFromQueryOption : _extraPassiveTimeoutMs;
+  private long getExtraPassiveTimeoutMs(Map<String, String> queryOptions) {
+    Long extraPassiveTimeoutMsFromQueryOption = QueryOptionsUtils.getExtraPassiveTimeoutMs(queryOptions);
+    return extraPassiveTimeoutMsFromQueryOption != null ? extraPassiveTimeoutMsFromQueryOption : _extraPassiveTimeoutMs;
   }
 
 
@@ -450,14 +452,9 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
       return new BrokerResponseNative(QueryErrorCode.EXECUTION_TIMEOUT);
     }
 
-    String clientRequestId = extractClientRequestId(query.getSqlNodeAndOptions());
-    onQueryStart(requestId, clientRequestId, query.getTextQuery());
-
     try {
-      String workloadName = QueryOptionsUtils.getWorkloadName(query.getOptions());
-      _resourceUsageAccountant.setupRunner(QueryThreadContext.getCid(), CommonConstants.Accounting.ANCHOR_TASK_ID,
-          ThreadExecutionContext.TaskType.MSE, workloadName);
-
+      String clientRequestId = extractClientRequestId(query.getSqlNodeAndOptions());
+      onQueryStart(requestId, clientRequestId, query.getTextQuery());
       long executionStartTimeNs = System.nanoTime();
       QueryDispatcher.QueryResult queryResults;
       try {
@@ -472,7 +469,6 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
         requestContext.setErrorCode(queryErrorCode);
         return new BrokerResponseNative(queryErrorCode, consolidatedMessage);
       } finally {
-        Tracing.ThreadAccountantOps.clear();
         onQueryFinish(requestId);
       }
 

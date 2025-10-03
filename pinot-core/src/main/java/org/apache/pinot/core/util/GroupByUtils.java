@@ -95,7 +95,8 @@ public final class GroupByUtils {
    * Creates an indexed table for the combine operator given a sample results block.
    */
   public static IndexedTable createIndexedTableForCombineOperator(GroupByResultsBlock resultsBlock,
-      QueryContext queryContext, int numThreads, ExecutorService executorService) {
+                                                                  QueryContext queryContext, int numThreads,
+                                                                  ExecutorService executorService) {
     DataSchema dataSchema = resultsBlock.getDataSchema();
     int numGroups = resultsBlock.getNumGroups();
     int limit = queryContext.getLimit();
@@ -147,7 +148,8 @@ public final class GroupByUtils {
    * Creates an indexed table for the data table reducer given a sample data table.
    */
   public static IndexedTable createIndexedTableForDataTableReducer(DataTable dataTable, QueryContext queryContext,
-      DataTableReducerContext reducerContext, int numThreads, ExecutorService executorService) {
+                                                                   DataTableReducerContext reducerContext,
+                                                                   int numThreads, ExecutorService executorService) {
     DataSchema dataSchema = dataTable.getDataSchema();
     int numGroups = dataTable.getNumberOfRows();
     int limit = queryContext.getLimit();
@@ -185,7 +187,9 @@ public final class GroupByUtils {
   }
 
   private static IndexedTable getTrimDisabledIndexedTable(DataSchema dataSchema, boolean hasFinalInput,
-      QueryContext queryContext, int resultSize, int initialCapacity, int numThreads, ExecutorService executorService) {
+                                                          QueryContext queryContext, int resultSize,
+                                                          int initialCapacity, int numThreads,
+                                                          ExecutorService executorService) {
     if (queryContext.isAccurateGroupByWithoutOrderBy() && queryContext.getOrderByExpressions() == null
         && queryContext.getHavingFilter() == null) {
       return new DeterministicConcurrentIndexedTable(dataSchema, hasFinalInput, queryContext, resultSize,
@@ -201,8 +205,9 @@ public final class GroupByUtils {
   }
 
   private static IndexedTable getTrimEnabledIndexedTable(DataSchema dataSchema, boolean hasFinalInput,
-      QueryContext queryContext, int resultSize, int trimSize, int trimThreshold, int initialCapacity, int numThreads,
-      ExecutorService executorService) {
+                                                         QueryContext queryContext, int resultSize, int trimSize,
+                                                         int trimThreshold, int initialCapacity, int numThreads,
+                                                         ExecutorService executorService) {
     assert trimThreshold != Integer.MAX_VALUE;
     if (numThreads == 1) {
       return new SimpleIndexedTable(dataSchema, hasFinalInput, queryContext, resultSize, trimSize, trimThreshold,

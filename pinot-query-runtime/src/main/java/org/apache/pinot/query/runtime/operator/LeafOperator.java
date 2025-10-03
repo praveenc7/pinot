@@ -62,9 +62,10 @@ import org.apache.pinot.query.runtime.blocks.RowHeapDataBlock;
 import org.apache.pinot.query.runtime.blocks.SuccessMseBlock;
 import org.apache.pinot.query.runtime.operator.utils.TypeUtils;
 import org.apache.pinot.query.runtime.plan.OpChainExecutionContext;
-import org.apache.pinot.spi.accounting.ThreadExecutionContext;
+import org.apache.pinot.spi.exception.EarlyTerminationException;
 import org.apache.pinot.spi.exception.QueryErrorCode;
-import org.apache.pinot.spi.trace.Tracing;
+import org.apache.pinot.spi.exception.TerminationException;
+import org.apache.pinot.spi.query.QueryThreadContext;
 import org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,6 +89,7 @@ public class LeafOperator extends MultiStageOperator {
 
   // Use a limit-sized BlockingQueue to store the results blocks and apply back pressure to the single-stage threads
   private final BlockingQueue<BaseResultsBlock> _blockingQueue;
+  private volatile boolean _terminated;
 
   @Nullable
   private volatile Future<Void> _executionFuture;
@@ -95,7 +97,7 @@ public class LeafOperator extends MultiStageOperator {
   private final StatMap<StatKey> _statMap = new StatMap<>(StatKey.class);
 
   public LeafOperator(OpChainExecutionContext context, List<ServerQueryRequest> requests, DataSchema dataSchema,
-      QueryExecutor queryExecutor, ExecutorService executorService) {
+                      QueryExecutor queryExecutor, ExecutorService executorService) {
     super(context);
     int numRequests = requests.size();
     Preconditions.checkArgument(numRequests == 1 || numRequests == 2, "Expected 1 or 2 requests, got: %s", numRequests);
@@ -151,6 +153,7 @@ public class LeafOperator extends MultiStageOperator {
       _executionFuture = startExecution();
     }
     if (_isEarlyTerminated) {
+      terminateAndClearResultsBlocks();
       return SuccessMseBlock.INSTANCE;
     }
     // Here we use passive deadline because we end up waiting for the SSE operators
@@ -166,6 +169,7 @@ public class LeafOperator extends MultiStageOperator {
       return ErrorMseBlock.fromMap(QueryErrorCode.fromKeyMap(exceptions));
     }
     if (resultsBlock == LAST_RESULTS_BLOCK) {
+      _terminated = true;
       return SuccessMseBlock.INSTANCE;
     } else {
       // Regular data block
@@ -308,6 +312,13 @@ public class LeafOperator extends MultiStageOperator {
     }
   }
 
+  private void checkTerminateException() {
+    TerminationException terminateException = QueryThreadContext.getTerminateException();
+    if (terminateException != null) {
+      throw terminateException;
+    }
+  }
+
   public ExplainedNode explain() {
     Preconditions.checkState(
         _requests.stream().allMatch(request -> request.getQueryContext().getExplain() == ExplainMode.NODE),
@@ -325,18 +336,25 @@ public class LeafOperator extends MultiStageOperator {
         long timeout = _context.getPassiveDeadlineMs() - System.currentTimeMillis();
         resultsBlock = _blockingQueue.poll(timeout, TimeUnit.MILLISECONDS);
       } catch (InterruptedException e) {
+        terminateAndClearResultsBlocks();
+        checkTerminateException();
         Thread.currentThread().interrupt();
         throw new RuntimeException("Interrupted while waiting for results block", e);
       }
       if (resultsBlock == null) {
+        terminateAndClearResultsBlocks();
+        checkTerminateException();
         throw new RuntimeException("Timed out waiting for results block");
       }
       // Terminate when receiving exception block
       Map<Integer, String> exceptions = _exceptions;
       if (exceptions != null) {
+        terminateAndClearResultsBlocks();
+        checkTerminateException();
         throw new RuntimeException("Received exception block: " + exceptions);
       }
       if (_isEarlyTerminated || resultsBlock == LAST_RESULTS_BLOCK) {
+        _terminated = true;
         break;
       } else if (!(resultsBlock instanceof ExplainV2ResultBlock)) {
         throw new IllegalArgumentException("Expected ExplainV2ResultBlock, got: " + resultsBlock.getClass().getName());
@@ -372,13 +390,10 @@ public class LeafOperator extends MultiStageOperator {
   private Future<Void> startExecution() {
     ResultsBlockConsumer resultsBlockConsumer = new ResultsBlockConsumer();
     ServerQueryLogger queryLogger = ServerQueryLogger.getInstance();
-    ThreadExecutionContext parentContext = Tracing.getThreadAccountant().getThreadExecutionContext();
     return _executorService.submit(() -> {
       try {
         if (_requests.size() == 1) {
           ServerQueryRequest request = _requests.get(0);
-          Tracing.ThreadAccountantOps.setupWorker(1, parentContext);
-
           InstanceResponseBlock instanceResponseBlock =
               _queryExecutor.execute(request, _executorService, resultsBlockConsumer);
           if (queryLogger != null) {
@@ -410,8 +425,6 @@ public class LeafOperator extends MultiStageOperator {
             ServerQueryRequest request = _requests.get(i);
             int taskId = i;
             futures[i] = _executorService.submit(() -> {
-              Tracing.ThreadAccountantOps.setupWorker(taskId, parentContext);
-
               try {
                 InstanceResponseBlock instanceResponseBlock =
                     _queryExecutor.execute(request, _executorService, resultsBlockConsumer);
@@ -468,14 +481,23 @@ public class LeafOperator extends MultiStageOperator {
   @VisibleForTesting
   void addResultsBlock(BaseResultsBlock resultsBlock)
       throws InterruptedException, TimeoutException {
+    if (_terminated) {
+      throw new EarlyTerminationException("Query has been terminated");
+    }
     if (!_blockingQueue.offer(resultsBlock, _context.getPassiveDeadlineMs() - System.currentTimeMillis(),
         TimeUnit.MILLISECONDS)) {
       throw new TimeoutException("Timed out waiting to add results block");
     }
   }
 
+  private void terminateAndClearResultsBlocks() {
+    _terminated = true;
+    _blockingQueue.clear();
+  }
+
   @Override
   public void close() {
+    terminateAndClearResultsBlocks();
     cancelSseTasks();
   }
 
@@ -559,7 +581,7 @@ public class LeafOperator extends MultiStageOperator {
   }
 
   private static Object[] reorderAndConvertRow(Object[] row, ColumnDataType[] inputStoredTypes,
-      ColumnDataType[] outputStoredTypes, int[] columnIndices) {
+                                               ColumnDataType[] outputStoredTypes, int[] columnIndices) {
     int numColumns = columnIndices.length;
     Object[] resultRow = new Object[numColumns];
     for (int colId = 0; colId < numColumns; colId++) {

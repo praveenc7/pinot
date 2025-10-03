@@ -55,7 +55,7 @@ public class TransformOperator extends MultiStageOperator {
   private final StatMap<StatKey> _statMap = new StatMap<>(StatKey.class);
 
   public TransformOperator(OpChainExecutionContext context, MultiStageOperator input, DataSchema inputSchema,
-      ProjectNode node) {
+                           ProjectNode node) {
     super(context);
     _input = input;
     List<RexExpression> projects = node.getProjects();

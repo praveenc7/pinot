@@ -45,6 +45,7 @@ import org.apache.pinot.query.runtime.plan.MultiStageQueryStats;
 import org.apache.pinot.query.runtime.plan.OpChainExecutionContext;
 import org.apache.pinot.segment.spi.memory.DataBuffer;
 import org.apache.pinot.spi.exception.QueryCancelledException;
+import org.apache.pinot.spi.exception.TerminationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -75,7 +76,7 @@ public class MailboxSendOperator extends MultiStageOperator {
 
   @VisibleForTesting
   MailboxSendOperator(OpChainExecutionContext context, MultiStageOperator input,
-      Function<StatMap<StatKey>, BlockExchange> exchangeFactory) {
+                      Function<StatMap<StatKey>, BlockExchange> exchangeFactory) {
     super(context);
     _input = input;
     _exchange = exchangeFactory.apply(_statMap);
@@ -97,7 +98,7 @@ public class MailboxSendOperator extends MultiStageOperator {
    * @see BlockExchange#asSendingMailbox(String)
    */
   private static BlockExchange getBlockExchange(OpChainExecutionContext ctx, MailboxSendNode node,
-      StatMap<StatKey> statMap) {
+                                                StatMap<StatKey> statMap) {
     BlockSplitter mainSplitter = BlockSplitter.DEFAULT;
     if (!node.isMultiSend()) {
       // it is guaranteed that there is exactly one receiver stage
@@ -119,7 +120,7 @@ public class MailboxSendOperator extends MultiStageOperator {
   }
 
   private static Function<List<SendingMailbox>, Integer> getStatsIndexChooser(OpChainExecutionContext ctx,
-      MailboxSendNode node) {
+                                                                              MailboxSendNode node) {
     // Stats must be sent to a single stage. That stage must also be one with a smaller stage id than the current stage.
     // Ideally, the stage chosen should always be the same in order to have repeatable stats.
     int minStageIndex = indexOfMinStageId(node);
@@ -154,7 +155,8 @@ public class MailboxSendOperator extends MultiStageOperator {
    * In case of a multi-sender node, this method will be called for each receiver stage.
    */
   private static BlockExchange getBlockExchange(OpChainExecutionContext context, int receiverStageId,
-      RelDistribution.Type distributionType, List<Integer> keys, StatMap<StatKey> statMap, BlockSplitter splitter) {
+                                                RelDistribution.Type distributionType, List<Integer> keys,
+                                                StatMap<StatKey> statMap, BlockSplitter splitter) {
     Preconditions.checkState(SUPPORTED_EXCHANGE_TYPES.contains(distributionType), "Unsupported distribution type: %s",
         distributionType);
     MailboxService mailboxService = context.getMailboxService();
@@ -166,8 +168,8 @@ public class MailboxSendOperator extends MultiStageOperator {
     List<MailboxInfo> mailboxInfos =
         context.getWorkerMetadata().getMailboxInfosMap().get(receiverStageId).getMailboxInfos();
     List<RoutingInfo> routingInfos =
-          MailboxIdUtils.toRoutingInfos(requestId, context.getStageId(), context.getWorkerId(), receiverStageId,
-              mailboxInfos);
+        MailboxIdUtils.toRoutingInfos(requestId, context.getStageId(), context.getWorkerId(), receiverStageId,
+            mailboxInfos);
     List<SendingMailbox> sendingMailboxes = routingInfos.stream()
         .map(v -> mailboxService.getSendingMailbox(v.getHostname(), v.getPort(), v.getMailboxId(), deadlineMs, statMap))
         .collect(Collectors.toList());
@@ -212,11 +214,14 @@ public class MailboxSendOperator extends MultiStageOperator {
           earlyTerminate();
         }
       }
-      sampleAndCheckInterruption();
+      checkTerminationAndSampleUsage();
       return block;
     } catch (QueryCancelledException e) {
       LOGGER.debug("Query was cancelled! for opChain: {}", _context.getId());
       return SuccessMseBlock.INSTANCE;
+    } catch (TerminationException e) {
+      LOGGER.info("Query was terminated for opChain: {}", _context.getId(), e);
+      return ErrorMseBlock.fromException(e);
     } catch (TimeoutException e) {
       LOGGER.warn("Timed out transferring data on opChain: {}", _context.getId(), e);
       return ErrorMseBlock.fromException(e);
@@ -230,12 +235,6 @@ public class MailboxSendOperator extends MultiStageOperator {
       }
       return errorBlock;
     }
-  }
-
-  @Override
-  protected void sampleAndCheckInterruption() {
-    // mailbox send operator uses passive deadline instead of the active one
-    sampleAndCheckInterruption(_context.getPassiveDeadlineMs());
   }
 
   private void sendEos(MseBlock.Eos eosBlockWithoutStats)

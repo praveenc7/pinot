@@ -113,9 +113,9 @@ public class QueryOptionsUtils {
   }
 
   @Nullable
-  public static Long getPassiveTimeoutMs(Map<String, String> queryOptions) {
-    String passiveTimeoutMsString = queryOptions.get(QueryOptionKey.EXTRA_PASSIVE_TIMEOUT_MS);
-    return checkedParseLong(QueryOptionKey.EXTRA_PASSIVE_TIMEOUT_MS, passiveTimeoutMsString, 0);
+  public static Long getExtraPassiveTimeoutMs(Map<String, String> queryOptions) {
+    String extraPassiveTimeoutMsString = queryOptions.get(QueryOptionKey.EXTRA_PASSIVE_TIMEOUT_MS);
+    return checkedParseLong(QueryOptionKey.EXTRA_PASSIVE_TIMEOUT_MS, extraPassiveTimeoutMsString, 0);
   }
 
   @Nullable
@@ -157,6 +157,11 @@ public class QueryOptionsUtils {
 
   public static boolean isSkipScanFilterReorder(Map<String, String> queryOptions) {
     return "false".equalsIgnoreCase(queryOptions.get(QueryOptionKey.USE_SCAN_REORDER_OPTIMIZATION));
+  }
+
+  public static boolean isCollectGcStats(Map<String, String> queryOptions) {
+    // Disabled by default
+    return Boolean.parseBoolean(queryOptions.get(QueryOptionKey.COLLECT_GC_STATS));
   }
 
   @Nullable

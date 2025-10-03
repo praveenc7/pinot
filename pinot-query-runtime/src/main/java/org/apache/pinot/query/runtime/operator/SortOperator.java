@@ -60,7 +60,7 @@ public class SortOperator extends MultiStageOperator {
 
   @VisibleForTesting
   SortOperator(OpChainExecutionContext context, MultiStageOperator input, SortNode node, int defaultHolderCapacity,
-      int defaultResponseLimit) {
+               int defaultResponseLimit) {
     super(context);
     _input = input;
     _dataSchema = node.getDataSchema();
@@ -185,7 +185,7 @@ public class SortOperator extends MultiStageOperator {
         for (Object[] row : container) {
           SelectionOperatorUtils.addToPriorityQueue(row, _priorityQueue, _numRowsToKeep);
         }
-        sampleAndCheckInterruption();
+        checkTerminationAndSampleUsage();
       }
       block = _input.nextBlock();
     }

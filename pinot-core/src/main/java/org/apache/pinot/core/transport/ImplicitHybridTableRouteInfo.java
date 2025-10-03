@@ -31,8 +31,6 @@ import org.apache.pinot.core.routing.TimeBoundaryInfo;
 import org.apache.pinot.spi.config.table.QueryConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
-import org.apache.pinot.spi.query.QueryThreadContext;
-import org.apache.pinot.spi.utils.CommonConstants;
 
 
 public class ImplicitHybridTableRouteInfo extends BaseTableRouteInfo {
@@ -285,16 +283,8 @@ public class ImplicitHybridTableRouteInfo extends BaseTableRouteInfo {
 
   protected static InstanceRequest getInstanceRequest(long requestId, String brokerId, BrokerRequest brokerRequest,
       ServerRouteInfo segments) {
-    InstanceRequest instanceRequest = new InstanceRequest();
-    instanceRequest.setRequestId(requestId);
-    instanceRequest.setCid(QueryThreadContext.getCid());
-    instanceRequest.setQuery(brokerRequest);
-    Map<String, String> queryOptions = brokerRequest.getPinotQuery().getQueryOptions();
-    if (queryOptions != null) {
-      instanceRequest.setEnableTrace(Boolean.parseBoolean(queryOptions.get(CommonConstants.Broker.Request.TRACE)));
-    }
+    InstanceRequest instanceRequest = TableRouteInfo.createInstanceRequest(brokerRequest, brokerId, requestId);
     instanceRequest.setSearchSegments(segments.getSegments());
-    instanceRequest.setBrokerId(brokerId);
     if (CollectionUtils.isNotEmpty(segments.getOptionalSegments())) {
       // Don't set this field, i.e. leave it as null, if there is no optional segment at all, to be more backward
       // compatible, as there are places like in multi-stage query engine where this field is not set today when

@@ -43,7 +43,7 @@ import org.apache.pinot.core.util.GroupByUtils;
 import org.apache.pinot.spi.exception.QueryErrorCode;
 import org.apache.pinot.spi.exception.QueryErrorMessage;
 import org.apache.pinot.spi.exception.QueryException;
-import org.apache.pinot.spi.trace.Tracing;
+import org.apache.pinot.spi.query.QueryThreadContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -141,6 +141,7 @@ public class GroupByCombineOperator extends BaseSingleBlockCombineOperator<Group
             // Iterate over the group-by keys, for each key, update the group-by result in the indexedTable
             Iterator<GroupKeyGenerator.GroupKey> dicGroupKeyIterator = aggregationGroupByResult.getGroupKeyIterator();
             while (dicGroupKeyIterator.hasNext()) {
+              QueryThreadContext.checkTerminationAndSampleUsagePeriodically(mergedKeys++, EXPLAIN_NAME);
               GroupKeyGenerator.GroupKey groupKey = dicGroupKeyIterator.next();
               Object[] keys = groupKey._keys;
               Object[] values = Arrays.copyOf(keys, _numColumns);
@@ -149,16 +150,13 @@ public class GroupByCombineOperator extends BaseSingleBlockCombineOperator<Group
                 values[_numGroupByExpressions + i] = aggregationGroupByResult.getResultForGroupId(i, groupId);
               }
               _indexedTable.upsert(new Key(keys), new Record(values));
-              Tracing.ThreadAccountantOps.sampleAndCheckInterruptionPeriodically(mergedKeys);
-              mergedKeys++;
             }
           }
         } else {
           for (IntermediateRecord intermediateResult : intermediateRecords) {
+            QueryThreadContext.checkTerminationAndSampleUsagePeriodically(mergedKeys++, EXPLAIN_NAME);
             //TODO: change upsert api so that it accepts intermediateRecord directly
             _indexedTable.upsert(intermediateResult._key, intermediateResult._record);
-            Tracing.ThreadAccountantOps.sampleAndCheckInterruptionPeriodically(mergedKeys);
-            mergedKeys++;
           }
         }
       } catch (RuntimeException e) {
