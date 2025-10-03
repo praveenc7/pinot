@@ -119,6 +119,10 @@
       <groupId>org.apache.pinot</groupId>
       <artifactId>pinot-yammer</artifactId>
     </dependency>
+    <dependency>
+      <groupId>org.apache.pinot</groupId>
+      <artifactId>pinot-s3</artifactId>
+    </dependency>
     <!--
       Shaded jar dependency
       pbnj depends on pinot-common shaded jar
