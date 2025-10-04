@@ -90,7 +90,7 @@ import org.apache.pinot.segment.local.function.GroovyFunctionEvaluator;
 import org.apache.pinot.spi.accounting.ThreadAccountant;
 import org.apache.pinot.spi.accounting.ThreadAccountantUtils;
 import org.apache.pinot.spi.accounting.ThreadResourceUsageProvider;
-import org.apache.pinot.spi.accounting.WorkloadBudgetManager;
+import org.apache.pinot.spi.accounting.WorkloadBudgetManagerFactory;
 import org.apache.pinot.spi.cursors.ResponseStoreService;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.eventlistener.query.BrokerQueryEventListenerFactory;
@@ -362,7 +362,7 @@ public abstract class BaseBrokerStarter implements ServiceStartable {
     // Initialize workload budget manager and thread resource usage accountant. Workload budget manager must be
     // initialized first because it might be used by the accountant.
     PinotConfiguration schedulerConfig = _brokerConf.subset(CommonConstants.PINOT_QUERY_SCHEDULER_PREFIX);
-    WorkloadBudgetManager.set(createWorkloadBudgetManager(schedulerConfig));
+    WorkloadBudgetManagerFactory.register(schedulerConfig);
     _threadAccountant = ThreadAccountantUtils.createAccountant(schedulerConfig, _instanceId,
         org.apache.pinot.spi.config.instance.InstanceType.BROKER);
     _threadAccountant.startWatcherTask();
@@ -540,13 +540,6 @@ public abstract class BaseBrokerStarter implements ServiceStartable {
   protected void registerExtraComponents(BrokerAdminApiApplication brokerAdminApplication) {
   }
 
-  /**
-   * Can be overridden to create a custom WorkloadBudgetManager.
-   */
-  protected WorkloadBudgetManager createWorkloadBudgetManager(PinotConfiguration brokerConf) {
-    return new WorkloadBudgetManager(brokerConf);
-  }
-
   private QueryDispatcher createQueryDispatcher(PinotConfiguration brokerConf) {
     String hostname = _brokerConf.getProperty(CommonConstants.MultiStageQueryRunner.KEY_OF_QUERY_RUNNER_HOSTNAME);
     int port = Integer.parseInt(_brokerConf.getProperty(
@@ -722,6 +715,7 @@ public abstract class BaseBrokerStarter implements ServiceStartable {
     ServiceStatus.removeServiceStatusCallback(_instanceId);
     LOGGER.info("Shutdown Broker Metrics Registry");
     _metricsRegistry.shutdown();
+    WorkloadBudgetManagerFactory.unregister();
     LOGGER.info("Finish shutting down Pinot broker for {}", _instanceId);
   }
 
