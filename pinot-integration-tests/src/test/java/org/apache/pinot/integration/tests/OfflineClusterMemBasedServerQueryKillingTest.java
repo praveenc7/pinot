@@ -208,12 +208,12 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
   @Test(dataProvider = "oomQueries")
   public void testOomSse(String query)
       throws Exception {
-    testOom(query, false);
+    testOom(query);
     setUseMultiStageQueryEngine(true);
-    testOom(query, true);
+    testOom(query);
   }
 
-  private void testOom(String query, boolean useMultiStageQueryEngine)
+  private void testOom(String query)
       throws Exception {
     JsonNode queryResponse = postQuery(query);
     JsonNode exceptionsNode = queryResponse.get("exceptions");
@@ -224,7 +224,7 @@ public class OfflineClusterMemBasedServerQueryKillingTest extends BaseClusterInt
     assertNotNull(errorCodeNode, "Missing errorCode from exception: " + exceptionNode);
     int errorCode = errorCodeNode.asInt();
     // TODO: (praveen) Ensure QueryErrorCode.SERVER_RESOURCE_LIMIT_EXCEEDED is thrown for all MSE queries
-    if (useMultiStageQueryEngine && errorCode == QueryErrorCode.UNKNOWN.getId()) {
+    if (useMultiStageQueryEngine() && errorCode == QueryErrorCode.UNKNOWN.getId()) {
       // MSE currently returns UNKNOWN error code for OOM
       assertEquals(errorCode, QueryErrorCode.UNKNOWN.getId(),
           "Unexpected error code: " + errorCode + " from exception: " + exceptionNode);
