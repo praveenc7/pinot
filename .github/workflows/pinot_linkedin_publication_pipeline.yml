@@ -19,8 +19,10 @@
 name: Pinot LinkedIn Publication Pipeline
 
 on:
-  # TODO: trigger the workflow for any merged PR
   workflow_dispatch: {}
+  schedule:
+    # Runs every day at 09:00 UTC (1 AM PST)
+    - cron: "0 9 * * *"
 
 concurrency:
   group: deploy-${{ github.ref_name }}
@@ -47,16 +49,37 @@ jobs:
       - name: Compute & set version
         shell: bash
         run: |
-          # 1) Get base version from POM (strip -SNAPSHOT if present)
           set -euo pipefail
+
+          # 1) Base version from POM (strip -SNAPSHOT if present)
           BASE=$(mvn -q --non-recursive -Pli-publish exec:exec -Dexec.executable=echo -Dexec.args='${project.version}')
           BASE=${BASE%-SNAPSHOT}
-          
-          # 2) Compose new version, e.g. 1.4.0-li-1
-          NEW_VERSION="${BASE}-li-${GITHUB_RUN_NUMBER}"
-          echo "Setting project version to: $NEW_VERSION"
-          
-          mvn -B -q -Pli-publish versions:set -DnewVersion="$NEW_VERSION" -DgenerateBackupPoms=false
+
+          # 2) Figure out branch name
+          BRANCH="${GITHUB_REF_NAME:-$(basename "${GITHUB_REF}")}"
+
+          # 3) Decide version suffix:
+          #    - master: keep existing pattern -> li-<run>
+          #    - others: add sanitized branch name -> li-<run>-<branch>
+          if [[ "${BRANCH}" == "master" ]]; then
+            SUFFIX="li-${GITHUB_RUN_NUMBER}"
+          else
+            # Sanitize branch for Maven version compatibility:
+            # - lowercase
+            # - replace anything not [a-z0-9._-] with '-'
+            # - collapse multiple '-' and trim leading/trailing '-'
+            SAFE_BRANCH=$(echo "${BRANCH}" \
+              | tr '[:upper:]' '[:lower:]' \
+              | sed -E 's/[^a-z0-9._-]+/-/g; s/^-+|-+$//g; s/-{2,}/-/g')
+            # (Optional) keep it reasonably short
+            SAFE_BRANCH="${SAFE_BRANCH:0:40}"
+            SUFFIX="li-${GITHUB_RUN_NUMBER}-${SAFE_BRANCH}"
+          fi
+
+          NEW_VERSION="${BASE}-${SUFFIX}"
+          echo "Setting project version to: ${NEW_VERSION}"
+
+          mvn -B -q -Pli-publish versions:set -DnewVersion="${NEW_VERSION}" -DgenerateBackupPoms=false
           mvn -B -q -Pli-publish versions:commit
 
       - name: Build the repo
