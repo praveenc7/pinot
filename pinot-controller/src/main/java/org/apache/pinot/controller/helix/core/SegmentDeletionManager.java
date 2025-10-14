@@ -78,7 +78,6 @@ public class SegmentDeletionManager {
   private static final String DELIMITER = "/";
 
   private static final int OBJECT_DELETION_TIMEOUT = 5;
-  private static final int NUM_AGED_SEGMENTS_TO_DELETE_PER_ATTEMPT = 100;
 
   static {
     RETENTION_DATE_FORMAT = new SimpleDateFormat(RETENTION_DATE_FORMAT_STR);
@@ -438,11 +437,6 @@ public class SegmentDeletionManager {
                     LOGGER.warn("Failed to remove resource: {}", targetURI);
                   } else {
                     numFilesDeleted++;
-                    if (numFilesDeleted >= NUM_AGED_SEGMENTS_TO_DELETE_PER_ATTEMPT) {
-                      LOGGER.info("Reached threshold of max aged segments to delete per attempt. Deleted: {} files "
-                          + "from directory: {}", numFilesDeleted, tableNameDir);
-                      break;
-                    }
                   }
                 }
               } catch (Exception e) {

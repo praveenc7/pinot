@@ -346,8 +346,8 @@ public class SegmentDeletionManagerTest {
     // all files should get deleted
     Assert.assertFalse(pinotFS.exists(tableUri2));
 
-    // One file that doesn't meet retention criteria, and another file due to the per attempt batch limit remains.
-    Assert.assertEquals(pinotFS.listFiles(tableUri1, false).length, 2);
+    // One file that doesn't meet retention criteria.
+    Assert.assertEquals(pinotFS.listFiles(tableUri1, false).length, 1);
   }
 
   @Test
