@@ -31,6 +31,7 @@ import org.apache.commons.configuration2.Configuration;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.helix.controller.rebalancer.strategy.AutoRebalanceStrategy;
 import org.apache.pinot.common.protocols.SegmentCompletionProtocol;
+import org.apache.pinot.controller.helix.core.assignment.instance.DefaultTenantInstancePartitionGenerator;
 import org.apache.pinot.controller.helix.core.rebalance.RebalanceConfig;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.filesystem.LocalPinotFS;
@@ -378,6 +379,12 @@ public class ControllerConf extends PinotConfiguration {
   public static final boolean DEFAULT_EXIT_ON_TABLE_CONFIG_CHECK_FAILURE = true;
   public static final String EXIT_ON_SCHEMA_CHECK_FAILURE = "controller.startup.exitOnSchemaCheckFailure";
   public static final boolean DEFAULT_EXIT_ON_SCHEMA_CHECK_FAILURE = true;
+
+  // Tenant Instance Partition Configs
+  public static final String TENANT_INSTANCE_PARTITION_GENERATOR_CLASS =
+      "controller.tenant.instance.partition.generator.class";
+  public static final String DEFAULT_TENANT_INSTANCE_PARTITION_GENERATOR_CLASS =
+      DefaultTenantInstancePartitionGenerator.class.getName();
 
   private final Map<String, String> _invalidConfigs = new ConcurrentHashMap<>();
 
@@ -1031,6 +1038,10 @@ public class ControllerConf extends PinotConfiguration {
 
   public String getAccessControlFactoryClass() {
     return getProperty(ACCESS_CONTROL_FACTORY_CLASS, DEFAULT_ACCESS_CONTROL_FACTORY_CLASS);
+  }
+
+  public String getTenantInstancePartitionGeneratorClass() {
+    return getProperty(TENANT_INSTANCE_PARTITION_GENERATOR_CLASS, DEFAULT_TENANT_INSTANCE_PARTITION_GENERATOR_CLASS);
   }
 
   public void setAccessControlFactoryClass(String accessControlFactoryClass) {

@@ -43,26 +43,6 @@ public class TenantInstancePartitionGeneratorFactory {
   }
 
   /**
-   * Configuration key for specifying custom MZ generator implementation
-   */
-  public static final String GENERATOR_CLASS_CONFIG_KEY = "controller.tenant.instance.partition.generator.class";
-
-  /**
-   * Default generator class name
-   */
-  private static final String DEFAULT_GENERATOR_CLASS = DefaultTenantInstancePartitionGenerator.class.getName();
-
-  /**
-   * Creates an instance of TenantInstancePartitionGenerator based on controller configuration.
-   *
-   * @param controllerConf Controller configuration containing generator class specification
-   * @return TenantInstancePartitionGenerator instance (never null)
-   */
-  public static TenantInstancePartitionGenerator getInstance(ControllerConf controllerConf) {
-    return getInstance(controllerConf, null);
-  }
-
-  /**
    * Creates an instance of TenantInstancePartitionGenerator based on controller configuration
    * with PinotHelixResourceManager dependency injection.
    *
@@ -72,7 +52,7 @@ public class TenantInstancePartitionGeneratorFactory {
    */
   public static TenantInstancePartitionGenerator getInstance(ControllerConf controllerConf,
       PinotHelixResourceManager pinotHelixResourceManager) {
-    String generatorClassName = controllerConf.getProperty(GENERATOR_CLASS_CONFIG_KEY, DEFAULT_GENERATOR_CLASS);
+    String generatorClassName = controllerConf.getTenantInstancePartitionGeneratorClass();
 
     LOGGER.info("Creating TenantInstancePartitionGenerator using class: {}", generatorClassName);
 
@@ -89,7 +69,7 @@ public class TenantInstancePartitionGeneratorFactory {
       try {
         generator = (TenantInstancePartitionGenerator) generatorClass
             .getDeclaredConstructor(PinotHelixResourceManager.class)
-            .newInstance(pinotHelixResourceManager);
+            .newInstance(pinotHelixResourceManager, controllerConf);
         LOGGER.info("Successfully created TenantInstancePartitionGenerator with ResourceManager: {}",
             generatorClassName);
         return generator;
@@ -100,15 +80,15 @@ public class TenantInstancePartitionGeneratorFactory {
 
 
       // Fallback to default constructor
-      generator = new DefaultTenantInstancePartitionGenerator(pinotHelixResourceManager);
+      generator = new DefaultTenantInstancePartitionGenerator(pinotHelixResourceManager, controllerConf);
       LOGGER.info("Successfully created DefaultTenantInstancePartitionGenerator as fallback");
       return generator;
     } catch (Exception e) {
       LOGGER.warn("Failed to instantiate TenantInstancePartitionGenerator class: {}. "
-          + "Falling back to default implementation: {}", generatorClassName, DEFAULT_GENERATOR_CLASS, e);
+          + "Falling back to default implementation", generatorClassName, e);
 
       // Fallback to default implementation with resource manager if available
-      return new DefaultTenantInstancePartitionGenerator(pinotHelixResourceManager);
+      return new DefaultTenantInstancePartitionGenerator(pinotHelixResourceManager, controllerConf);
     }
   }
 }

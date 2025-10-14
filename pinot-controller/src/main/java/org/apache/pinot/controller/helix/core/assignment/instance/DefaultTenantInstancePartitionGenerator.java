@@ -19,6 +19,7 @@
 package org.apache.pinot.controller.helix.core.assignment.instance;
 
 import org.apache.pinot.common.assignment.InstancePartitions;
+import org.apache.pinot.controller.ControllerConf;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
 
 /**
@@ -37,9 +38,12 @@ public class DefaultTenantInstancePartitionGenerator implements TenantInstancePa
   /**
    * Constructor with PinotHelixResourceManager dependency for auto-discovery capabilities.
    *
-   * @param pinotHelixResourceManager the Pinot Helix resource manager (can be null)
+   * @param pinotHelixResourceManager the Pinot Helix resource manager
+   * @param controllerConf the controller configuration
+   *
    */
-  public DefaultTenantInstancePartitionGenerator(PinotHelixResourceManager pinotHelixResourceManager) {
+  public DefaultTenantInstancePartitionGenerator(PinotHelixResourceManager pinotHelixResourceManager,
+      ControllerConf controllerConf) {
     _pinotHelixResourceManager = pinotHelixResourceManager;
   }
 
