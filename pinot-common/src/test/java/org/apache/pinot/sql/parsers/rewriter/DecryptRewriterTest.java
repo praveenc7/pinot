@@ -309,6 +309,22 @@ public class DecryptRewriterTest {
     Expression sumOperand = selectExpr.getFunctionCall().getOperands().get(0);
     verifyDecryptDouble(sumOperand);
   }
+  @Test
+  public void testAlreadyAliasedEncryptedColumn() throws Exception {
+    String aliasedName = "aliasedName";
+    PinotQuery query = CalciteSqlParser.compileToPinotQueryWithoutRewrites(
+        "SELECT " + ENCRYPTED_DOUBLE_COLUMN + " AS " + aliasedName + " FROM " + EAR_ENABLED_TABLE);
+
+    PinotQuery rewrittenQuery = _decryptRewriter.rewrite(query);
+
+    Expression selectExpr = rewrittenQuery.getSelectList().get(0);
+    assertEquals(selectExpr.getFunctionCall().getOperator(), "as");
+    Expression decryptExpr = selectExpr.getFunctionCall().getOperands().get(0);
+    verifyDecryptDouble(decryptExpr);
+    Expression aliasExpr = selectExpr.getFunctionCall().getOperands().get(1);
+    assertEquals(aliasExpr.getIdentifier().getName(), aliasedName);
+  }
+
 
   @Test
   public void testRewriteWithUnregisteredTable() throws Exception {
