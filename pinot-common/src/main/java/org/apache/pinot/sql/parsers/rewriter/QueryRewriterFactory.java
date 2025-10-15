@@ -37,19 +37,30 @@ public class QueryRewriterFactory {
   //   OrdinalsUpdater must be applied after AliasApplier because OrdinalsUpdater can put the select expression
   //   (reference) into the group-by list, but the alias should not be applied to the reference.
   //   E.g. SELECT a + 1 AS a FROM table GROUP BY 1
+  //
+  //   DecryptRewriter must be applied before AliasApplier because DecryptRewriter uses aliasing as in
+  //   SELECT encryptedCol FROM SomeTable
+  //     is rewritten to
+  //   SELECT decryptLong(klu, encryptedCol) AS encryptedCol from SomeTable
+  //     or
+  //   SELECT decryptDouble(klu, encryptedCol) AS encryptedCol from SomeTable
+  //     (depending on the expected type of encryptedCol after decryption)
   public static final List<String> DEFAULT_QUERY_REWRITERS_CLASS_NAMES =
-      ImmutableList.of(CompileTimeFunctionsInvoker.class.getName(), SelectionsRewriter.class.getName(),
-          PredicateComparisonRewriter.class.getName(), AliasApplier.class.getName(), OrdinalsUpdater.class.getName(),
+      ImmutableList.of(DecryptRewriter.class.getName(), CompileTimeFunctionsInvoker.class.getName(),
+          SelectionsRewriter.class.getName(), PredicateComparisonRewriter.class.getName(),
+          AliasApplier.class.getName(), OrdinalsUpdater.class.getName(),
           NonAggregationGroupByToDistinctQueryRewriter.class.getName(), RlsFiltersRewriter.class.getName());
+
+  private static List<QueryRewriter> _queryRewriters;
 
   public static void init(String queryRewritersClassNamesStr) {
     List<String> queryRewritersClassNames =
         (queryRewritersClassNamesStr != null) ? Arrays.asList(queryRewritersClassNamesStr.split(","))
             : DEFAULT_QUERY_REWRITERS_CLASS_NAMES;
-    final List<QueryRewriter> queryRewriters = getQueryRewriters(queryRewritersClassNames);
+    _queryRewriters = ImmutableList.copyOf(getQueryRewriters(queryRewritersClassNames));
     synchronized (CalciteSqlParser.class) {
       CalciteSqlParser.QUERY_REWRITERS.clear();
-      CalciteSqlParser.QUERY_REWRITERS.addAll(queryRewriters);
+      CalciteSqlParser.QUERY_REWRITERS.addAll(_queryRewriters);
     }
   }
 

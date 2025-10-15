@@ -16,14 +16,11 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.pinot.sql.parsers.rewriter;
+package org.apache.pinot.segment.spi.crypt;
 
-import org.apache.pinot.common.request.PinotQuery;
-
-/**
- * QueryRewriter is the interface to rewrite PinotQuery.
- * Rewrite is recommended to be in-place.
- */
-public interface QueryRewriter {
-  PinotQuery rewrite(PinotQuery pinotQuery);
+public class DefaultKeyBasedCrypter implements KeyBasedCrypter {
+    @Override
+    public byte[] decrypt(byte[] cypherText) {
+        return cypherText;
+    }
 }

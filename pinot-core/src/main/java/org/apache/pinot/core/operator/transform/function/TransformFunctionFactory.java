@@ -259,6 +259,9 @@ public class TransformFunctionFactory {
     // Time Series functions
     typeToImplementation.put(TransformFunctionType.TIME_SERIES_BUCKET, TimeSeriesBucketTransformFunction.class);
 
+    // Encryption At rest transform functions
+    typeToImplementation.put(TransformFunctionType.DECRYPT_DOUBLE, DecryptDoubleTransformFunction.class);
+
     Map<String, Class<? extends TransformFunction>> registry =
         new HashMap<>(HashUtil.getHashMapCapacity(typeToImplementation.size()));
     for (Map.Entry<TransformFunctionType, Class<? extends TransformFunction>> entry : typeToImplementation.entrySet()) {

@@ -18,12 +18,21 @@
  */
 package org.apache.pinot.sql.parsers.rewriter;
 
-import org.apache.pinot.common.request.PinotQuery;
+import org.apache.pinot.spi.config.table.TableConfig;
 
 /**
- * QueryRewriter is the interface to rewrite PinotQuery.
- * Rewrite is recommended to be in-place.
+ * This interface extends the QueryRewriter interface and is used to rewrite queries specific tables.
+ * Rewriters implementing this interface get notified when a table is added in the broker so that they
+ * can store state from the tableConfig and apply the appropriate rewriting functionality.
  */
-public interface QueryRewriter {
-  PinotQuery rewrite(PinotQuery pinotQuery);
+public interface TableQueryRewriter extends QueryRewriter {
+    /**
+     * Register any new table that a broker instance has started to serve.
+     * @param tableConfig
+     */
+    default void registerTable(TableConfig tableConfig) {
+    }
+
+    default void deregisterTable(TableConfig tableConfig) {
+    }
 }

@@ -18,21 +18,33 @@
  */
 package org.apache.pinot.segment.spi.crypt;
 
-import org.apache.pinot.segment.spi.ImmutableSegment;
-import org.apache.pinot.spi.config.table.TableConfig;
+/**
+ * All the encryption algorithms we support need to implement this interface.
+ */
+public interface KeyBasedCrypter {
+    /**
+     * Decrypt the input cypher-text into a byte array.
+     * @param cypherText
+     * @return
+     */
+    byte[] decrypt(byte[] cypherText);
 
-public class DefaultKeyBasedCrypterCache implements KeyBasedCrypterCache {
-    @Override
-    public void init(TableConfig tableConfig) {
-    }
+    /**
+     * This method is needed for backward compatibility only. It will be removed in the future.
+     * @param cypherText
+     * @return a double value
+     */
+    default double decryptToDouble(String cypherText) {
+        throw new UnsupportedOperationException("Not implemented");
+    };
 
-    @Override
-    public KeyBasedCrypter getCrypter(String keyLineageUrn) {
-        return new DefaultKeyBasedCrypter();
-    }
-
-    @Override
-    public void fillSegmentCache(ImmutableSegment segment) {
-        return;
+    /**
+     *
+     * This method is needed for backward compatibility only. It will be removed in the future.
+     * @param cypherText
+     * @return a long value
+     */
+    default long decryptToLong(String cypherText) {
+        throw new UnsupportedOperationException("Not implemented");
     }
 }

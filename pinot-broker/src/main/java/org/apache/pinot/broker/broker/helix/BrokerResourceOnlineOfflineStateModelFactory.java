@@ -18,6 +18,7 @@
  */
 package org.apache.pinot.broker.broker.helix;
 
+import java.util.List;
 import org.apache.helix.HelixDataAccessor;
 import org.apache.helix.NotificationContext;
 import org.apache.helix.model.Message;
@@ -32,6 +33,9 @@ import org.apache.pinot.broker.routing.BrokerRoutingManager;
 import org.apache.pinot.common.metadata.ZKMetadataProvider;
 import org.apache.pinot.common.utils.DatabaseUtils;
 import org.apache.pinot.spi.config.table.TableConfig;
+import org.apache.pinot.sql.parsers.rewriter.QueryRewriter;
+import org.apache.pinot.sql.parsers.rewriter.QueryRewriterFactory;
+import org.apache.pinot.sql.parsers.rewriter.TableQueryRewriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -88,6 +92,12 @@ public class BrokerResourceOnlineOfflineStateModelFactory extends StateModelFact
               _helixDataAccessor.getProperty(_helixDataAccessor.keyBuilder().externalView(BROKER_RESOURCE_INSTANCE)));
           _queryQuotaManager.createDatabaseRateLimiter(
               DatabaseUtils.extractDatabaseFromFullyQualifiedTableName(physicalOrLogicalTable));
+          List<QueryRewriter> rewriters = QueryRewriterFactory.getQueryRewriters();
+          for (QueryRewriter rewriter : rewriters) {
+            if (rewriter instanceof TableQueryRewriter) {
+              ((TableQueryRewriter) rewriter).registerTable(tableConfig);
+            }
+          }
         }
       } catch (Exception e) {
         LOGGER.error("Caught exception while processing transition from OFFLINE to ONLINE for table: {}",
@@ -107,6 +117,13 @@ public class BrokerResourceOnlineOfflineStateModelFactory extends StateModelFact
         } else {
           _routingManager.removeRouting(physicalOrLogicalTable);
           _queryQuotaManager.dropTableQueryQuota(physicalOrLogicalTable);
+          TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, physicalOrLogicalTable);
+          List<QueryRewriter> rewriters = QueryRewriterFactory.getQueryRewriters();
+          for (QueryRewriter rewriter : rewriters) {
+            if (rewriter instanceof TableQueryRewriter) {
+              ((TableQueryRewriter) rewriter).deregisterTable(tableConfig);
+            }
+          }
         }
       } catch (Exception e) {
         LOGGER.error("Caught exception while processing transition from ONLINE to OFFLINE for table: {}",
@@ -131,6 +148,13 @@ public class BrokerResourceOnlineOfflineStateModelFactory extends StateModelFact
         } else {
           _routingManager.removeRouting(physicalOrLogicalTable);
           _queryQuotaManager.dropTableQueryQuota(physicalOrLogicalTable);
+          TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, physicalOrLogicalTable);
+          List<QueryRewriter> rewriters = QueryRewriterFactory.getQueryRewriters();
+          for (QueryRewriter rewriter : rewriters) {
+            if (rewriter instanceof TableQueryRewriter) {
+              ((TableQueryRewriter) rewriter).deregisterTable(tableConfig);
+            }
+          }
         }
       } catch (Exception e) {
         LOGGER.error("Caught exception while processing transition from ONLINE to DROPPED for table: {}",

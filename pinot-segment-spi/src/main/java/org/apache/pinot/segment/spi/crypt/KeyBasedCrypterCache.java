@@ -28,12 +28,11 @@ import org.apache.pinot.spi.config.table.TableConfig;
  * - Provide a method to update the cache while a segment is being loaded.
  * - Provide a method to get a crypter for a specific key lineage urn.
  *
- * @note: We dont have a method to call when segments are unloaded. This is on purpose. At least initially,
- * it is ok to just restart the servers. Over time (and depending on usage of this feature), we may need methots
+ * @note: We don't have a method to call when segments are unloaded. This is on purpose. At least initially,
+ * it is ok to just restart the servers. Over time (and depending on usage of this feature), we may need methods
  * to clear the cache, etc.
- * @param <T> represents the types of crypter objects that can be returned by getCrypter.
  */
-public interface KeyBasedCrypterCache<T> {
+public interface KeyBasedCrypterCache {
     /**
      * @param tableConfig so that the cache can pick up the column names, encryption type, etc.
      */
@@ -45,7 +44,7 @@ public interface KeyBasedCrypterCache<T> {
      * @return the crypter. The type of the crypter is TBD, but it should be able to decrypt any encrypted column of
      *          that row.
      */
-    T getCrypter(String keyLineageUrn);
+    KeyBasedCrypter getCrypter(String keyLineageUrn);
 
     /**
      * Segments can be loaded in parallel. In general, when this method returns, it implies that the all the values

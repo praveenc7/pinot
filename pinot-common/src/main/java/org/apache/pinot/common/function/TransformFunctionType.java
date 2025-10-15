@@ -249,6 +249,8 @@ public enum TransformFunctionType {
   RADIANS("radians"),
   // Complex type handling
   ITEM("item"),
+  DECRYPT_DOUBLE("decryptDouble", ReturnTypes.DOUBLE, OperandTypes.family(List.of(SqlTypeFamily.CHARACTER,
+          SqlTypeFamily.BINARY), i -> i == 1)),
   // Time series functions
   TIME_SERIES_BUCKET("timeSeriesBucket");
 
