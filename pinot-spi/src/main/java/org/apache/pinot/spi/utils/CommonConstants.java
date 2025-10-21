@@ -215,6 +215,7 @@ public class CommonConstants {
 
       public static final String SYSTEM_RESOURCE_INFO_KEY = "SYSTEM_RESOURCE_INFO";
       public static final String PINOT_VERSION_KEY = "pinotVersion";
+      public static final String MAINTENANCE_ZONE_ID_KEY = "maintenanceZoneId";
     }
 
     public static final String SET_INSTANCE_ID_TO_HOSTNAME_KEY = "pinot.set.instance.id.to.hostname";
