@@ -61,7 +61,7 @@ public class PinotFSFactory {
     // Get schemes and their respective classes
     PinotConfiguration schemesConfiguration = fsFactoryConfig.subset(CLASS);
     List<String> schemes = schemesConfiguration.getKeys();
-    if (!schemes.isEmpty()) {
+    if (schemes.isEmpty()) {
       LOGGER.info("Did not find any fs classes in the configuration");
     }
 
