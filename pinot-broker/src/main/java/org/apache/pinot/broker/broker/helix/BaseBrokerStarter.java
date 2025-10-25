@@ -73,6 +73,7 @@ import org.apache.pinot.common.metrics.BrokerTimer;
 import org.apache.pinot.common.utils.PinotAppConfigs;
 import org.apache.pinot.common.utils.ServiceStartableUtils;
 import org.apache.pinot.common.utils.ServiceStatus;
+import org.apache.pinot.common.utils.config.QueryWorkloadConfigUtils;
 import org.apache.pinot.common.utils.config.TagNameUtils;
 import org.apache.pinot.common.utils.helix.HelixHelper;
 import org.apache.pinot.common.utils.tls.PinotInsecureMode;
@@ -366,6 +367,8 @@ public abstract class BaseBrokerStarter implements ServiceStartable {
     _threadAccountant = ThreadAccountantUtils.createAccountant(schedulerConfig, _instanceId,
         org.apache.pinot.spi.config.instance.InstanceType.BROKER);
     _threadAccountant.startWatcherTask();
+    // Get all workload budgets this instance should support
+    QueryWorkloadConfigUtils.getAndUpdateWorkloadBudgets(_instanceId, _spectatorHelixManager);
 
     // Create Broker request handler.
     String brokerId = _brokerConf.getProperty(Broker.CONFIG_OF_BROKER_ID, getDefaultBrokerId());
@@ -715,7 +718,6 @@ public abstract class BaseBrokerStarter implements ServiceStartable {
     ServiceStatus.removeServiceStatusCallback(_instanceId);
     LOGGER.info("Shutdown Broker Metrics Registry");
     _metricsRegistry.shutdown();
-    WorkloadBudgetManagerFactory.unregister();
     LOGGER.info("Finish shutting down Pinot broker for {}", _instanceId);
   }
 
