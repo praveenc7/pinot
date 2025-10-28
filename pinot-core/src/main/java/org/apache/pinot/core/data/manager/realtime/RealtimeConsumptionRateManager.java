@@ -22,6 +22,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.RateLimiter;
@@ -241,8 +242,8 @@ public class RealtimeConsumptionRateManager {
         if (_previousMinute != -1) { // not first time
           double actualRate = _aggregateNumMessages / ((nowInMinutes - _previousMinute) * 60.0); // messages per second
           ratioPercentage = (int) Math.round(actualRate / rateLimit * 100);
-          _serverMetrics.setValueOfTableGauge(_metricKeyName, ServerGauge.CONSUMPTION_QUOTA_UTILIZATION,
-              ratioPercentage);
+          _serverMetrics.setOrUpdateGauge(_metricKeyName, ServerGauge.CONSUMPTION_QUOTA_UTILIZATION,
+              ratioPercentage, ImmutableMap.of());
         }
         _aggregateNumMessages = numMsgsConsumed;
         _previousMinute = nowInMinutes;

@@ -132,7 +132,6 @@ public class IngestionDelayTracker {
 
   private final ServerMetrics _serverMetrics;
   private final String _tableNameWithType;
-  private final String _metricName;
 
   private final RealtimeTableDataManager _realTimeTableDataManager;
   private final Supplier<Boolean> _isServerReadyToServeQueries;
@@ -146,7 +145,6 @@ public class IngestionDelayTracker {
       throws RuntimeException {
     _serverMetrics = serverMetrics;
     _tableNameWithType = tableNameWithType;
-    _metricName = tableNameWithType;
     _realTimeTableDataManager = realtimeTableDataManager;
     _clock = Clock.systemUTC();
     _isServerReadyToServeQueries = isServerReadyToServeQueries;
@@ -206,12 +204,16 @@ public class IngestionDelayTracker {
     _ingestionInfoMap.compute(partitionId, (k, v) -> {
       if (v != null) {
         // Remove all metrics associated with this partition
-        _serverMetrics.removePartitionGauge(_metricName, partitionId, ServerGauge.REALTIME_INGESTION_DELAY_MS);
-        _serverMetrics.removePartitionGauge(_metricName, partitionId,
+        _serverMetrics.removePartitionGauge(_tableNameWithType, partitionId,
+            ServerGauge.REALTIME_INGESTION_DELAY_MS);
+        _serverMetrics.removePartitionGauge(_tableNameWithType, partitionId,
             ServerGauge.END_TO_END_REALTIME_INGESTION_DELAY_MS);
-        _serverMetrics.removePartitionGauge(_metricName, partitionId, ServerGauge.REALTIME_INGESTION_OFFSET_LAG);
-        _serverMetrics.removePartitionGauge(_metricName, partitionId, ServerGauge.REALTIME_INGESTION_UPSTREAM_OFFSET);
-        _serverMetrics.removePartitionGauge(_metricName, partitionId, ServerGauge.REALTIME_INGESTION_CONSUMING_OFFSET);
+        _serverMetrics.removePartitionGauge(_tableNameWithType, partitionId,
+            ServerGauge.REALTIME_INGESTION_OFFSET_LAG);
+        _serverMetrics.removePartitionGauge(_tableNameWithType, partitionId,
+            ServerGauge.REALTIME_INGESTION_UPSTREAM_OFFSET);
+        _serverMetrics.removePartitionGauge(_tableNameWithType, partitionId,
+            ServerGauge.REALTIME_INGESTION_CONSUMING_OFFSET);
       }
       return null;
     });
@@ -279,26 +281,26 @@ public class IngestionDelayTracker {
       if (v == null) {
         // Add metric when we start tracking a partition. Only publish the metric if supported by the stream.
         if (ingestionTimeMs > 0) {
-          _serverMetrics.setOrUpdatePartitionGauge(_metricName, partitionId, ServerGauge.REALTIME_INGESTION_DELAY_MS,
-              () -> getPartitionIngestionDelayMs(partitionId));
+          _serverMetrics.setOrUpdatePartitionGauge(_tableNameWithType, partitionId,
+              ServerGauge.REALTIME_INGESTION_DELAY_MS, () -> getPartitionIngestionDelayMs(partitionId));
         }
         if (firstStreamIngestionTimeMs > 0) {
-          _serverMetrics.setOrUpdatePartitionGauge(_metricName, partitionId,
+          _serverMetrics.setOrUpdatePartitionGauge(_tableNameWithType, partitionId,
               ServerGauge.END_TO_END_REALTIME_INGESTION_DELAY_MS,
               () -> getPartitionEndToEndIngestionDelayMs(partitionId));
         }
         if (currentOffset != null && latestOffset != null) {
-          _serverMetrics.setOrUpdatePartitionGauge(_metricName, partitionId, ServerGauge.REALTIME_INGESTION_OFFSET_LAG,
-              () -> getPartitionIngestionOffsetLag(partitionId));
+          _serverMetrics.setOrUpdatePartitionGauge(_tableNameWithType, partitionId,
+              ServerGauge.REALTIME_INGESTION_OFFSET_LAG, () -> getPartitionIngestionOffsetLag(partitionId));
         }
 
         if (currentOffset != null) {
-          _serverMetrics.setOrUpdatePartitionGauge(_metricName, partitionId,
+          _serverMetrics.setOrUpdatePartitionGauge(_tableNameWithType, partitionId,
               ServerGauge.REALTIME_INGESTION_CONSUMING_OFFSET, () -> getPartitionIngestionConsumingOffset(partitionId));
         }
 
         if (latestOffset != null) {
-          _serverMetrics.setOrUpdatePartitionGauge(_metricName, partitionId,
+          _serverMetrics.setOrUpdatePartitionGauge(_tableNameWithType, partitionId,
               ServerGauge.REALTIME_INGESTION_UPSTREAM_OFFSET, () -> getPartitionIngestionUpstreamOffset(partitionId));
         }
       }

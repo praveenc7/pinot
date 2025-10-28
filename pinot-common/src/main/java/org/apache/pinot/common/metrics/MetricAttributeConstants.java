@@ -32,8 +32,9 @@ public class MetricAttributeConstants {
   public static final String MERGE_LEVEL = "MergeLevel";
   public static final String SEGMENT_NAME = "SegmentName";
   public static final String RESOURCE_NAME = "ResourceName";
-  public static final String TOPIC_NAME = "TopicName";
+  public static final String STREAM_TOPIC_NAME = "StreamTopicName";
   public static final String STREAM_PARTITION_ID = "StreamPartitionId";
+  public static final String STREAM_CLIENT_ID_SUFFIX = "StreamClientIdSuffix";
   public static final String COLUMN_NAME = "ColumnName";
   public static final String REPLICA_GROUP_TAG = "ReplicaGroupTag";
   public static final String REPLICA_GROUP_ID = "ReplicaGroupId";

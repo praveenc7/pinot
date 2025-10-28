@@ -54,7 +54,7 @@ public class SegmentSizeBasedFlushThresholdUpdater implements FlushThresholdUpda
     _controllerMetrics.setOrUpdateTableGauge(_realtimeTableName, ControllerGauge.COMMITTING_SEGMENT_SIZE, segmentSize);
     _controllerMetrics.setOrUpdateTableGauge(_realtimeTableName, _topicName,
         ControllerGauge.COMMITTING_SEGMENT_SIZE_WITH_TOPIC,
-        ImmutableMap.of(MetricAttributeConstants.TOPIC_NAME, _topicName),
+        ImmutableMap.of(MetricAttributeConstants.STREAM_TOPIC_NAME, _topicName),
         segmentSize);
 
     _flushThresholdComputer.onSegmentCommit(committingSegmentDescriptor, committingSegmentZKMetadata);
@@ -69,7 +69,7 @@ public class SegmentSizeBasedFlushThresholdUpdater implements FlushThresholdUpda
     _controllerMetrics.setOrUpdateTableGauge(_realtimeTableName, ControllerGauge.NUM_ROWS_THRESHOLD, threshold);
     _controllerMetrics.setOrUpdateTableGauge(_realtimeTableName, _topicName,
         ControllerGauge.NUM_ROWS_THRESHOLD_WITH_TOPIC,
-        ImmutableMap.of(MetricAttributeConstants.TOPIC_NAME, _topicName),
+        ImmutableMap.of(MetricAttributeConstants.STREAM_TOPIC_NAME, _topicName),
         threshold);
   }
 }

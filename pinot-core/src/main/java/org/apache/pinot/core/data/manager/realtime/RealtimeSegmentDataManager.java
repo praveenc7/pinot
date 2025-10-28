@@ -44,6 +44,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.pinot.common.Utils;
 import org.apache.pinot.common.metadata.segment.SegmentZKMetadata;
+import org.apache.pinot.common.metrics.MetricAttributeConstants;
 import org.apache.pinot.common.metrics.ServerGauge;
 import org.apache.pinot.common.metrics.ServerMeter;
 import org.apache.pinot.common.metrics.ServerMetrics;
@@ -301,6 +302,7 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
   private final int _streamPartitionId;
   private final PartitionGroupConsumptionStatus _partitionGroupConsumptionStatus;
   final String _clientId;
+  Map<String, String> _metricAttributes;
   private final TransformPipeline _transformPipeline;
   private PartitionGroupConsumer _partitionGroupConsumer = null;
   private StreamMetadataProvider _partitionMetadataProvider = null;
@@ -465,7 +467,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
 
     _segmentLogger.info("Starting consumption loop start offset {}, finalOffset {}", _currentOffset, _finalOffset);
     while (!_shouldStop && !endCriteriaReached()) {
-      _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING, 1);
+      _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING, 1,
+          _metricAttributes);
       // Consume for the next readTime ms, or we get to final offset, whichever happens earlier,
       // Update _currentOffset upon return from this method
       MessageBatch messageBatch;
@@ -513,8 +516,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
         // TODO Issue 5359 Need to find a way to bump metrics without getting actual offset value.
         if (_currentOffset instanceof LongMsgOffset) {
           // TODO: only LongMsgOffset supplies long offset value.
-          _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.HIGHEST_STREAM_OFFSET_CONSUMED,
-              ((LongMsgOffset) _currentOffset).getOffset());
+          _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.HIGHEST_STREAM_OFFSET_CONSUMED,
+              ((LongMsgOffset) _currentOffset).getOffset(), _metricAttributes);
         }
         lastUpdatedOffset = _streamPartitionMsgOffsetFactory.create(_currentOffset);
       } else if (endCriteriaReached) {
@@ -796,21 +799,22 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
           if (_state.shouldConsume()) {
             consumeLoop();  // Consume until we reached the end criteria, or we are stopped.
           }
-          _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING, 0);
+          _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING,
+              0, _metricAttributes);
           if (_shouldStop) {
             break;
           }
 
           if (_state == State.INITIAL_CONSUMING) {
             initialConsumptionEnd = now();
-            _serverMetrics.setValueOfTableGauge(_clientId,
+            _serverMetrics.setOrUpdateGauge(_clientId,
                 ServerGauge.LAST_REALTIME_SEGMENT_INITIAL_CONSUMPTION_DURATION_SECONDS,
-                TimeUnit.MILLISECONDS.toSeconds(initialConsumptionEnd - _startTimeMs));
+                TimeUnit.MILLISECONDS.toSeconds(initialConsumptionEnd - _startTimeMs), _metricAttributes);
           } else if (_state == State.CATCHING_UP) {
             catchUpTimeMillis += now() - lastCatchUpStart;
             _serverMetrics
-                .setValueOfTableGauge(_clientId, ServerGauge.LAST_REALTIME_SEGMENT_CATCHUP_DURATION_SECONDS,
-                    TimeUnit.MILLISECONDS.toSeconds(catchUpTimeMillis));
+                .setOrUpdateGauge(_clientId, ServerGauge.LAST_REALTIME_SEGMENT_CATCHUP_DURATION_SECONDS,
+                    TimeUnit.MILLISECONDS.toSeconds(catchUpTimeMillis), _metricAttributes);
           }
 
           // If we are sending segmentConsumed() to the controller, we are in HOLDING state.
@@ -884,7 +888,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
                 // respectively.
                 // Refer to the PR for the new commit protocol: https://github.com/apache/pinot/pull/14741
                 if (PauselessConsumptionUtils.isPauselessEnabled(_tableConfig)) {
-                  _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.PAUSELESS_CONSUMPTION_ENABLED, 1);
+                  _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.PAUSELESS_CONSUMPTION_ENABLED,
+                      1, _metricAttributes);
                   if (!startSegmentCommit()) {
                     // If for any reason commit failed, we don't want to be in COMMITTING state when we hold.
                     // Change the state to HOLDING before looping around.
@@ -894,7 +899,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
                     break;
                   }
                 } else {
-                  _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.PAUSELESS_CONSUMPTION_ENABLED, 0);
+                  _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.PAUSELESS_CONSUMPTION_ENABLED,
+                      0, _metricAttributes);
                 }
                 long buildTimeSeconds = response.getBuildTimeSeconds();
                 try {
@@ -943,7 +949,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
           _segmentLogger.error(errorMessage, e);
           _state = State.ERROR;
           _realtimeTableDataManager.addSegmentError(_segmentNameStr, new SegmentErrorInfo(now(), errorMessage, e));
-          _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING, 0);
+          _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING,
+              0, _metricAttributes);
           postStopConsumedMsg(e.getClass().getName());
           return;
         }
@@ -953,8 +960,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
 
       if (initialConsumptionEnd != 0L) {
         _serverMetrics
-            .setValueOfTableGauge(_clientId, ServerGauge.LAST_REALTIME_SEGMENT_COMPLETION_DURATION_SECONDS,
-                TimeUnit.MILLISECONDS.toSeconds(now() - initialConsumptionEnd));
+            .setOrUpdateGauge(_clientId, ServerGauge.LAST_REALTIME_SEGMENT_COMPLETION_DURATION_SECONDS,
+                TimeUnit.MILLISECONDS.toSeconds(now() - initialConsumptionEnd), _metricAttributes);
       }
       // There is a race condition that the destroy() method can be called which ends up calling stop on the consumer.
       // The destroy() method does not wait for the thread to terminate (and reasonably so, we dont want to wait
@@ -963,7 +970,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
       // so it is ok not to mark it non-consuming, as the main thread will clean up this metric in destroy() method
       // as the final step.
       if (!_shouldStop) {
-        _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING, 0);
+        _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING,
+            0, _metricAttributes);
       }
     }
 
@@ -1080,7 +1088,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
    */
   private void reportDataLoss(MessageBatch messageBatch) {
     if (messageBatch.hasDataLoss()) {
-      _serverMetrics.setValueOfTableGauge(_tableStreamName, ServerGauge.STREAM_DATA_LOSS, 1L);
+      _serverMetrics.setOrUpdateGauge(_tableStreamName, ServerGauge.STREAM_DATA_LOSS, 1L,
+          _metricAttributes);
       String message = "Message loss detected in stream partition: " + _partitionGroupId + " for table: "
           + _tableNameWithType + " startOffset: " + _currentOffset + " batchFirstOffset: "
           + messageBatch.getFirstMessageOffset();
@@ -1189,10 +1198,10 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
       }
 
       long segmentSizeBytes = FileUtils.sizeOfDirectory(indexDir);
-      _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.LAST_REALTIME_SEGMENT_CREATION_DURATION_SECONDS,
-          TimeUnit.MILLISECONDS.toSeconds(buildTimeMillis));
-      _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.LAST_REALTIME_SEGMENT_CREATION_WAIT_TIME_SECONDS,
-          TimeUnit.MILLISECONDS.toSeconds(waitTimeMillis));
+      _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.LAST_REALTIME_SEGMENT_CREATION_DURATION_SECONDS,
+          TimeUnit.MILLISECONDS.toSeconds(buildTimeMillis), _metricAttributes);
+      _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.LAST_REALTIME_SEGMENT_CREATION_WAIT_TIME_SECONDS,
+          TimeUnit.MILLISECONDS.toSeconds(waitTimeMillis), _metricAttributes);
 
       if (forCommit) {
         File segmentTarFile = new File(dataDir, _segmentNameStr + TarCompressionUtils.TAR_COMPRESSED_FILE_EXTENSION);
@@ -1430,7 +1439,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
 
   public void goOnlineFromConsuming(SegmentZKMetadata segmentZKMetadata)
       throws InterruptedException {
-    _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING, 0);
+    _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING,
+        0, _metricAttributes);
     try {
       // Remove the segment file before we do anything else.
       removeSegmentFile();
@@ -1515,7 +1525,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
     } catch (Exception e) {
       Utils.rethrowException(e);
     } finally {
-      _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING, 0);
+      _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING,
+          0, _metricAttributes);
     }
   }
 
@@ -1546,7 +1557,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
       _segmentLogger.warn("Exception when catching up to final offset", e);
       return false;
     } finally {
-      _serverMetrics.setValueOfTableGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING, 0);
+      _serverMetrics.setOrUpdateGauge(_clientId, ServerGauge.LLC_PARTITION_CONSUMING,
+          0, _metricAttributes);
     }
     if (_currentOffset.compareTo(endOffset) != 0) {
       // Timeout?
@@ -1672,6 +1684,13 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
     } else {
       _clientId = _tableNameWithType + "-" + streamTopic + "-" + _streamPartitionId;
     }
+    _metricAttributes = Map.of(
+        MetricAttributeConstants.TABLE_NAME, _tableNameWithType,
+        MetricAttributeConstants.STREAM_TOPIC_NAME, streamTopic,
+        MetricAttributeConstants.STREAM_PARTITION_ID, String.valueOf(_streamPartitionId),
+        MetricAttributeConstants.STREAM_CLIENT_ID_SUFFIX, StringUtils.isEmpty(clientIdSuffix) ? "-" : clientIdSuffix
+    );
+
     _segmentLogger = LoggerFactory.getLogger(RealtimeSegmentDataManager.class.getName() + "_" + _segmentNameStr);
     _tableStreamName = _tableNameWithType + "_" + streamTopic;
     if (indexLoadingConfig.isRealtimeOffHeapAllocation() && !indexLoadingConfig.isDirectRealtimeOffHeapAllocation()) {

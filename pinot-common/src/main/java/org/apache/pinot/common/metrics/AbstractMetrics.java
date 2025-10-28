@@ -175,7 +175,7 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
   }
 
   /**
-   * Logs the timing for a table with an additional key
+   * Logs the timing for a table with an additional taskType prefix.
    * @param tableName The table associated with this timer
    * @param taskType The additional taskType associated with this timer
    * @param timer The name of timer
@@ -213,16 +213,16 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
   }
 
   /**
-   * Logs the timing for a timer with a key
-   * @param key The key associated with this timer
+   * Logs the timing for a timer with an additional prefix
+   * @param prefix The prefix associated with this timer
    * @param timer The name of timer
    * @param duration The log time duration time value
    * @param timeUnit The log time duration time unit
    * @param attributes Additional attributes to be added to the metric
    */
-  public void addTimedValue(final String key, final T timer, final long duration, final TimeUnit timeUnit,
+  public void addTimedValue(final String prefix, final T timer, final long duration, final TimeUnit timeUnit,
       Map<String, String> attributes) {
-    final String fullTimerName = _metricPrefix + key + "." + timer.getTimerName();
+    final String fullTimerName = _metricPrefix + prefix + "." + timer.getTimerName();
     addValueToTimer(fullTimerName, timer.getTimerName(), duration, timeUnit, attributes);
   }
 
@@ -292,22 +292,22 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
     }
   }
 
-  public void addMeteredValue(final String key, final M meter, final long unitCount, Map<String, String> attributes) {
-    addMeteredValue(key, meter, unitCount, null, attributes);
+  public void addMeteredValue(final String prefix, final M meter, final long unitCount,
+      Map<String, String> attributes) {
+    addMeteredValue(prefix, meter, unitCount, null, attributes);
   }
 
   /**
-   * Logs a value to a meter with a key.
-   *
-   * @param key The key associated with this meter
+   * Logs a value to a meter with a prefix.
+   * @param prefix The prefix associated with this meter
    * @param meter The meter to use
    * @param unitCount The number of units to add to the meter
    * @param reusedMeter The meter to reuse
    */
-  public PinotMeter addMeteredValue(final String key, final M meter, final long unitCount,
+  public PinotMeter addMeteredValue(final String prefix, final M meter, final long unitCount,
       PinotMeter reusedMeter, Map<String, String> attributes) {
     String meterName = meter.getMeterName();
-    final String fullMeterName = _metricPrefix + key + "." + meterName;
+    final String fullMeterName = _metricPrefix + prefix + "." + meterName;
     return addValueToMeter(fullMeterName, meterName, meter.getUnit(), unitCount, reusedMeter, attributes);
   }
 
@@ -337,31 +337,31 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
   }
 
   /**
-   * Logs a value to a table-level meter with an additional key
+   * Logs a value to a table-level meter with an additional prefix
    * @param tableName The table name
-   * @param key The additional key associated with this meter
+   * @param prefix The additional prefix associated with this meter
    * @param meter The meter to use
    * @param unitCount The number of units to add to the meter
    * @param attributes The attributes to attach to the meter
    */
-  public void addMeteredTableValue(final String tableName, final String key, final M meter, final long unitCount,
+  public void addMeteredTableValue(final String tableName, final String prefix, final M meter, final long unitCount,
       Map<String, String> attributes) {
-    addMeteredTableValue(tableName, key, meter, unitCount, null, attributes);
+    addMeteredTableValue(tableName, prefix, meter, unitCount, null, attributes);
   }
 
   /**
-   * Logs a value to a table-level meter with an additional key
+   * Logs a value to a table-level meter with an additional prefix
    * @param tableName The table name
-   * @param key The additional key associated with this meter
+   * @param prefix The additional prefix associated with this meter
    * @param meter The meter to use
    * @param unitCount The number of units to add to the meter
    * @param reusedMeter The meter to reuse
    * @param attributes The attributes to attach to the meter
    */
-  public PinotMeter addMeteredTableValue(final String tableName, final String key, final M meter, final long unitCount,
-      PinotMeter reusedMeter, Map<String, String> attributes) {
+  public PinotMeter addMeteredTableValue(final String tableName, final String prefix, final M meter,
+      final long unitCount, PinotMeter reusedMeter, Map<String, String> attributes) {
     String meterName = meter.getMeterName();
-    final String fullMeterName = _metricPrefix + getTableName(tableName) + "." + key + "." + meterName;
+    final String fullMeterName = _metricPrefix + getTableName(tableName) + "." + prefix + "." + meterName;
     Map<String, String> fullAttributes = new HashMap<>(attributes);
     fullAttributes.put(MetricAttributeConstants.TABLE_NAME, tableName);
 
@@ -462,16 +462,30 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
    * Sets the value of a table partition gauge.
    *
    * @param tableName The table name
-   * @param partitionId The partition name
+   * @param partitionId The partition id
    * @param gauge The gauge to use
    * @param value The value to set the gauge to
    */
   public void setValueOfPartitionGauge(final String tableName, final int partitionId, final G gauge, final long value) {
-    final String fullGaugeName = composeTableGaugeName(tableName, String.valueOf(partitionId), gauge);
     Map<String, String> attributes = ImmutableMap.of(
-        MetricAttributeConstants.TABLE_NAME, tableName,
         MetricAttributeConstants.STREAM_PARTITION_ID, String.valueOf(partitionId)
     );
+    setValueOfTableGauge(tableName, String.valueOf(partitionId), gauge, value, attributes);
+  }
+
+  /**
+   * Sets the value of a table gauge.
+   *
+   * @param tableName The table name
+   * @param suffix The suffix to attach to the gauge name
+   * @param gauge The gauge to use
+   * @param value The value to set the gauge to
+   */
+  public void setValueOfTableGauge(final String tableName, final String suffix, final G gauge, final long value,
+      Map<String, String> attributes) {
+    final String fullGaugeName = composeTableGaugeName(tableName, suffix, gauge);
+    Map<String, String> fullAttributes = new HashMap<>(attributes);
+    fullAttributes.put(MetricAttributeConstants.TABLE_NAME, tableName);
     setValueOfGauge(value, fullGaugeName, gauge.getGaugeName(), attributes);
   }
 
@@ -697,15 +711,29 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
    * Sets or updates a gauge to the given value.
    * The value can be updated by calling this method again.
    *
-   * @param tableName The table name
-   * @param key The key associated with this gauge
+   * @param suffix The suffix associated with this gauge
    * @param gauge The gauge to use
    * @param attributes Additional attributes to be added to the metric
    * @param value The value of the gauge
    */
-  public void setOrUpdateTableGauge(final String tableName, final String key, final G gauge,
+  public void setOrUpdateGauge(final String suffix, final G gauge, final long value, Map<String, String> attributes) {
+    String fullGaugeName = gauge.getGaugeName() + "." + suffix;
+    setValueOfGauge(value, fullGaugeName, gauge.getGaugeName(), attributes);
+  }
+
+  /**
+   * Sets or updates a gauge to the given value.
+   * The value can be updated by calling this method again.
+   *
+   * @param tableName The table name associated with this gauge
+   * @param suffix The suffix associated with this gauge
+   * @param gauge The gauge to use
+   * @param attributes Additional attributes to be added to the metric
+   * @param value The value of the gauge
+   */
+  public void setOrUpdateTableGauge(final String tableName, final String suffix, final G gauge,
       final Map<String, String> attributes, final long value) {
-    setOrUpdateTableGauge(tableName, key, gauge, attributes, () -> value);
+    setOrUpdateTableGauge(tableName, suffix, gauge, attributes, () -> value);
   }
 
   /**
@@ -713,14 +741,14 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
    * The supplier function can be updated by calling this method again.
    *
    * @param tableName The table name
-   * @param key The key associated with this gauge
+   * @param suffix The suffix associated with this gauge
    * @param gauge The gauge to use
    * @param attributes Additional attributes to be added to the metric
    * @param valueSupplier The supplier function used to retrieve the value of the gauge
    */
-  public void setOrUpdateTableGauge(final String tableName, final String key, final G gauge,
+  public void setOrUpdateTableGauge(final String tableName, final String suffix, final G gauge,
       Map<String, String> attributes, final Supplier<Long> valueSupplier) {
-    String fullGaugeName = composeTableGaugeName(tableName, key, gauge);
+    String fullGaugeName = composeTableGaugeName(tableName, suffix, gauge);
 
     Map<String, String> fullAttributes = new HashMap<>(attributes);
     fullAttributes.put(MetricAttributeConstants.TABLE_NAME, tableName);
@@ -843,32 +871,31 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
    * @param gauge the gauge to be removed
    */
   public void removePartitionGauge(final String tableName, final int partitionId, final G gauge) {
-    final String fullGaugeName = composeTableGaugeName(tableName, String.valueOf(partitionId), gauge);
-    removeGauge(fullGaugeName);
+    removeTableGauge(tableName, String.valueOf(partitionId), gauge);
   }
 
   /**
-   * Removes a table gauge given the table name, the key and the gauge.
+   * Removes a table gauge given the table name, the suffix and the gauge.
    * The add/remove is expected to work correctly in case of being invoked across multiple threads.
    * @param tableName table name
-   * @param key the key associated with the gauge
+   * @param suffix the suffix associated with the gauge
    * @param gauge the gauge to be removed
    */
-  public void removeTableGauge(final String tableName, final String key, final G gauge) {
-    final String fullGaugeName = composeTableGaugeName(tableName, key, gauge);
+  public void removeTableGauge(final String tableName, final String suffix, final G gauge) {
+    final String fullGaugeName = composeTableGaugeName(tableName, suffix, gauge);
     removeGauge(fullGaugeName);
   }
 
-  private String composeGlobalGaugeName(final String key, final G gauge) {
-    return gauge.getGaugeName() + "." + key;
+  private String composeGlobalGaugeName(final String suffix, final G gauge) {
+    return gauge.getGaugeName() + "." + suffix;
   }
 
   private String composeTableGaugeName(final String tableName, final G gauge) {
     return gauge.getGaugeName() + "." + getTableName(tableName);
   }
 
-  private String composeTableGaugeName(final String tableName, final String key, final G gauge) {
-    return gauge.getGaugeName() + "." + getTableName(tableName) + "." + key;
+  private String composeTableGaugeName(final String tableName, final String suffix, final G gauge) {
+    return gauge.getGaugeName() + "." + getTableName(tableName) + "." + suffix;
   }
 
   public String composePluginGaugeName(String pluginName, Gauge gauge) {

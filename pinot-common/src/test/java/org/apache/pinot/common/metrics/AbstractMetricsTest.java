@@ -445,12 +445,11 @@ public class AbstractMetricsTest {
     ControllerMetrics controllerMetrics = buildTestMetrics();
     String table = "test_table";
     int partitionId = 1024;
-
     controllerMetrics.setValueOfPartitionGauge(table, partitionId, ControllerGauge.VERSION, 1L);
     Assert.assertEquals(MetricValueUtils.getGaugeValue(controllerMetrics,
             ControllerGauge.VERSION.getGaugeName() + "." + table + "." + partitionId), 1);
 
-    controllerMetrics.setOrUpdatePartitionGauge(table, partitionId, ControllerGauge.VERSION, () -> 2L);
+    controllerMetrics.setValueOfPartitionGauge(table, partitionId, ControllerGauge.VERSION, 2L);
     Assert.assertEquals(MetricValueUtils.getGaugeValue(controllerMetrics,
             ControllerGauge.VERSION.getGaugeName() + "." + table + "." + partitionId), 2);
 

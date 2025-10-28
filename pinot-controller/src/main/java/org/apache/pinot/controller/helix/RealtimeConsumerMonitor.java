@@ -104,6 +104,7 @@ public class RealtimeConsumerMonitor extends ControllerPeriodicTask<RealtimeCons
           });
         });
       }
+
       partitionToLagSet.forEach((partition, lagSet) -> {
         _controllerMetrics.setValueOfPartitionGauge(tableNameWithType, Integer.parseInt(partition),
             ControllerGauge.MAX_RECORDS_LAG, Collections.max(lagSet));
