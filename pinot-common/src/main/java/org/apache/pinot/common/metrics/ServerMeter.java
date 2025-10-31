@@ -208,8 +208,9 @@ public enum ServerMeter implements AbstractMetrics.Meter {
    * Approximate heap bytes used by the mutable JSON index at the time of index close.
    */
   MUTABLE_JSON_INDEX_MEMORY_USAGE("bytes", false),
-  // Workload Budget exceeded counter
-  WORKLOAD_BUDGET_EXCEEDED("workloadBudgetExceeded", false, "Number of times workload budget exceeded");
+  // Workload related metrics
+  WORKLOAD_BUDGET_EXCEEDED("workloadBudgetExceeded", true, "Number of times workload budget exceeded"),
+  WORKLOAD_QUERIES("queries", false);
 
   private final String _meterName;
   private final String _unit;

@@ -116,6 +116,7 @@ public class QueryLoggerTest {
         + "offlineMemAllocatedBytes(total/thread/resSer):0/0/0,"
         + "realtimeMemAllocatedBytes(total/thread/resSer):0/0/0,"
         + "replicaGroups=[],"
+        + "workloadName=workloadName,"
         + "query=SELECT * FROM foo");
     //@formatter:on
   }
@@ -290,6 +291,6 @@ public class QueryLoggerTest {
     serverStats.setServerStats("serverStats");
 
     return new QueryLogger.QueryLogParams(requestContext, "table", response,
-        QueryLogger.QueryLogParams.QueryEngine.SINGLE_STAGE, identity, serverStats);
+        QueryLogger.QueryLogParams.QueryEngine.SINGLE_STAGE, identity, serverStats, "workloadName");
   }
 }

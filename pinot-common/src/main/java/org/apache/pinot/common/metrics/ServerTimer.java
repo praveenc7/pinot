@@ -101,7 +101,9 @@ public enum ServerTimer implements AbstractMetrics.Timer {
   STARTUP_SUCCESS_DURATION_MS("millis", true),
   STARTUP_FAILURE_DURATION_MS("millis", true),
 
-  PREDOWNLOAD_TIME("millis", true);
+  PREDOWNLOAD_TIME("millis", true),
+  // The total time spent in processing the workload queries
+  WORKLOAD_TOTAL_QUERY_TIME_MS("millis", false);
 
   private final String _timerName;
   private final boolean _global;
