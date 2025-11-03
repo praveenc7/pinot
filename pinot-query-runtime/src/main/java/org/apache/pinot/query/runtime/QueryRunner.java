@@ -213,7 +213,7 @@ public class QueryRunner {
       _executorService = new ThrottleOnCriticalHeapUsageExecutor(_executorService);
     }
 
-    _opChainScheduler = new OpChainSchedulerService(_executorService, serverConf);
+    _opChainScheduler = new OpChainSchedulerService(instanceDataManager.getInstanceId(), _executorService, serverConf);
     _mailboxService = new MailboxService(hostname, port, serverConf, tlsConfig);
     try {
       _leafQueryExecutor = new ServerQueryExecutorV1Impl();
