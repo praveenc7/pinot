@@ -162,7 +162,7 @@ public class WorkloadResourceAggregator implements ResourceAggregator {
           _metrics.addMeteredValue(workloadName, _workloadBudgetExceededMeter, 1,
               ImmutableMap.of(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
           _metrics.addMeteredGlobalValue(_workloadBudgetExceededMeter, 1);
-          executionContext.terminate(QueryErrorCode.SERVER_RESOURCE_LIMIT_EXCEEDED, errorMessage);
+          executionContext.terminate(QueryErrorCode.WORKLOAD_BUDGET_EXCEEDED, errorMessage);
         }
       }
     }

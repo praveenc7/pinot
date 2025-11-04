@@ -92,7 +92,7 @@ public class WorkloadScheduler extends QueryScheduler {
           ImmutableMap.of(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
       _serverMetrics.addMeteredTableValue(tableName, ServerMeter.WORKLOAD_BUDGET_EXCEEDED, 1L);
       _serverMetrics.addMeteredGlobalValue(ServerMeter.WORKLOAD_BUDGET_EXCEEDED, 1L);
-      return immediateErrorResponse(queryRequest, QueryErrorCode.SERVER_RESOURCE_LIMIT_EXCEEDED);
+      return immediateErrorResponse(queryRequest, QueryErrorCode.WORKLOAD_BUDGET_EXCEEDED);
     }
     queryRequest.getTimerContext().startNewPhaseTimer(ServerQueryPhase.SCHEDULER_WAIT);
     QueryExecutorService executorService = _resourceManager.getExecutorService(queryRequest, null);

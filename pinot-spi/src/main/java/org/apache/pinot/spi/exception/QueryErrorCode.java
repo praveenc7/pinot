@@ -44,6 +44,7 @@ public enum QueryErrorCode {
   SERVER_SEGMENT_MISSING(235, "ServerSegmentMissing"),
   QUERY_SCHEDULING_TIMEOUT(240, "QuerySchedulingTimeoutError"),
   SERVER_RESOURCE_LIMIT_EXCEEDED(245, "ServerResourceLimitExceededError"),
+  WORKLOAD_BUDGET_EXCEEDED(246, "WorkloadBudgetExceededError"),
   EXECUTION_TIMEOUT(250, "ExecutionTimeoutError"),
   BROKER_SEGMENT_UNAVAILABLE(305, ""),
   BROKER_TIMEOUT(400, "BrokerTimeoutError"),

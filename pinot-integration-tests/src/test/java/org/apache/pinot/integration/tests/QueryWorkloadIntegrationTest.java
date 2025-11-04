@@ -289,14 +289,14 @@ public class QueryWorkloadIntegrationTest extends BaseClusterIntegrationTest {
     if (expectRejection) {
       assertFalse(exceptions.isEmpty(), "Expected workload enforcement to reject query for: " + workloadName);
       int errorCode = exceptions.get(0).get("errorCode").asInt();
-      assertEquals(errorCode, QueryErrorCode.SERVER_RESOURCE_LIMIT_EXCEEDED.getId(),
+      assertEquals(errorCode, QueryErrorCode.WORKLOAD_BUDGET_EXCEEDED.getId(),
           "Expected workload budget exceeded error but got: " + exceptions);
     } else {
       // For high budget scenarios, we expect the query to succeed (no exceptions or empty exceptions)
       if (exceptions != null && !exceptions.isEmpty()) {
         // If there are exceptions, they should not be budget-related
         int errorCode = exceptions.get(0).get("errorCode").asInt();
-        assertNotEquals(errorCode, QueryErrorCode.SERVER_RESOURCE_LIMIT_EXCEEDED.getId(),
+        assertNotEquals(errorCode, QueryErrorCode.WORKLOAD_BUDGET_EXCEEDED.getId(),
             "Unexpected workload budget exceeded error for high budget scenario: " + exceptions);
       }
     }
