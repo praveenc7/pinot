@@ -586,6 +586,7 @@ public class PinotHelixResourceManager {
       long startTimeMs = System.currentTimeMillis();
       List<String> tablesAdded = new ArrayList<>();
       HelixHelper.updateBrokerResource(_helixZkManager, instanceId, newBrokerTags, tablesAdded, null);
+      _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, null);
       LOGGER.info("Updated broker resource for broker: {} with tags: {} in {}ms, tables added: {}", instanceId,
           newBrokerTags, System.currentTimeMillis() - startTimeMs, tablesAdded);
       return PinotResourceManagerResponse.success("Added instance: " + instanceId + ", and updated broker resource - "
@@ -628,6 +629,7 @@ public class PinotHelixResourceManager {
       List<String> tablesAdded = new ArrayList<>();
       List<String> tablesRemoved = new ArrayList<>();
       HelixHelper.updateBrokerResource(_helixZkManager, instanceId, newBrokerTags, tablesAdded, tablesRemoved);
+      _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, tablesRemoved);
       LOGGER.info("Updated broker resource for broker: {} with tags: {} in {}ms, tables added: {}, tables removed: {}",
           instanceId, newBrokerTags, System.currentTimeMillis() - startTimeMs, tablesAdded, tablesRemoved);
       return PinotResourceManagerResponse.success("Updated instance: " + instanceId + ", and updated broker resource - "
@@ -668,6 +670,7 @@ public class PinotHelixResourceManager {
       List<String> tablesAdded = new ArrayList<>();
       List<String> tablesRemoved = new ArrayList<>();
       HelixHelper.updateBrokerResource(_helixZkManager, instanceId, newBrokerTags, tablesAdded, tablesRemoved);
+      _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, tablesRemoved);
       LOGGER.info("Updated broker resource for broker: {} with tags: {} in {}ms, tables added: {}, tables removed: {}",
           instanceId, newBrokerTags, System.currentTimeMillis() - startTimeMs, tablesAdded, tablesRemoved);
       return PinotResourceManagerResponse.success("Updated tags: " + newTags + " for instance: " + instanceId
@@ -696,6 +699,7 @@ public class PinotHelixResourceManager {
     List<String> tablesAdded = new ArrayList<>();
     List<String> tablesRemoved = new ArrayList<>();
     HelixHelper.updateBrokerResource(_helixZkManager, instanceId, brokerTags, tablesAdded, tablesRemoved);
+    _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, tablesRemoved);
     LOGGER.info("Updated broker resource for broker: {} with tags: {} in {}ms, tables added: {}, tables removed: {}",
         instanceId, brokerTags, System.currentTimeMillis() - startTimeMs, tablesAdded, tablesRemoved);
     return PinotResourceManagerResponse.success("Updated broker resource for broker: " + instanceId
@@ -1833,7 +1837,7 @@ public class PinotHelixResourceManager {
           .put(tableNameWithType, SegmentAssignmentUtils.getInstanceStateMap(brokers, BrokerResourceStateModel.ONLINE));
       return is;
     });
-    _queryWorkloadManager.propagateWorkloadFor(tableNameWithType);
+    _queryWorkloadManager.propagateWorkloadForTable(tableNameWithType);
     LOGGER.info("Adding table {}: Successfully added table", tableNameWithType);
   }
 
@@ -2198,7 +2202,7 @@ public class PinotHelixResourceManager {
     // Send update query quota message if quota is specified
     sendTableConfigRefreshMessage(tableNameWithType);
     // TODO: Propagate workload for tables if there is change is change instance characteristics
-    _queryWorkloadManager.propagateWorkloadFor(tableNameWithType);
+    _queryWorkloadManager.propagateWorkloadForTable(tableNameWithType);
   }
 
   public void deleteUser(String username) {
