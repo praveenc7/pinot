@@ -20,11 +20,18 @@ package org.apache.pinot.common.utils.fetcher;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.zip.GZIPOutputStream;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.apache.commons.io.FileUtils;
 import org.apache.pinot.common.utils.TarCompressionUtils;
+import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.filesystem.PinotFS;
 import org.apache.pinot.spi.filesystem.PinotFSFactory;
 import org.apache.pinot.spi.utils.retry.AttemptsExceededException;
@@ -43,8 +50,10 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertThrows;
 import static org.testng.Assert.assertTrue;
+
 
 public class PinotFSSegmentFetcherTest {
 
@@ -79,23 +88,25 @@ public class PinotFSSegmentFetcherTest {
     PinotFS mockFs = mock(PinotFS.class);
     InputStream fakeStream = new ByteArrayInputStream("fake-data".getBytes(StandardCharsets.UTF_8));
 
+    File fakeSegmentRoot = new File(_tempDir, "testSegment");
+
     try (MockedStatic<PinotFSFactory> fsFactoryMock = Mockito.mockStatic(PinotFSFactory.class);
         MockedStatic<TarCompressionUtils> tarMock = Mockito.mockStatic(TarCompressionUtils.class)) {
 
       fsFactoryMock.when(() -> PinotFSFactory.create("mock")).thenReturn(mockFs);
       when(mockFs.open(_mockUri)).thenReturn(fakeStream);
 
-      // ✅ Correctly mock the method your code actually calls
       tarMock.when(() -> TarCompressionUtils.untarWithRateLimiter(
           any(InputStream.class),
           eq(_tempDir),
           anyLong()
-      )).thenAnswer(i -> null);
+      )).thenReturn(java.util.List.of(fakeSegmentRoot));
 
       File result = _fetcher.fetchUntarSegmentToLocalStreamed(_mockUri, _tempDir, 0L, _attempts);
 
-      assertEquals(result, _tempDir);
+      assertEquals(result, fakeSegmentRoot);
       assertTrue(_attempts.get() >= 0);
+
       tarMock.verify(() -> TarCompressionUtils.untarWithRateLimiter(
           any(InputStream.class), eq(_tempDir), anyLong()), times(1));
     }
@@ -106,23 +117,25 @@ public class PinotFSSegmentFetcherTest {
     PinotFS mockFs = mock(PinotFS.class);
     InputStream fakeStream = new ByteArrayInputStream("fake-data".getBytes(StandardCharsets.UTF_8));
 
+    File fakeSegmentRoot = new File(_tempDir, "testSegment");
+
     try (MockedStatic<PinotFSFactory> fsFactoryMock = Mockito.mockStatic(PinotFSFactory.class);
         MockedStatic<TarCompressionUtils> tarMock = Mockito.mockStatic(TarCompressionUtils.class)) {
 
       fsFactoryMock.when(() -> PinotFSFactory.create("mock")).thenReturn(mockFs);
       when(mockFs.open(_mockUri))
-          .thenThrow(new java.io.IOException("first fail"))
+          .thenThrow(new IOException("first fail"))
           .thenReturn(fakeStream);
 
       tarMock.when(() -> TarCompressionUtils.untarWithRateLimiter(
           any(InputStream.class),
           eq(_tempDir),
           anyLong()
-      )).thenAnswer(i -> null);
+      )).thenReturn(java.util.List.of(fakeSegmentRoot));
 
       File result = _fetcher.fetchUntarSegmentToLocalStreamed(_mockUri, _tempDir, 0L, _attempts);
 
-      assertEquals(result, _tempDir);
+      assertEquals(result, fakeSegmentRoot);
       assertTrue(_attempts.get() >= 1);
       verify(mockFs, atLeast(2)).open(_mockUri);
     }
@@ -138,6 +151,80 @@ public class PinotFSSegmentFetcherTest {
 
       assertThrows(AttemptsExceededException.class, () ->
           _fetcher.fetchUntarSegmentToLocalStreamed(_mockUri, _tempDir, 0L, _attempts));
+    }
+  }
+
+  /**
+   * Verifies that segments packaged in the production tar layout
+   * (segmentName/v3/...) are correctly normalized by the fetcher so that
+   * the final files exist under destDir/v3/ after untar.
+   */
+  @Test
+  public void testFetchUntarSegmentToLocalStreamedWithNestedLayout() throws Exception {
+    String segmentName = "testSegment_0_0_0";
+
+    File tempDir = java.nio.file.Files.createTempDirectory("pinot_test_").toFile();
+    AtomicInteger attempts = new AtomicInteger();
+
+    try {
+      // Create segment structure
+      File v3Dir = new File(tempDir, segmentName + "/v3");
+      assertTrue(v3Dir.mkdirs());
+
+      File metadata = new File(v3Dir, "metadata.properties");
+      File creation = new File(v3Dir, "creation.meta");
+      FileUtils.writeStringToFile(metadata, "foo=bar", "UTF-8");
+      FileUtils.writeStringToFile(creation, "created", "UTF-8");
+
+      // Create tar.gz
+      File tarFile = new File(tempDir, segmentName + ".tar.gz");
+      try (FileOutputStream fos = new FileOutputStream(tarFile);
+          GZIPOutputStream gzos = new GZIPOutputStream(fos);
+          TarArchiveOutputStream tar = new TarArchiveOutputStream(gzos)) {
+        addFileToTar(tar, new File(tempDir, segmentName), segmentName);
+      }
+
+      // Destination directory
+      File destDir = new File(tempDir, "untar-dest-" + System.currentTimeMillis());
+      assertTrue(destDir.mkdirs());
+
+      // Run fetcher
+      PinotFSSegmentFetcher fetcher = new PinotFSSegmentFetcher();
+      fetcher.init(new PinotConfiguration());
+
+      File resultDir = fetcher.fetchUntarSegmentToLocalStreamed(tarFile.toURI(), destDir, -1, attempts);
+
+      // Assertions
+      assertNotNull(resultDir);
+      assertEquals(resultDir.getName(), segmentName);
+
+      File normalizedV3 = new File(resultDir, "v3");
+      assertTrue(normalizedV3.exists(), "v3 directory should exist under segment root");
+
+      assertTrue(new File(normalizedV3, "metadata.properties").exists());
+      assertTrue(new File(normalizedV3, "creation.meta").exists());
+    } finally {
+      if (tempDir.exists()) {
+        FileUtils.deleteDirectory(tempDir);
+      }
+    }
+  }
+
+  private void addFileToTar(TarArchiveOutputStream tar, File file, String entryName) throws Exception {
+    TarArchiveEntry entry = new TarArchiveEntry(file, entryName);
+    tar.putArchiveEntry(entry);
+
+    if (file.isFile()) {
+      tar.write(FileUtils.readFileToByteArray(file));
+      tar.closeArchiveEntry();
+    } else {
+      tar.closeArchiveEntry();
+      File[] children = file.listFiles();
+      if (children != null) {
+        for (File child : children) {
+          addFileToTar(tar, child, entryName + "/" + child.getName());
+        }
+      }
     }
   }
 }

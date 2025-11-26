@@ -64,10 +64,12 @@ public class PinotFSSegmentFetcher extends BaseSegmentFetcher {
 
               _logger.info("Opening input stream from {} using PinotFS scheme: {}", downloadURI, scheme);
               try (InputStream inputStream = fs.open(downloadURI)) {
-                TarCompressionUtils.untarWithRateLimiter(inputStream, destDir, maxStreamRateInByte);
+                File segmentRoot =
+                    TarCompressionUtils.untarWithRateLimiter(inputStream, destDir, maxStreamRateInByte).get(0);
+
+                result.set(segmentRoot);
               }
 
-              result.set(destDir);
               return true;
             } catch (IOException e) {
               _logger.warn("IOException during untar fetch from {} to {}, will retry", downloadURI, destDir, e);
