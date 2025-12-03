@@ -27,9 +27,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.Nullable;
+import javax.ws.rs.core.Response;
+import org.apache.hc.client5.http.async.methods.SimpleHttpRequest;
+import org.apache.hc.client5.http.async.methods.SimpleRequestBuilder;
 import org.apache.hc.core5.http.ClassicHttpRequest;
+import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.HttpHeaders;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.HttpVersion;
@@ -40,7 +46,6 @@ import org.apache.helix.PropertyKey;
 import org.apache.helix.zookeeper.datamodel.ZNRecord;
 import org.apache.pinot.common.exception.HttpErrorStatusException;
 import org.apache.pinot.common.helix.ExtraInstanceConfig;
-import org.apache.pinot.common.messages.QueryWorkloadRefreshMessage;
 import org.apache.pinot.common.utils.SimpleHttpResponse;
 import org.apache.pinot.common.utils.http.HttpClient;
 import org.apache.pinot.common.utils.http.HttpClientConfig;
@@ -54,6 +59,7 @@ import org.apache.pinot.spi.config.workload.PropagationEntity;
 import org.apache.pinot.spi.config.workload.PropagationEntityOverrides;
 import org.apache.pinot.spi.config.workload.PropagationScheme;
 import org.apache.pinot.spi.config.workload.QueryWorkloadConfig;
+import org.apache.pinot.spi.config.workload.QueryWorkloadRefreshRequest;
 import org.apache.pinot.spi.utils.InstanceTypeUtils;
 import org.apache.pinot.spi.utils.JsonUtils;
 import org.apache.pinot.spi.utils.retry.RetryPolicies;
@@ -66,9 +72,13 @@ public class QueryWorkloadConfigUtils {
   }
 
   private static final Logger LOGGER = org.slf4j.LoggerFactory.getLogger(QueryWorkloadConfigUtils.class);
+
   private static final HttpClient HTTP_CLIENT = new HttpClient(HttpClientConfig.DEFAULT_HTTP_CLIENT_CONFIG,
-          TlsUtils.getSslContext());
+      TlsUtils.getSslContext());
   private static final Random RANDOM = new Random();
+  private static final int WORKLOAD_PROPAGATION_MAX_RETRIES = 3;
+  private static final long RETRY_INITIAL_DELAY_MS = 3000L;
+  private static final double RETRY_BACKOFF_MULTIPLIER = 2.0;
 
   /**
    * Converts a ZNRecord into a QueryWorkloadConfig object by extracting mapFields.
@@ -109,31 +119,6 @@ public class QueryWorkloadConfigUtils {
     }
   }
 
-  public static void updateZNRecordWithInstanceCost(ZNRecord znRecord, String queryWorkloadName,
-      InstanceCost instanceCost) {
-    Preconditions.checkNotNull(znRecord, "ZNRecord cannot be null");
-    Preconditions.checkNotNull(instanceCost, "InstanceCost cannot be null");
-    try {
-      znRecord.setSimpleField(QueryWorkloadRefreshMessage.QUERY_WORKLOAD_NAME, queryWorkloadName);
-      znRecord.setSimpleField(QueryWorkloadRefreshMessage.INSTANCE_COST, JsonUtils.objectToString(instanceCost));
-    } catch (Exception e) {
-      String errorMessage = String.format("Failed to convert InstanceCost : %s to ZNRecord",
-          instanceCost);
-      throw new RuntimeException(errorMessage, e);
-    }
-  }
-
-  public static InstanceCost getInstanceCostFromZNRecord(ZNRecord znRecord) {
-    Preconditions.checkNotNull(znRecord, "ZNRecord cannot be null");
-    String instanceCostJson = znRecord.getSimpleField(QueryWorkloadRefreshMessage.INSTANCE_COST);
-    Preconditions.checkNotNull(instanceCostJson, "InstanceCost cannot be null");
-    try {
-      return JsonUtils.stringToObject(instanceCostJson, InstanceCost.class);
-    } catch (Exception e) {
-      String errorMessage = String.format("Failed to convert ZNRecord : %s to InstanceCost", znRecord);
-      throw new RuntimeException(errorMessage, e);
-    }
-  }
 
   /**
    * Gets a random controller URL by dynamically discovering all live controller instances from Helix.
@@ -451,33 +436,154 @@ public class QueryWorkloadConfigUtils {
   }
 
   /**
-   * Handles a query workload refresh message by updating or deleting the workload budget.
-   * This method is used by both broker and server message handlers.
+   * Handles a workload refresh request for a server or broker instance.
+   *
+   * @param requestString The JSON request string containing workload refresh data
+   * @param instanceId The instance ID for logging and error messages
+   * @param logger The logger to use for logging
+   * @return JAX-RS Response with appropriate status code and message
    */
-  public static void handleWorkloadRefreshMessage(String instanceId, String workloadName, String messageType,
-      InstanceCost instanceCost) {
-    WorkloadBudgetManager workloadBudgetManager = WorkloadBudgetManagerFactory.get();
-    if (workloadBudgetManager == null) {
-      String errorMsg = "WorkloadBudgetManager not initialized for instance: " + instanceId
-          + ". Failed to handle query workload message: " + workloadName;
-      LOGGER.error(errorMsg);
-      throw new IllegalStateException(errorMsg);
-    }
-
-    if (messageType.equals(QueryWorkloadRefreshMessage.DELETE_QUERY_WORKLOAD_MSG_SUB_TYPE)) {
-      workloadBudgetManager.deleteWorkload(workloadName);
-      LOGGER.info("Deleted workload: {} on instance: {}", workloadName, instanceId);
-    } else if (messageType.equals(QueryWorkloadRefreshMessage.REFRESH_QUERY_WORKLOAD_MSG_SUB_TYPE)) {
-      if (instanceCost == null) {
-        throw new IllegalStateException(
-            "Instance cost is not provided for refreshing query workload: " + workloadName);
+  public static Response handleRefreshRequest(String requestString, String instanceId, Logger logger) {
+    try {
+      QueryWorkloadRefreshRequest request = JsonUtils.stringToObject(requestString, QueryWorkloadRefreshRequest.class);
+      WorkloadBudgetManager budgetManager = WorkloadBudgetManagerFactory.get();
+      if (budgetManager == null) {
+        String errorMsg = "WorkloadBudgetManager not initialized for instance: " + instanceId;
+        logger.warn(errorMsg);
+        return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(errorMsg).build();
       }
-      workloadBudgetManager.addOrUpdateWorkload(workloadName, instanceCost.getCpuCostNs(),
-          instanceCost.getMemoryCostBytes());
-      LOGGER.info("Refreshed workload: {} on instance: {} with cpuCostNs: {}, memoryCostBytes: {}",
-          workloadName, instanceId, instanceCost.getCpuCostNs(), instanceCost.getMemoryCostBytes());
-    } else {
-      throw new IllegalStateException("Unknown message type: " + messageType);
+      logger.info("Processing {} workloads, operationType: {} on instance: {}",
+          request.getWorkloadToCostMap().size(), request.getOperationType(), instanceId);
+      int successCount = 0;
+      int failureCount = 0;
+      StringBuilder resultMessage = new StringBuilder();
+
+      for (Map.Entry<String, InstanceCost> entry : request.getWorkloadToCostMap().entrySet()) {
+        String workloadName = entry.getKey();
+        InstanceCost instanceCost = entry.getValue();
+        try {
+          if (request.isDelete()) {
+            budgetManager.deleteWorkload(workloadName);
+            logger.info("Deleted workload: {} on instance: {}", workloadName, instanceId);
+            resultMessage.append(String.format("Deleted: %s; ", workloadName));
+            successCount++;
+          } else if (request.isRefresh()) {
+            if (instanceCost == null) {
+              logger.error("InstanceCost is null for workload: {}", workloadName);
+              resultMessage.append(String.format("Failed %s: null cost; ", workloadName));
+              failureCount++;
+              continue;
+            }
+            budgetManager.addOrUpdateWorkload(workloadName, instanceCost.getCpuCostNs(),
+                instanceCost.getMemoryCostBytes());
+            logger.info("Updated workload: {} on instance: {}", workloadName, instanceId);
+            resultMessage.append(String.format("Updated: %s; ", workloadName));
+            successCount++;
+          }
+        } catch (Exception e) {
+          logger.error("Error processing workload: {}", workloadName, e);
+          resultMessage.append(String.format("Failed %s: %s; ", workloadName, e.getMessage()));
+          failureCount++;
+        }
+      }
+      String message = String.format("Processed %d workloads: %d succeeded, %d failed. %s",
+          request.getWorkloadToCostMap().size(), successCount, failureCount, resultMessage);
+
+      if (failureCount > 0 && successCount == 0) {
+        return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(message).build();
+      } else if (failureCount > 0) {
+        // Indicate partial success with 202 Accepted
+        return Response.status(Response.Status.ACCEPTED).entity(message).build();
+      } else {
+        return Response.ok(message).build();
+      }
+    } catch (Exception e) {
+      String errorMsg = "Error processing workload refresh request: " + e.getMessage();
+      logger.error(errorMsg, e);
+      return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(errorMsg).build();
+    }
+  }
+
+  /**
+   * Sends a workload refresh request with automatic retries and exponential backoff.
+   * Uses async HTTP client for non-blocking I/O.
+   *
+   * @param url The target URL for the refresh endpoint
+   * @param request The workload refresh request to send
+   * @param instanceId The instance ID for logging
+   * @return CompletableFuture that completes with true if successful, false otherwise
+   */
+  public static CompletableFuture<Boolean> sendWorkloadRefreshRequestWithRetry(String url,
+      QueryWorkloadRefreshRequest request, String instanceId) {
+    return sendWorkloadRefreshRequestWithRetryInternal(url, request, instanceId, 0);
+  }
+
+  private static CompletableFuture<Boolean> sendWorkloadRefreshRequestWithRetryInternal(String url,
+      QueryWorkloadRefreshRequest request, String instanceId, int attemptNumber) {
+    return sendWorkloadRefreshRequestAsync(request, url, instanceId)
+        .thenCompose(success -> {
+          if (success || attemptNumber >= WORKLOAD_PROPAGATION_MAX_RETRIES - 1) {
+            return CompletableFuture.completedFuture(success);
+          }
+          // Exponential backoff before retry
+          long delayMs = (long) (RETRY_INITIAL_DELAY_MS * Math.pow(RETRY_BACKOFF_MULTIPLIER, attemptNumber));
+          LOGGER.debug("Retrying workload refresh for instance {} after {}ms delay (attempt {}/{})",
+              instanceId, delayMs, attemptNumber + 1, WORKLOAD_PROPAGATION_MAX_RETRIES);
+          CompletableFuture<Boolean> delayed = new CompletableFuture<>();
+          CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS)
+              .execute(() -> {
+                sendWorkloadRefreshRequestWithRetryInternal(url, request, instanceId, attemptNumber + 1)
+                    .whenComplete((result, error) -> {
+                      if (error != null) {
+                        delayed.completeExceptionally(error);
+                      } else {
+                        delayed.complete(result);
+                      }
+                    });
+              });
+          return delayed;
+        });
+  }
+
+  /**
+   * Sends a workload refresh request to an instance asynchronously via HTTP POST using true non-blocking I/O.
+   * Supports both HTTP and HTTPS using the TLS-configured HTTP_CLIENT.
+   * This method does NOT block any threads - it uses Apache HttpAsyncClient for true async execution.
+   *
+   */
+  public static CompletableFuture<Boolean> sendWorkloadRefreshRequestAsync(QueryWorkloadRefreshRequest request,
+                                                                           String uri, String instanceId) {
+    try {
+      String requestBody = JsonUtils.objectToString(request);
+      SimpleHttpRequest httpRequest = SimpleRequestBuilder.post(uri)
+          .setHeader(HttpHeaders.CONTENT_TYPE, HttpClient.JSON_CONTENT_TYPE)
+          .setBody(requestBody, ContentType.APPLICATION_JSON)
+          .build();
+      return HTTP_CLIENT.sendSimpleRequestAsync(httpRequest)
+          .thenApply(response -> {
+            try {
+              SimpleHttpResponse wrappedResponse = HttpClient.wrapAndThrowHttpException(response);
+              if (wrappedResponse.getStatusCode() == HttpStatus.SC_OK
+                  || wrappedResponse.getStatusCode() == HttpStatus.SC_ACCEPTED) {
+                LOGGER.info("Successfully sent workload refresh request to instance: {}", instanceId);
+                return true;
+              } else {
+                LOGGER.error("Failed to send workload refresh request to instance: {}, status: {}, response: {}",
+                    instanceId, wrappedResponse.getStatusCode(), wrappedResponse.getResponse());
+                return false;
+              }
+            } catch (Exception e) {
+              LOGGER.error("Error processing response for instance: {}", instanceId, e);
+              return false;
+            }
+          })
+          .exceptionally(ex -> {
+            LOGGER.error("Exception sending async workload refresh request to instance: {}", instanceId, ex);
+            return false;
+          });
+    } catch (Exception e) {
+      LOGGER.error("Exception creating async workload refresh request for instance: {}", instanceId, e);
+      return CompletableFuture.completedFuture(false);
     }
   }
 }

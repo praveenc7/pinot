@@ -75,7 +75,14 @@ public enum ControllerMeter implements AbstractMetrics.Meter {
   // Total Bytes written to deep store
   DEEP_STORE_WRITE_BYTES_COMPLETED("deepStoreWriteBytesCompleted", true),
   // Tracks failures encountered while fetching partition group metadata
-  PARTITION_GROUP_METADATA_FETCH_ERROR("failures", true);
+  PARTITION_GROUP_METADATA_FETCH_ERROR("failures", true),
+  // Query workload propagation metrics
+  QUERY_WORKLOAD_PROPAGATION_COUNT("calls", false),
+  QUERY_WORKLOAD_PROPAGATION_SUCCESS("success", false),
+  QUERY_WORKLOAD_PROPAGATION_FAILURE("failures", false),
+  QUERY_WORKLOAD_MESSAGES_SENT("messages", false),
+  QUERY_WORKLOAD_MESSAGES_ENQUEUED("messages", false),
+  QUERY_WORKLOAD_MESSAGES_FAILED("messages", false);
 
   private final String _brokerMeterName;
   private final String _unit;

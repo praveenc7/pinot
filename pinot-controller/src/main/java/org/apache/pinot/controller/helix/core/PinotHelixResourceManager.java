@@ -170,6 +170,7 @@ import org.apache.pinot.spi.config.tenant.Tenant;
 import org.apache.pinot.spi.config.user.ComponentType;
 import org.apache.pinot.spi.config.user.RoleType;
 import org.apache.pinot.spi.config.user.UserConfig;
+import org.apache.pinot.spi.config.workload.NodeConfig;
 import org.apache.pinot.spi.config.workload.QueryWorkloadConfig;
 import org.apache.pinot.spi.data.DateTimeFieldSpec;
 import org.apache.pinot.spi.data.LogicalTableConfig;
@@ -234,7 +235,7 @@ public class PinotHelixResourceManager {
   private PinotLLCRealtimeSegmentManager _pinotLLCRealtimeSegmentManager;
   private TableCache _tableCache;
   private final LineageManager _lineageManager;
-  private final QueryWorkloadManager _queryWorkloadManager;
+  private QueryWorkloadManager _queryWorkloadManager;
 
   public PinotHelixResourceManager(String zkURL, String helixClusterName, @Nullable String dataDir,
       boolean isSingleTenantCluster, boolean enableBatchMessageMode, int deletedSegmentsRetentionInDays,
@@ -261,7 +262,6 @@ public class PinotHelixResourceManager {
       _lineageUpdaterLocks[i] = new Object();
     }
     _lineageManager = lineageManager;
-    _queryWorkloadManager = new QueryWorkloadManager(this);
   }
 
   public PinotHelixResourceManager(ControllerConf controllerConf) {
@@ -586,7 +586,7 @@ public class PinotHelixResourceManager {
       long startTimeMs = System.currentTimeMillis();
       List<String> tablesAdded = new ArrayList<>();
       HelixHelper.updateBrokerResource(_helixZkManager, instanceId, newBrokerTags, tablesAdded, null);
-      _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, null);
+      _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, null, NodeConfig.Type.BROKER_NODE);
       LOGGER.info("Updated broker resource for broker: {} with tags: {} in {}ms, tables added: {}", instanceId,
           newBrokerTags, System.currentTimeMillis() - startTimeMs, tablesAdded);
       return PinotResourceManagerResponse.success("Added instance: " + instanceId + ", and updated broker resource - "
@@ -629,7 +629,7 @@ public class PinotHelixResourceManager {
       List<String> tablesAdded = new ArrayList<>();
       List<String> tablesRemoved = new ArrayList<>();
       HelixHelper.updateBrokerResource(_helixZkManager, instanceId, newBrokerTags, tablesAdded, tablesRemoved);
-      _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, tablesRemoved);
+      _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, tablesRemoved, NodeConfig.Type.BROKER_NODE);
       LOGGER.info("Updated broker resource for broker: {} with tags: {} in {}ms, tables added: {}, tables removed: {}",
           instanceId, newBrokerTags, System.currentTimeMillis() - startTimeMs, tablesAdded, tablesRemoved);
       return PinotResourceManagerResponse.success("Updated instance: " + instanceId + ", and updated broker resource - "
@@ -670,7 +670,7 @@ public class PinotHelixResourceManager {
       List<String> tablesAdded = new ArrayList<>();
       List<String> tablesRemoved = new ArrayList<>();
       HelixHelper.updateBrokerResource(_helixZkManager, instanceId, newBrokerTags, tablesAdded, tablesRemoved);
-      _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, tablesRemoved);
+      _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, tablesRemoved, NodeConfig.Type.BROKER_NODE);
       LOGGER.info("Updated broker resource for broker: {} with tags: {} in {}ms, tables added: {}, tables removed: {}",
           instanceId, newBrokerTags, System.currentTimeMillis() - startTimeMs, tablesAdded, tablesRemoved);
       return PinotResourceManagerResponse.success("Updated tags: " + newTags + " for instance: " + instanceId
@@ -699,7 +699,7 @@ public class PinotHelixResourceManager {
     List<String> tablesAdded = new ArrayList<>();
     List<String> tablesRemoved = new ArrayList<>();
     HelixHelper.updateBrokerResource(_helixZkManager, instanceId, brokerTags, tablesAdded, tablesRemoved);
-    _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, tablesRemoved);
+    _queryWorkloadManager.propagateWorkloadForTables(tablesAdded, tablesRemoved, NodeConfig.Type.BROKER_NODE);
     LOGGER.info("Updated broker resource for broker: {} with tags: {} in {}ms, tables added: {}, tables removed: {}",
         instanceId, brokerTags, System.currentTimeMillis() - startTimeMs, tablesAdded, tablesRemoved);
     return PinotResourceManagerResponse.success("Updated broker resource for broker: " + instanceId
@@ -1837,7 +1837,6 @@ public class PinotHelixResourceManager {
           .put(tableNameWithType, SegmentAssignmentUtils.getInstanceStateMap(brokers, BrokerResourceStateModel.ONLINE));
       return is;
     });
-    _queryWorkloadManager.propagateWorkloadForTable(tableNameWithType);
     LOGGER.info("Adding table {}: Successfully added table", tableNameWithType);
   }
 
@@ -2039,6 +2038,7 @@ public class PinotHelixResourceManager {
 
     InstanceAssignmentDriver instanceAssignmentDriver = new InstanceAssignmentDriver(tableConfig);
     List<InstanceConfig> instanceConfigs = getAllHelixInstanceConfigs();
+    boolean instancesAssigned = false;
     if (!instancePartitionsTypesToAssign.isEmpty()) {
       LOGGER.info("Assigning {} instances to table: {}", instancePartitionsTypesToAssign, tableNameWithType);
       for (InstancePartitionsType instancePartitionsType : instancePartitionsTypesToAssign) {
@@ -2068,6 +2068,7 @@ public class PinotHelixResourceManager {
           }
         }
         InstancePartitionsUtils.persistInstancePartitions(_propertyStore, instancePartitions);
+        instancesAssigned = true;
       }
     }
 
@@ -2086,9 +2087,14 @@ public class PinotHelixResourceManager {
                     tableConfig.getInstanceAssignmentConfigMap().get(tierConfig.getName()));
             LOGGER.info("Persisting instance partitions: {}", instancePartitions);
             InstancePartitionsUtils.persistInstancePartitions(_propertyStore, instancePartitions);
+            instancesAssigned = true;
           }
         }
       }
+    }
+    // Trigger workload refresh if server instances were assigned
+    if (instancesAssigned) {
+      triggerWorkloadRefreshForTable(tableNameWithType);
     }
   }
 
@@ -2201,8 +2207,6 @@ public class PinotHelixResourceManager {
 
     // Send update query quota message if quota is specified
     sendTableConfigRefreshMessage(tableNameWithType);
-    // TODO: Propagate workload for tables if there is change is change instance characteristics
-    _queryWorkloadManager.propagateWorkloadForTable(tableNameWithType);
   }
 
   public void deleteUser(String username) {
@@ -4708,6 +4712,28 @@ public class PinotHelixResourceManager {
   public QueryWorkloadManager getQueryWorkloadManager() {
     return _queryWorkloadManager;
   }
+
+  public void setQueryWorkloadManager(QueryWorkloadManager queryWorkloadManager) {
+    _queryWorkloadManager = queryWorkloadManager;
+  }
+
+  /**
+   * Triggers workload refresh for a table when server instances are assigned/changed.
+   * @param tableNameWithType The table name with type suffix
+   */
+  private void triggerWorkloadRefreshForTable(String tableNameWithType) {
+    try {
+      LOGGER.info("Triggering workload refresh for table {} due to instance assignment", tableNameWithType);
+      List<String> tableNames = new ArrayList<>();
+      tableNames.add(tableNameWithType);
+      _queryWorkloadManager.propagateWorkloadForTables(tableNames, NodeConfig.Type.SERVER_NODE);
+      LOGGER.info("Successfully triggered workload refresh for table: {}", tableNameWithType);
+    } catch (Exception e) {
+      LOGGER.error("Failed to trigger workload refresh for table {}: {}", tableNameWithType, e.getMessage(), e);
+      // Don't throw - workload refresh failure shouldn't block instance assignment
+    }
+  }
+
   /*
    * Uncomment and use for testing on a real cluster
   public static void main(String[] args) throws Exception {

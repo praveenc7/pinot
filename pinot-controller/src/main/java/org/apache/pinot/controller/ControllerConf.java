@@ -301,7 +301,11 @@ public class ControllerConf extends PinotConfiguration {
   public static final String SEGMENT_COMMIT_TIMEOUT_SECONDS = "controller.realtime.segment.commit.timeoutSeconds";
   public static final String CONTROLLER_EXECUTOR_NUM_THREADS = "controller.executor.numThreads";
   public static final String CONTROLLER_EXECUTOR_REBALANCE_NUM_THREADS = "controller.executor.rebalance.numThreads";
-
+  // Rate limit (QPS) for workload propagation HTTP requests to servers/brokers
+  public static final String CONTROLLER_WORKLOAD_PROPAGATION_REQUESTS_PER_SECOND =
+      "controller.workload.propagation.requestsPerSecond";
+  public static final String CONTROLLER_ENABLE_TABLE_CHANGE_PROPAGATION =
+      "controller.enable.table.change.propagation";
   public static final String DELETED_SEGMENTS_RETENTION_IN_DAYS = "controller.deleted.segments.retentionInDays";
   public static final String TABLE_MIN_REPLICAS = "table.minReplicas";
   public static final String JERSEY_ADMIN_API_PORT = "jersey.admin.api.port";
@@ -548,6 +552,19 @@ public class ControllerConf extends PinotConfiguration {
 
   public int getControllerExecutorRebalanceNumThreads() {
     return getProperty(CONTROLLER_EXECUTOR_REBALANCE_NUM_THREADS, UNSPECIFIED_THREAD_POOL);
+  }
+
+  /**
+   * Gets the rate limit (QPS) for workload propagation HTTP requests.
+   * Controls how many requests per second the controller will send to servers/brokers
+   * during workload propagation to prevent overwhelming the cluster.
+   */
+  public double getControllerWorkloadPropagationRequestsPerSecond() {
+    return getProperty(CONTROLLER_WORKLOAD_PROPAGATION_REQUESTS_PER_SECOND, 1000.0);
+  }
+
+  public boolean enableTableChangePropagation() {
+    return getProperty(CONTROLLER_ENABLE_TABLE_CHANGE_PROPAGATION, false);
   }
 
   public boolean isUpdateSegmentStateModel() {
