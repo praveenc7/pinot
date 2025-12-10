@@ -68,7 +68,7 @@ public class TenantInstancePartitionGeneratorFactory {
 
       try {
         generator = (TenantInstancePartitionGenerator) generatorClass
-            .getDeclaredConstructor(PinotHelixResourceManager.class)
+            .getDeclaredConstructor(PinotHelixResourceManager.class, ControllerConf.class)
             .newInstance(pinotHelixResourceManager, controllerConf);
         LOGGER.info("Successfully created TenantInstancePartitionGenerator with ResourceManager: {}",
             generatorClassName);
