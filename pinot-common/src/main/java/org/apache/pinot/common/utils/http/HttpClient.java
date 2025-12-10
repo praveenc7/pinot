@@ -30,33 +30,25 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import javax.annotation.Nullable;
 import javax.net.ssl.SSLContext;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.collections4.MapUtils;
 import org.apache.commons.io.IOUtils;
-import org.apache.hc.client5.http.async.methods.SimpleHttpRequest;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpPut;
 import org.apache.hc.client5.http.config.ConnectionConfig;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.entity.mime.MultipartEntityBuilder;
-import org.apache.hc.client5.http.impl.async.CloseableHttpAsyncClient;
-import org.apache.hc.client5.http.impl.async.HttpAsyncClients;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
-import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManager;
-import org.apache.hc.client5.http.impl.nio.PoolingAsyncClientConnectionManagerBuilder;
 import org.apache.hc.client5.http.protocol.HttpClientContext;
-import org.apache.hc.client5.http.ssl.ClientTlsStrategyBuilder;
 import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
 import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
-import org.apache.hc.core5.concurrent.FutureCallback;
 import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.Header;
@@ -101,7 +93,6 @@ public class HttpClient implements AutoCloseable {
   public static final String JSON_CONTENT_TYPE = "application/json";
 
   private final CloseableHttpClient _httpClient;
-  private final CloseableHttpAsyncClient _asyncHttpClient;
 
   public HttpClient() {
     this(HttpClientConfig.DEFAULT_HTTP_CLIENT_CONFIG, null);
@@ -116,21 +107,6 @@ public class HttpClient implements AutoCloseable {
     // Set NoopHostnameVerifier to skip validating hostname when uploading/downloading segments.
     SSLConnectionSocketFactory csf = new SSLConnectionSocketFactory(context, NoopHostnameVerifier.INSTANCE);
     _httpClient = buildCloseableHttpClient(httpClientConfig, csf);
-
-    // Build async HTTP client with TLS support
-    PoolingAsyncClientConnectionManager asyncConnectionManager = PoolingAsyncClientConnectionManagerBuilder.create()
-        .setTlsStrategy(ClientTlsStrategyBuilder.create()
-            .setSslContext(context)
-            .setHostnameVerifier(NoopHostnameVerifier.INSTANCE)
-            .build())
-        .setMaxConnTotal(httpClientConfig.getMaxConnTotal())
-        .setMaxConnPerRoute(httpClientConfig.getMaxConnPerRoute())
-        .build();
-
-    _asyncHttpClient = HttpAsyncClients.custom()
-        .setConnectionManager(asyncConnectionManager)
-        .build();
-    _asyncHttpClient.start();
   }
 
   public static HttpClient getInstance() {
@@ -336,43 +312,6 @@ public class HttpClient implements AutoCloseable {
   public CloseableHttpResponse execute(ClassicHttpRequest request)
       throws IOException {
     return _httpClient.execute(request);
-  }
-
-  /**
-   * Sends a SimpleHttpRequest asynchronously using true non-blocking I/O.
-   *
-   * @param request The SimpleHttpRequest to send
-   * @return CompletableFuture that completes with the response (non-blocking)
-   */
-  public CompletableFuture<SimpleHttpResponse> sendSimpleRequestAsync(SimpleHttpRequest request) {
-    CompletableFuture<SimpleHttpResponse> future = new CompletableFuture<>();
-    try {
-      // Execute async request with callback
-      _asyncHttpClient.execute(request, new FutureCallback<>() {
-        @Override
-        public void completed(org.apache.hc.client5.http.async.methods.SimpleHttpResponse response) {
-          try {
-            future.complete(new SimpleHttpResponse(response.getCode(),
-                response.getBodyText() != null ? response.getBodyText() : ""));
-          } catch (Exception e) {
-            future.completeExceptionally(new IOException("Failed to process async response", e));
-          }
-        }
-
-        @Override
-        public void failed(Exception ex) {
-          future.completeExceptionally(new IOException("Async HTTP request failed", ex));
-        }
-
-        @Override
-        public void cancelled() {
-          future.completeExceptionally(new IOException("Async HTTP request was cancelled"));
-        }
-      });
-    } catch (Exception e) {
-      future.completeExceptionally(new IOException("Failed to initiate async HTTP request", e));
-    }
-    return future;
   }
 
   // --------------------------------------------------------------------------
@@ -679,6 +618,5 @@ public class HttpClient implements AutoCloseable {
   public void close()
       throws IOException {
     _httpClient.close();
-    _asyncHttpClient.close();
   }
 }

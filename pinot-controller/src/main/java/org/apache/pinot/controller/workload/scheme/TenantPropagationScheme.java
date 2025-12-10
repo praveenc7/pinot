@@ -19,6 +19,7 @@
 package org.apache.pinot.controller.workload.scheme;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import javax.annotation.Nullable;
@@ -49,7 +50,7 @@ public class TenantPropagationScheme implements PropagationScheme {
     String tenantName = entity.getEntity();
     Set<String> allInstances = new HashSet<>();
     // Get the unique set of helix tags for the tenants
-    Set<String> helixTags = PropagationUtils.getHelixTagsForTenant(tenantName, nodeType);
+    List<String> helixTags = PropagationUtils.getHelixTagsForTenant(tenantName, nodeType);
     // Get the instances for the helix tags
     for (String helixTag : helixTags) {
       Set<String> instances = helixTagToInstances.get(helixTag);

@@ -26,14 +26,11 @@ import io.swagger.annotations.Authorization;
 import io.swagger.annotations.SecurityDefinition;
 import io.swagger.annotations.SwaggerDefinition;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeMap;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
@@ -62,7 +59,6 @@ import org.apache.pinot.controller.api.access.Authenticate;
 import org.apache.pinot.controller.api.exception.ControllerApplicationException;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
 import org.apache.pinot.controller.helix.core.assignment.instance.InstanceAssignmentDriver;
-import org.apache.pinot.controller.workload.QueryWorkloadManager;
 import org.apache.pinot.core.auth.Actions;
 import org.apache.pinot.core.auth.Authorize;
 import org.apache.pinot.core.auth.TargetType;
@@ -70,7 +66,6 @@ import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.config.table.TierConfig;
 import org.apache.pinot.spi.config.table.assignment.InstancePartitionsType;
-import org.apache.pinot.spi.config.workload.NodeConfig;
 import org.apache.pinot.spi.utils.JsonUtils;
 import org.apache.pinot.spi.utils.builder.TableNameBuilder;
 import org.slf4j.Logger;
@@ -189,7 +184,7 @@ public class PinotInstanceAssignmentRestletResource {
           if (InstanceAssignmentConfigUtils.allowInstanceAssignment(offlineTableConfig,
               InstancePartitionsType.OFFLINE)) {
             assignInstancesForInstancePartitionsType(instancePartitionsMap, offlineTableConfig, instanceConfigs,
-                InstancePartitionsType.OFFLINE, dryRun);
+                InstancePartitionsType.OFFLINE);
           }
         } catch (IllegalStateException e) {
           throw new ControllerApplicationException(LOGGER, "Caught IllegalStateException", Response.Status.BAD_REQUEST,
@@ -208,14 +203,14 @@ public class PinotInstanceAssignmentRestletResource {
             if (InstanceAssignmentConfigUtils.allowInstanceAssignment(realtimeTableConfig,
                 InstancePartitionsType.CONSUMING)) {
               assignInstancesForInstancePartitionsType(instancePartitionsMap, realtimeTableConfig, instanceConfigs,
-                  InstancePartitionsType.CONSUMING, dryRun);
+                  InstancePartitionsType.CONSUMING);
             }
           }
           if (InstancePartitionsType.COMPLETED.toString().equals(type) || type == null) {
             if (InstanceAssignmentConfigUtils.allowInstanceAssignment(realtimeTableConfig,
                 InstancePartitionsType.COMPLETED)) {
               assignInstancesForInstancePartitionsType(instancePartitionsMap, realtimeTableConfig, instanceConfigs,
-                  InstancePartitionsType.COMPLETED, dryRun);
+                  InstancePartitionsType.COMPLETED);
             }
           }
         } catch (IllegalStateException e) {
@@ -258,26 +253,22 @@ public class PinotInstanceAssignmentRestletResource {
    * @param tableConfig table config
    * @param instanceConfigs list of instance configs
    * @param instancePartitionsType type of instancePartitions
-   * @param dryRun whether this is a dry-run (no persistence or workload refresh)
    */
   private void assignInstancesForInstancePartitionsType(Map<String, InstancePartitions> instancePartitionsMap,
-      TableConfig tableConfig, List<InstanceConfig> instanceConfigs, InstancePartitionsType instancePartitionsType,
-      boolean dryRun) {
+      TableConfig tableConfig, List<InstanceConfig> instanceConfigs, InstancePartitionsType instancePartitionsType) {
     String tableNameWithType = tableConfig.getTableName();
-    InstancePartitions newInstancePartitions;
-    InstancePartitions existingInstancePartitions;
     if (!TableConfigUtils.hasPreConfiguredInstancePartitions(tableConfig, instancePartitionsType)) {
-       existingInstancePartitions =
+      InstancePartitions existingInstancePartitions =
           InstancePartitionsUtils.fetchInstancePartitions(_resourceManager.getHelixZkManager().getHelixPropertyStore(),
               InstancePartitionsUtils.getInstancePartitionsName(tableNameWithType, instancePartitionsType.toString()));
-      newInstancePartitions = new InstanceAssignmentDriver(tableConfig).assignInstances(instancePartitionsType,
-          instanceConfigs, existingInstancePartitions);
-      instancePartitionsMap.put(instancePartitionsType.toString(), newInstancePartitions);
+      instancePartitionsMap.put(instancePartitionsType.toString(),
+          new InstanceAssignmentDriver(tableConfig).assignInstances(instancePartitionsType, instanceConfigs,
+              existingInstancePartitions));
     } else {
       if (InstanceAssignmentConfigUtils.isMirrorServerSetAssignment(tableConfig, instancePartitionsType)) {
         // fetch the existing instance partitions, if the table, this is referenced in the new instance partitions
         // generation for minimum difference
-         existingInstancePartitions = InstancePartitionsUtils.fetchInstancePartitions(
+        InstancePartitions existingInstancePartitions = InstancePartitionsUtils.fetchInstancePartitions(
             _resourceManager.getHelixZkManager().getHelixPropertyStore(),
             InstancePartitionsUtils.getInstancePartitionsName(tableNameWithType, instancePartitionsType.toString()));
         String rawTableName = TableNameBuilder.extractRawTableName(tableNameWithType);
@@ -287,23 +278,16 @@ public class PinotInstanceAssignmentRestletResource {
             InstancePartitionsUtils.fetchInstancePartitionsWithRename(_resourceManager.getPropertyStore(),
                 tableConfig.getInstancePartitionsMap().get(instancePartitionsType),
                 instancePartitionsType.getInstancePartitionsName(rawTableName));
-        newInstancePartitions = new InstanceAssignmentDriver(tableConfig).assignInstances(instancePartitionsType,
-            instanceConfigs, existingInstancePartitions, preConfigured);
-        instancePartitionsMap.put(instancePartitionsType.toString(), newInstancePartitions);
+        instancePartitionsMap.put(instancePartitionsType.toString(),
+            new InstanceAssignmentDriver(tableConfig).assignInstances(instancePartitionsType, instanceConfigs,
+                existingInstancePartitions, preConfigured));
       } else {
         String rawTableName = TableNameBuilder.extractRawTableName(tableNameWithType);
-        newInstancePartitions =
+        instancePartitionsMap.put(instancePartitionsType.toString(),
             InstancePartitionsUtils.fetchInstancePartitionsWithRename(_resourceManager.getPropertyStore(),
                 tableConfig.getInstancePartitionsMap().get(instancePartitionsType),
-                instancePartitionsType.getInstancePartitionsName(rawTableName));
-        instancePartitionsMap.put(instancePartitionsType.toString(), newInstancePartitions);
-        // No change detection needed for pre-configured instance partitions (just reference)
-        return;
+                instancePartitionsType.getInstancePartitionsName(rawTableName)));
       }
-    }
-    // Check if instance assignments changed and trigger workload refresh if not dry-run
-    if (!dryRun && hasInstancePartitionChanges(newInstancePartitions, existingInstancePartitions)) {
-      triggerWorkloadRefresh(tableNameWithType);
     }
   }
 
@@ -481,64 +465,6 @@ public class PinotInstanceAssignmentRestletResource {
       throw new ControllerApplicationException(LOGGER, "Failed to find the old instance", Response.Status.NOT_FOUND);
     } else {
       return instancePartitionsMap;
-    }
-  }
-
-  /**
-   * Checks if instance partition assignment has changed by comparing with existing partitions.
-   * @param newInstancePartitions The new instance partitions to be persisted
-   * @return true if instances have been added or removed, false otherwise
-   */
-  private boolean hasInstancePartitionChanges(InstancePartitions newInstancePartitions,
-      @Nullable InstancePartitions existingInstancePartitions) {
-    try {
-      if (existingInstancePartitions == null) {
-        // New instance partitions, consider it as a change
-        LOGGER.info("New instance partitions detected: {}", newInstancePartitions.getInstancePartitionsName());
-        return true;
-      }
-      // Collect all instances from both old and new partitions
-      Set<String> existingInstances = new HashSet<>();
-      Set<String> newInstances = new HashSet<>();
-      for (List<String> instances : existingInstancePartitions.getPartitionToInstancesMap().values()) {
-        existingInstances.addAll(instances);
-      }
-      for (List<String> instances : newInstancePartitions.getPartitionToInstancesMap().values()) {
-        newInstances.addAll(instances);
-      }
-      // Check for additions or removals
-      boolean hasChanges = !existingInstances.equals(newInstances);
-      if (hasChanges) {
-        LOGGER.info("Instance partition changes detected for {}: existing={}, new={}",
-            newInstancePartitions.getInstancePartitionsName(), existingInstances, newInstances);
-      }
-      return hasChanges;
-    } catch (Exception e) {
-      LOGGER.warn("Failed to check instance partition changes for {}: {}",
-          newInstancePartitions.getInstancePartitionsName(), e.getMessage());
-      // On error, assume no change to avoid unnecessary workload refresh
-      return false;
-    }
-  }
-
-  /**
-   * Triggers workload refresh for the given table when server instances change.
-   * @param tableName The table name (can be raw or with type suffix)
-   */
-  private void triggerWorkloadRefresh(String tableName) {
-    try {
-      QueryWorkloadManager workloadManager = _resourceManager.getQueryWorkloadManager();
-      if (workloadManager == null) {
-        return;
-      }
-      LOGGER.info("Triggering workload refresh for table {} due to instance partition changes", tableName);
-      List<String> tableNames = new ArrayList<>();
-      tableNames.add(tableName);
-      workloadManager.propagateWorkloadForTables(tableNames, NodeConfig.Type.SERVER_NODE);
-      LOGGER.info("Successfully triggered workload refresh for table: {}", tableName);
-    } catch (Exception e) {
-      LOGGER.error("Failed to trigger workload refresh for table {}: {}", tableName, e.getMessage(), e);
-      // Don't throw - workload refresh failure shouldn't block instance assignment
     }
   }
 }
