@@ -21,7 +21,6 @@ package org.apache.pinot.server.starter;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.helix.HelixManager;
 import org.apache.helix.zookeeper.datamodel.ZNRecord;
 import org.apache.pinot.common.metrics.ServerMetrics;
@@ -42,7 +41,7 @@ public class ServerQueriesDisabledTracker {
   private final ServerMetrics _serverMetrics;
   private final String _clusterName;
   private final String _instanceId;
-  private AtomicBoolean _queriesDisabled = new AtomicBoolean();
+  private volatile boolean _queriesDisabled;
 
   public ServerQueriesDisabledTracker(String helixClusterName, String instanceId, HelixManager helixManager,
       ServerMetrics serverMetrics) {
@@ -53,7 +52,7 @@ public class ServerQueriesDisabledTracker {
   }
 
   public void start() {
-    _serverMetrics.addCallbackGauge(CommonConstants.Helix.QUERIES_DISABLED, () -> _queriesDisabled.get() ? 1L : 0L);
+    _serverMetrics.addCallbackGauge(CommonConstants.Helix.QUERIES_DISABLED, () -> _queriesDisabled ? 1L : 0L);
     LOGGER.info("Tracking server queries disabled.");
     _executorService.scheduleWithFixedDelay(() -> {
       ZNRecord instanceConfigZNRecord =
@@ -61,7 +60,7 @@ public class ServerQueriesDisabledTracker {
       if (instanceConfigZNRecord == null) {
         LOGGER.error("Failed to get instance config: {} in {} from zookeeper", _instanceId, _clusterName);
       } else {
-        _queriesDisabled.set(instanceConfigZNRecord.getBooleanField(CommonConstants.Helix.QUERIES_DISABLED, false));
+        _queriesDisabled = instanceConfigZNRecord.getBooleanField(CommonConstants.Helix.QUERIES_DISABLED, false);
       }
     }, 0L, FETCH_INTERVAL_MINS, TimeUnit.MINUTES);
   }
