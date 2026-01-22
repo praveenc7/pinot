@@ -75,6 +75,7 @@ import org.apache.pinot.controller.helix.core.assignment.segment.SegmentAssignme
 import org.apache.pinot.controller.helix.core.assignment.segment.SegmentAssignmentUtils;
 import org.apache.pinot.controller.helix.core.assignment.segment.StrictRealtimeSegmentAssignment;
 import org.apache.pinot.controller.util.TableSizeReader;
+import org.apache.pinot.controller.workload.QueryWorkloadManager;
 import org.apache.pinot.spi.config.table.RoutingConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
@@ -152,6 +153,7 @@ public class TableRebalancer {
   private final ControllerMetrics _controllerMetrics;
   private final RebalancePreChecker _rebalancePreChecker;
   private final TableSizeReader _tableSizeReader;
+  private QueryWorkloadManager _queryWorkloadManager;
 
   public TableRebalancer(HelixManager helixManager, @Nullable TableRebalanceObserver tableRebalanceObserver,
       @Nullable ControllerMetrics controllerMetrics, @Nullable RebalancePreChecker rebalancePreChecker,
@@ -164,8 +166,19 @@ public class TableRebalancer {
     _tableSizeReader = tableSizeReader;
   }
 
+  public TableRebalancer(HelixManager helixManager, @Nullable TableRebalanceObserver tableRebalanceObserver,
+      @Nullable ControllerMetrics controllerMetrics, @Nullable RebalancePreChecker rebalancePreChecker,
+      @Nullable TableSizeReader tableSizeReader, @Nullable QueryWorkloadManager queryWorkloadManager) {
+    this(helixManager, tableRebalanceObserver, controllerMetrics, rebalancePreChecker, tableSizeReader);
+    _queryWorkloadManager = queryWorkloadManager;
+  }
+
   public TableRebalancer(HelixManager helixManager) {
     this(helixManager, null, null, null, null);
+  }
+
+  public TableRebalancer(HelixManager helixManager, @Nullable QueryWorkloadManager queryWorkloadManager) {
+    this(helixManager, null, null, null, null, queryWorkloadManager);
   }
 
   public static String createUniqueRebalanceJobIdentifier() {
@@ -1150,7 +1163,7 @@ public class TableRebalancer {
           if (!dryRun && !instancePartitionsUnchanged) {
             tableRebalanceLogger.info("Persisting instance partitions: {} to ZK", instancePartitions);
             InstancePartitionsUtils.persistInstancePartitions(_helixManager.getHelixPropertyStore(),
-                instancePartitions);
+                instancePartitions, _queryWorkloadManager);
           }
         } else {
           String referenceInstancePartitionsName = tableConfig.getInstancePartitionsMap().get(instancePartitionsType);
@@ -1167,7 +1180,7 @@ public class TableRebalancer {
               tableRebalanceLogger.info("Persisting instance partitions: {} (based on {})", instancePartitions,
                   preConfiguredInstancePartitions);
               InstancePartitionsUtils.persistInstancePartitions(_helixManager.getHelixPropertyStore(),
-                  instancePartitions);
+                  instancePartitions, _queryWorkloadManager);
             }
           } else {
             instancePartitions =
@@ -1178,7 +1191,7 @@ public class TableRebalancer {
               tableRebalanceLogger.info("Persisting instance partitions: {} (referencing {})", instancePartitions,
                   referenceInstancePartitionsName);
               InstancePartitionsUtils.persistInstancePartitions(_helixManager.getHelixPropertyStore(),
-                  instancePartitions);
+                  instancePartitions, _queryWorkloadManager);
             }
           }
         }
@@ -1289,7 +1302,8 @@ public class TableRebalancer {
         boolean instancePartitionsUnchanged = instancePartitions.equals(existingInstancePartitions);
         if (!dryRun && !instancePartitionsUnchanged) {
           tableRebalanceLogger.info("Persisting instance partitions: {} to ZK", instancePartitions);
-          InstancePartitionsUtils.persistInstancePartitions(_helixManager.getHelixPropertyStore(), instancePartitions);
+          InstancePartitionsUtils.persistInstancePartitions(_helixManager.getHelixPropertyStore(), instancePartitions,
+              _queryWorkloadManager);
         }
         return Pair.of(instancePartitions, instancePartitionsUnchanged);
       }
