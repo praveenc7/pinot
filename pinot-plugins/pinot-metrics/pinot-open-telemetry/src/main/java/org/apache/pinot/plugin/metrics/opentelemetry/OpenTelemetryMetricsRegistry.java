@@ -45,11 +45,16 @@ import org.apache.pinot.spi.metrics.PinotMetricName;
 import org.apache.pinot.spi.metrics.PinotMetricsRegistry;
 import org.apache.pinot.spi.metrics.PinotMetricsRegistryListener;
 import org.apache.pinot.spi.metrics.PinotTimer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 
 /**
  * OpenTelemetryMetricsRegistry is the implementation of {@link PinotMetricsRegistry} for OpenTelemetry.
  */
 public class OpenTelemetryMetricsRegistry implements PinotMetricsRegistry {
+  private static final Logger LOGGER = LoggerFactory.getLogger(OpenTelemetryMetricsRegistry.class);
+
   public static final String OTEL_METRICS_SCOPE = "Pinot";
 
   private static final Map<OpenTelemetryMetricName, OpenTelemetryCounter> PINOT_COUNTER_MAP = new ConcurrentHashMap<>();
@@ -231,8 +236,16 @@ public class OpenTelemetryMetricsRegistry implements PinotMetricsRegistry {
 
   @Override
   public void addListener(PinotMetricsRegistryListener listener) {
-    if (listener != null) {
+    if (listener == null) {
+      return;
+    }
+    if (listener.getMetricsRegistryListener() instanceof OpenTelemetryMetricsRegistryListener) {
+      LOGGER.info("Adding OpenTelemetry MetricsRegistryListener {}",
+          listener.getMetricsRegistryListener().getClass().getName());
       LISTENERS.add((OpenTelemetryMetricsRegistryListener) listener.getMetricsRegistryListener());
+    } else {
+      LOGGER.info("Ignore listener {}, as it's not an OpenTelemetryMetricsRegistryListener",
+          listener.getMetricsRegistryListener().getClass().getName());
     }
   }
 

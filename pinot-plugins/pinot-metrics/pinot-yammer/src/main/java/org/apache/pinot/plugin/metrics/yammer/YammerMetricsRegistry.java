@@ -36,9 +36,13 @@ import org.apache.pinot.spi.metrics.PinotMetricName;
 import org.apache.pinot.spi.metrics.PinotMetricsRegistry;
 import org.apache.pinot.spi.metrics.PinotMetricsRegistryListener;
 import org.apache.pinot.spi.metrics.PinotTimer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 public class YammerMetricsRegistry implements PinotMetricsRegistry {
+  private static final Logger LOGGER = LoggerFactory.getLogger(YammerMetricsRegistry.class);
+
   MetricsRegistry _metricsRegistry;
 
   public YammerMetricsRegistry() {
@@ -92,7 +96,14 @@ public class YammerMetricsRegistry implements PinotMetricsRegistry {
 
   @Override
   public void addListener(PinotMetricsRegistryListener listener) {
-    _metricsRegistry.addListener((MetricsRegistryListener) listener.getMetricsRegistryListener());
+    if (listener.getMetricsRegistryListener() instanceof MetricsRegistryListener) {
+      LOGGER.info("Adding Yammer MetricsRegistryListener {}",
+          listener.getMetricsRegistryListener().getClass().getName());
+      _metricsRegistry.addListener((MetricsRegistryListener) listener.getMetricsRegistryListener());
+    } else {
+      LOGGER.info("Ignore listener {}, as it's not a Yammer MetricsRegistryListener",
+          listener.getMetricsRegistryListener().getClass().getName());
+    }
   }
 
   @Override

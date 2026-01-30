@@ -36,9 +36,13 @@ import org.apache.pinot.spi.metrics.PinotMetricName;
 import org.apache.pinot.spi.metrics.PinotMetricsRegistry;
 import org.apache.pinot.spi.metrics.PinotMetricsRegistryListener;
 import org.apache.pinot.spi.metrics.PinotTimer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 public class DropwizardMetricsRegistry implements PinotMetricsRegistry {
+  private static final Logger LOGGER = LoggerFactory.getLogger(DropwizardMetricsRegistry.class);
+
   MetricRegistry _metricRegistry;
 
   public DropwizardMetricsRegistry() {
@@ -93,7 +97,14 @@ public class DropwizardMetricsRegistry implements PinotMetricsRegistry {
 
   @Override
   public void addListener(PinotMetricsRegistryListener listener) {
-    _metricRegistry.addListener((MetricRegistryListener) listener.getMetricsRegistryListener());
+    if (listener.getMetricsRegistryListener() instanceof MetricRegistryListener) {
+      LOGGER.info("Adding Dropwizard MetricRegistryListener {}",
+          listener.getMetricsRegistryListener().getClass().getName());
+      _metricRegistry.addListener((MetricRegistryListener) listener.getMetricsRegistryListener());
+    } else {
+      LOGGER.info("Ignore listener {}, as it's not a Dropwizard MetricRegistryListener",
+          listener.getMetricsRegistryListener().getClass().getName());
+    }
   }
 
   @Override
