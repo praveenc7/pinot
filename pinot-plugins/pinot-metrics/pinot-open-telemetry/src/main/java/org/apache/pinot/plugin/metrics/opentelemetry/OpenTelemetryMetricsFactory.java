@@ -25,6 +25,7 @@ import io.opentelemetry.api.metrics.LongGauge;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.pinot.spi.annotations.metrics.MetricsFactory;
 import org.apache.pinot.spi.annotations.metrics.PinotMetricsFactory;
 import org.apache.pinot.spi.env.PinotConfiguration;
@@ -40,15 +41,28 @@ import static org.apache.pinot.spi.utils.CommonConstants.*;
 @MetricsFactory
 public class OpenTelemetryMetricsFactory implements PinotMetricsFactory {
   private final PinotMetricsRegistry _pinotMetricsRegistry = new OpenTelemetryMetricsRegistry();
-  /** Headers to be passed while creating OpenTelemetry exporter */
-  private Map<String, String> _otelHeaders = new HashMap<>();
+  // OpenTelemetry collector endpoint to which metrics are to be exported
+  private String _otelEndpoint;
+  // Headers to be passed while creating OpenTelemetry exporter
+  private final Map<String, String> _otelHeaders = new HashMap<>();
+  // Interval in seconds to export metrics to OpenTelemetry collector
+  private int _otelExportIntervalSeconds;
 
   @Override
   public void init(PinotConfiguration metricsConfiguration) {
+    String otelEndpointStr = metricsConfiguration.getProperty(OTEL_EXPORTER_OTLP_METRICS_ENDPOINT);
+    String otelExportIntervalStr = metricsConfiguration.getProperty(OTEL_EXPORTER_OTLP_METRICS_EXPORT_INTERVAL_SECONDS);
     String otelHeadersString = metricsConfiguration.getProperty(OTEL_EXPORTER_OTLP_METRICS_HEADERS);
-    if (otelHeadersString != null) {
+
+    _otelEndpoint = StringUtils.isEmpty(otelEndpointStr) ? OpenTelemetryHttpReporter.DEFAULT_OTEL_COLLECTOR_ENDPOINT
+        : otelEndpointStr;
+    _otelExportIntervalSeconds =
+        StringUtils.isEmpty(otelExportIntervalStr) ? OpenTelemetryHttpReporter.DEFAULT_EXPORT_INTERVAL_SECONDS
+            : Integer.parseInt(otelExportIntervalStr);
+
+    if (!StringUtils.isEmpty(otelHeadersString)) {
       // Headers are passed as key=value pairs separated by '='. Multiple headers are separated by ','
-      // Currently supporting 1 header
+      // Currently supporting only 1 header
       String[] headers = otelHeadersString.split("=");
       _otelHeaders.put(headers[0], headers[1]);
     }
@@ -87,7 +101,7 @@ public class OpenTelemetryMetricsFactory implements PinotMetricsFactory {
 
   @Override
   public PinotMetricReporter makePinotMetricReporter(PinotMetricsRegistry metricsRegistry) {
-    return new OpenTelemetryHttpReporter(_otelHeaders);
+    return new OpenTelemetryHttpReporter(_otelEndpoint, _otelHeaders, _otelExportIntervalSeconds);
   }
 
   @Override

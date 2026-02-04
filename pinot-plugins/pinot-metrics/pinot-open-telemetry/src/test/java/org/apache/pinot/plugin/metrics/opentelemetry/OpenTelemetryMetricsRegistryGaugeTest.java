@@ -19,6 +19,7 @@
 package org.apache.pinot.plugin.metrics.opentelemetry;
 
 import org.apache.pinot.spi.annotations.metrics.PinotMetricsFactory;
+import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.metrics.PinotGauge;
 import org.testng.Assert;
 import org.testng.annotations.Test;
@@ -30,6 +31,7 @@ public class OpenTelemetryMetricsRegistryGaugeTest {
   public void testNewGaugeGenerics() {
     OpenTelemetryMetricsFactory factory = new OpenTelemetryMetricsFactory();
     OpenTelemetryMetricsRegistry registry = new OpenTelemetryMetricsRegistry();
+    factory.init(new PinotConfiguration());
     factory.makePinotMetricReporter(registry).start();
     PinotMetricsFactory.SimpleMetricName longGaugeName = new PinotMetricsFactory.SimpleMetricName("testLongGauge");
     PinotGauge<Long> pinotLongGauge = registry.newGauge(longGaugeName,

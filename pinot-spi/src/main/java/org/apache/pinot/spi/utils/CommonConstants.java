@@ -55,8 +55,13 @@ public class CommonConstants {
   public static final String DEFAULT_BROKER_EVENT_LISTENER_CLASS_NAME =
       "org.apache.pinot.spi.eventlistener.query.NoOpBrokerQueryEventListener";
 
+  // OpenTelemetry collector endpoint to which metrics are to be exported
+  public static final String OTEL_EXPORTER_OTLP_METRICS_ENDPOINT = "otel.exporter.otlp.metrics.endpoint";
   // Additional headers to pass while creating OpenTelemetry exporter
   public static final String OTEL_EXPORTER_OTLP_METRICS_HEADERS = "otel.exporter.otlp.metrics.headers";
+  // Export interval in seconds
+  public static final String OTEL_EXPORTER_OTLP_METRICS_EXPORT_INTERVAL_SECONDS =
+      "otel.exporter.otlp.metrics.export.interval.seconds";
 
   public static final String SWAGGER_AUTHORIZATION_KEY = "oauth";
   public static final String SWAGGER_POM_PROPERTIES_PATH = "META-INF/maven/org.webjars/swagger-ui/pom.properties";

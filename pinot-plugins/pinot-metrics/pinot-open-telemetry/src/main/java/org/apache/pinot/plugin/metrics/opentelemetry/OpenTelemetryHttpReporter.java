@@ -22,30 +22,40 @@ import io.opentelemetry.exporter.otlp.http.metrics.OtlpHttpMetricExporter;
 import io.opentelemetry.sdk.metrics.export.AggregationTemporalitySelector;
 import java.util.Map;
 import org.apache.pinot.spi.metrics.PinotMetricReporter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
  * OpenTelemetryHttpReporter exports metrics to an OpenTelemetry collector on HTTP endpoint.
  */
 public class OpenTelemetryHttpReporter implements PinotMetricReporter {
-  public static final String DEFAULT_OTEL_COLLECTOR_ENDPOINT = "http://[::1]:22784/v1/metrics";
-  // public static final String DEFAULT_OTEL_COLLECTOR_ENDPOINT = "http://127.0.0.1:4318/v1/metrics";
-  public static final int DEFAULT_EXPORT_INTERVAL_SECONDS = 1;
-  private final Map<String, String> _otelHeaders;
+  private static final Logger LOGGER = LoggerFactory.getLogger(OpenTelemetryHttpReporter.class);
 
-  public OpenTelemetryHttpReporter(Map<String, String> otelHeaders) {
+  public static final String DEFAULT_OTEL_COLLECTOR_ENDPOINT = "http://127.0.0.1:4318/v1/metrics";
+  public static final int DEFAULT_EXPORT_INTERVAL_SECONDS = 1;
+  private final String _otelEndpoint;
+  private final Map<String, String> _otelHeaders;
+  private final int _otelExportIntervalSeconds;
+
+  public OpenTelemetryHttpReporter(String otelEndpoint, Map<String, String> otelHeaders,
+      int otelExportIntervalSeconds) {
+    _otelEndpoint = otelEndpoint;
     _otelHeaders = otelHeaders;
+    _otelExportIntervalSeconds = otelExportIntervalSeconds;
   }
 
   @Override
   public void start() {
+    LOGGER.info("Start OpenTelemetryHttpReporter to endpoint: {} which emit metrics every {} seconds with headers: {}",
+        _otelEndpoint, _otelExportIntervalSeconds, _otelHeaders);
     OtlpHttpMetricExporter httpMetricExporter = OtlpHttpMetricExporter
         .builder()
-        .setEndpoint(DEFAULT_OTEL_COLLECTOR_ENDPOINT)
+        .setEndpoint(_otelEndpoint)
         .setHeaders(() -> _otelHeaders)
         .setAggregationTemporalitySelector(AggregationTemporalitySelector.deltaPreferred())
         .build();
 
-    OpenTelemetryMetricsRegistry.init(httpMetricExporter, DEFAULT_EXPORT_INTERVAL_SECONDS);
+    OpenTelemetryMetricsRegistry.init(httpMetricExporter, _otelExportIntervalSeconds);
   }
 }
