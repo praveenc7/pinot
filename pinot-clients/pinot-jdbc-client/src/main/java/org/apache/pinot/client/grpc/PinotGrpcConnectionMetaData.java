@@ -37,7 +37,17 @@ import org.apache.pinot.spi.utils.JsonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.pinot.client.utils.Constants.*;
+import static org.apache.pinot.client.utils.Constants.DRIVER_NAME;
+import static org.apache.pinot.client.utils.Constants.DRIVER_VERSION;
+import static org.apache.pinot.client.utils.Constants.PINOT_VERSION;
+import static org.apache.pinot.client.utils.Constants.PRODUCT_NAME;
+import static org.apache.pinot.client.utils.Constants.TABLE_COLUMNS;
+import static org.apache.pinot.client.utils.Constants.TABLE_COLUMNS_DTYPES;
+import static org.apache.pinot.client.utils.Constants.TABLE_SCHEMA_COLUMNS;
+import static org.apache.pinot.client.utils.Constants.TABLE_SCHEMA_COLUMNS_DTYPES;
+import static org.apache.pinot.client.utils.Constants.TABLE_TYPE;
+import static org.apache.pinot.client.utils.Constants.TABLE_TYPES_COLUMNS;
+import static org.apache.pinot.client.utils.Constants.TABLE_TYPES_COLUMNS_DTYPES;
 
 
 public class PinotGrpcConnectionMetaData extends AbstractBaseConnectionMetaData {

@@ -22,7 +22,12 @@ import org.apache.pinot.common.metadata.segment.SegmentZKMetadata;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.server.predownload.PredownloadTestUtil.*;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.CRC;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.CRYPTER_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.DOWNLOAD_URL;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.SEGMENT_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.TABLE_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.createSegmentZKMetadata;
 import static org.testng.Assert.assertThrows;
 import static org.testng.AssertJUnit.assertEquals;
 import static org.testng.AssertJUnit.assertFalse;

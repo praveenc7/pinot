@@ -26,7 +26,37 @@ import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.spi.utils.CommonConstants.Helix;
 
-import static org.apache.pinot.spi.utils.CommonConstants.Server.*;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_ALLOWED_TABLES_FOR_EMITTING_METRICS;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_CRYPTER_CACHE_FACTORY_CLASS_NAME;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_ENABLE_GRPC_SERVER;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_ENABLE_TABLE_LEVEL_METRICS;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_GRPCTLS_SERVER_ENABLED;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_GRPC_PORT;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_INSTANCE_DATA_MANAGER_CLASS;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_NETTYTLS_SERVER_ENABLED;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_NETTY_SERVER_ENABLED;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_QUERY_EXECUTOR_CLASS;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_QUERY_LOG_DROPPED_REPORT_MAX_RATE;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_QUERY_LOG_MAX_RATE;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_SWAGGER_SERVER_ENABLED;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_TRANSFORM_FUNCTIONS;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_ENABLE_GRPC_SERVER;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_ENABLE_TABLE_LEVEL_METRICS;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_GRPCTLS_SERVER_ENABLED;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_GRPC_PORT;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_INSTANCE_DATA_MANAGER_CLASS;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_METRICS_PREFIX;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_NETTYTLS_SERVER_ENABLED;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_NETTY_SERVER_ENABLED;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_QUERY_EXECUTOR_CLASS;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_QUERY_LOG_DROPPED_REPORT_MAX_RATE;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_QUERY_LOG_MAX_RATE;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_SWAGGER_SERVER_ENABLED;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEPRECATED_CONFIG_OF_QUERY_LOG_MAX_RATE;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.INSTANCE_DATA_MANAGER_CONFIG_PREFIX;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.METRICS_CONFIG_PREFIX;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.PINOT_SERVER_METRICS_PREFIX;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.QUERY_EXECUTOR_CONFIG_PREFIX;
 
 
 /**

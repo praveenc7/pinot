@@ -29,7 +29,13 @@ import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.spi.utils.CommonConstants.Helix.*;
+import static org.apache.pinot.spi.utils.CommonConstants.Helix.CONFIG_OF_CLUSTER_NAME;
+import static org.apache.pinot.spi.utils.CommonConstants.Helix.CONFIG_OF_ZOOKEEPR_SERVER;
+import static org.apache.pinot.spi.utils.CommonConstants.Helix.DEFAULT_SERVER_NETTY_PORT;
+import static org.apache.pinot.spi.utils.CommonConstants.Helix.KEY_OF_SERVER_NETTY_HOST;
+import static org.apache.pinot.spi.utils.CommonConstants.Helix.KEY_OF_SERVER_NETTY_PORT;
+import static org.apache.pinot.spi.utils.CommonConstants.Helix.PREFIX_OF_SERVER_INSTANCE;
+import static org.apache.pinot.spi.utils.CommonConstants.Helix.SET_INSTANCE_ID_TO_HOSTNAME_KEY;
 import static org.apache.pinot.spi.utils.CommonConstants.Server.CONFIG_OF_INSTANCE_ID;
 import static org.testng.Assert.assertEquals;
 

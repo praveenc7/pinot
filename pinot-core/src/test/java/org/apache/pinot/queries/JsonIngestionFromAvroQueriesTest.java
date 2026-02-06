@@ -58,7 +58,15 @@ import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
-import static org.apache.avro.Schema.*;
+import static org.apache.avro.Schema.Field;
+import static org.apache.avro.Schema.Type;
+import static org.apache.avro.Schema.create;
+import static org.apache.avro.Schema.createArray;
+import static org.apache.avro.Schema.createEnum;
+import static org.apache.avro.Schema.createFixed;
+import static org.apache.avro.Schema.createMap;
+import static org.apache.avro.Schema.createRecord;
+import static org.apache.avro.Schema.createUnion;
 
 
 /**

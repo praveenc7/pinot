@@ -45,8 +45,16 @@ import org.slf4j.LoggerFactory;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.controller.recommender.rules.impl.RealtimeProvisioningRule.*;
-import static org.testng.Assert.*;
+import static org.apache.pinot.controller.recommender.rules.impl.RealtimeProvisioningRule.CONSUMING_MEMORY_PER_HOST;
+import static org.apache.pinot.controller.recommender.rules.impl.RealtimeProvisioningRule.NUM_ROWS_IN_SEGMENT;
+import static org.apache.pinot.controller.recommender.rules.impl.RealtimeProvisioningRule.NUM_SEGMENTS_QUERIED_PER_HOST;
+import static org.apache.pinot.controller.recommender.rules.impl.RealtimeProvisioningRule.OPTIMAL_SEGMENT_SIZE;
+import static org.apache.pinot.controller.recommender.rules.impl.RealtimeProvisioningRule.TOTAL_MEMORY_USED_PER_HOST;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertNotEquals;
+import static org.testng.Assert.assertNull;
+import static org.testng.Assert.assertTrue;
 
 
 public class TestConfigEngine {

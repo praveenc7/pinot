@@ -21,7 +21,13 @@ package org.apache.pinot.controller.recommender.rules.io.params;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
 
-import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.NoDictionaryOnHeapDictionaryJointRule.*;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.NoDictionaryOnHeapDictionaryJointRule.DEFAULT_DICTIONARY_COEFFICIENT;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.NoDictionaryOnHeapDictionaryJointRule.DEFAULT_THRESHOLD_MAX_DICTIONARY_SIZE_ON_HEAP;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.NoDictionaryOnHeapDictionaryJointRule.DEFAULT_THRESHOLD_MIN_FILTER_FREQ_DICTIONARY;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.NoDictionaryOnHeapDictionaryJointRule.DEFAULT_THRESHOLD_MIN_FILTER_FREQ_ON_HEAP;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.NoDictionaryOnHeapDictionaryJointRule.DEFAULT_THRESHOLD_MIN_PERCENT_DICTIONARY_STORAGE_SAVE;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.NoDictionaryOnHeapDictionaryJointRule.DEFAULT_THRESHOLD_MIN_QPS_ON_HEAP;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.NoDictionaryOnHeapDictionaryJointRule.DEFAULT_THRESHOLD_MIN_SELECTION_FREQ_NO_DICTIONARY;
 
 
 /**

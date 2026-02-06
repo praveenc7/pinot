@@ -24,7 +24,7 @@ import org.apache.pinot.common.utils.DataSchema;
 import org.apache.pinot.query.planner.plannode.MailboxSendNode;
 import org.testng.annotations.Test;
 
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
 
 
 public class EquivalentStagesFinderTest extends StagesTestBase {

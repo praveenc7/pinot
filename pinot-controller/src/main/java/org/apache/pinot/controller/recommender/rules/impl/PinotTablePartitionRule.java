@@ -40,7 +40,13 @@ import org.apache.pinot.core.query.request.context.QueryContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.*;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.FIRST;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.HYBRID;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.IN_PREDICATE_ESTIMATE_LEN_FLAG;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.OFFLINE;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.PartitionRule;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.REALTIME;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.SECOND;
 
 
 /**

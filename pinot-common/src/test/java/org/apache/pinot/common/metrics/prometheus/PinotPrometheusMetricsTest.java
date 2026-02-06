@@ -52,7 +52,13 @@ import org.testng.Assert;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 
-import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelKeys.*;
+import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelKeys.PARTITION;
+import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelKeys.PERIODIC_TASK;
+import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelKeys.STATUS;
+import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelKeys.TABLE;
+import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelKeys.TABLETYPE;
+import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelKeys.TASKTYPE;
+import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelKeys.TOPIC;
 import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelValues.CONTROLLER_PERIODIC_TASK_CHC;
 import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelValues.IN_PROGRESS;
 import static org.apache.pinot.common.metrics.prometheus.PinotPrometheusMetricsTest.ExportedLabelValues.TABLENAME_WITH_TYPE_REALTIME;

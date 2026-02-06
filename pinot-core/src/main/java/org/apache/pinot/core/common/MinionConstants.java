@@ -21,7 +21,25 @@ package org.apache.pinot.core.common;
 import java.util.EnumSet;
 import org.apache.pinot.segment.spi.AggregationFunctionType;
 
-import static org.apache.pinot.segment.spi.AggregationFunctionType.*;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.AVGVALUEINTEGERSUMTUPLESKETCH;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTCPCSKETCH;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTHLL;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTHLLPLUS;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTRAWCPCSKETCH;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTRAWHLL;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTRAWHLLPLUS;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTRAWINTEGERSUMTUPLESKETCH;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTRAWTHETASKETCH;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTRAWULL;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTTHETASKETCH;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTTUPLESKETCH;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTULL;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.MAX;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.MIN;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.PERCENTILEKLL;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.PERCENTILERAWKLL;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.SUM;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.SUMVALUESINTEGERSUMTUPLESKETCH;
 
 
 public class MinionConstants {

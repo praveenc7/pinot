@@ -20,7 +20,7 @@ package org.apache.pinot.segment.spi.creator.name;
 
 import org.testng.annotations.Test;
 
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
 
 
 public class UploadedRealtimeSegmentNameGeneratorTest {

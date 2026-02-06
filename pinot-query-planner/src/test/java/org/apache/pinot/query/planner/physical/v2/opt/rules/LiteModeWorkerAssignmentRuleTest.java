@@ -27,7 +27,7 @@ import org.mockito.Mockito;
 import org.testng.annotations.Test;
 
 import static org.mockito.Mockito.doReturn;
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
 
 
 public class LiteModeWorkerAssignmentRuleTest {

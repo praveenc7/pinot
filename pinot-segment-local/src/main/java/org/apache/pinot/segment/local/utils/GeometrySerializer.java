@@ -33,7 +33,14 @@ import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.Polygon;
 import org.locationtech.jts.geom.TopologyException;
 
-import static org.apache.pinot.segment.local.utils.GeometryType.*;
+import static org.apache.pinot.segment.local.utils.GeometryType.GEOMETRY_COLLECTION;
+import static org.apache.pinot.segment.local.utils.GeometryType.LINE_STRING;
+import static org.apache.pinot.segment.local.utils.GeometryType.MULTI_LINE_STRING;
+import static org.apache.pinot.segment.local.utils.GeometryType.MULTI_POINT;
+import static org.apache.pinot.segment.local.utils.GeometryType.MULTI_POLYGON;
+import static org.apache.pinot.segment.local.utils.GeometryType.POINT;
+import static org.apache.pinot.segment.local.utils.GeometryType.POLYGON;
+import static org.apache.pinot.segment.local.utils.GeometryType.fromID;
 
 
 /**

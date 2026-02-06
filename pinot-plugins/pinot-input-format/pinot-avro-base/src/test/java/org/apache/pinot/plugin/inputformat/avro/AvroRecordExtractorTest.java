@@ -55,7 +55,14 @@ import org.apache.pinot.spi.utils.JsonUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import static org.apache.avro.Schema.*;
+import static org.apache.avro.Schema.Field;
+import static org.apache.avro.Schema.Type;
+import static org.apache.avro.Schema.create;
+import static org.apache.avro.Schema.createArray;
+import static org.apache.avro.Schema.createFixed;
+import static org.apache.avro.Schema.createMap;
+import static org.apache.avro.Schema.createRecord;
+import static org.apache.avro.Schema.createUnion;
 
 
 /**

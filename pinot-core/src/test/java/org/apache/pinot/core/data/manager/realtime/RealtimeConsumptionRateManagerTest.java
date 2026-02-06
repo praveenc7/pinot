@@ -27,12 +27,17 @@ import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.apache.pinot.common.metrics.ServerMetrics;
+import org.apache.pinot.core.data.manager.realtime.RealtimeConsumptionRateManager.ConsumptionRateLimiter;
+import org.apache.pinot.core.data.manager.realtime.RealtimeConsumptionRateManager.MetricEmitter;
+import org.apache.pinot.core.data.manager.realtime.RealtimeConsumptionRateManager.PartitionCountFetcher;
+import org.apache.pinot.core.data.manager.realtime.RealtimeConsumptionRateManager.RateLimiterImpl;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.stream.StreamConfig;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.core.data.manager.realtime.RealtimeConsumptionRateManager.*;
+import static org.apache.pinot.core.data.manager.realtime.RealtimeConsumptionRateManager.NOOP_RATE_LIMITER;
+import static org.apache.pinot.core.data.manager.realtime.RealtimeConsumptionRateManager.buildCache;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;

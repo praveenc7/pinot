@@ -43,7 +43,11 @@ import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.*;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.BOOLEAN;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.DOUBLE;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.INT;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.LONG;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.STRING;
 import static org.apache.pinot.query.planner.plannode.WindowNode.WindowFrameType.RANGE;
 import static org.apache.pinot.query.planner.plannode.WindowNode.WindowFrameType.ROWS;
 import static org.mockito.Mockito.verify;

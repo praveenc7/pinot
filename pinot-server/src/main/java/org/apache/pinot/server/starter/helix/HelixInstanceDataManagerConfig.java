@@ -33,7 +33,25 @@ import org.apache.pinot.spi.utils.ReadMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.pinot.spi.utils.CommonConstants.Server.*;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONSUMER_CLIENT_ID_SUFFIX;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.CONSUMER_DIR;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_INSTANCE_DATA_DIR;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_INSTANCE_SEGMENT_TAR_DIR;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_READ_MODE;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_REALTIME_OFFHEAP_ALLOCATION;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_REALTIME_OFFHEAP_DIRECT_ALLOCATION;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_RELOAD_CONSUMING_SEGMENT;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.DEFAULT_TABLE_DATA_MANAGER_PROVIDER_CLASS;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.INSTANCE_DATA_DIR;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.INSTANCE_ID;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.INSTANCE_SEGMENT_TAR_DIR;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.READ_MODE;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.REALTIME_OFFHEAP_ALLOCATION;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.REALTIME_OFFHEAP_DIRECT_ALLOCATION;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.RELOAD_CONSUMING_SEGMENT;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.SEGMENT_FORMAT_VERSION;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.SEGMENT_STORE_URI;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.TABLE_DATA_MANAGER_PROVIDER_CLASS;
 
 
 /**

@@ -98,11 +98,21 @@ import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.common.function.scalar.StringFunctions.*;
+import static org.apache.pinot.common.function.scalar.StringFunctions.decodeUrl;
+import static org.apache.pinot.common.function.scalar.StringFunctions.encodeUrl;
+import static org.apache.pinot.common.function.scalar.StringFunctions.fromBase64;
+import static org.apache.pinot.common.function.scalar.StringFunctions.fromUtf8;
+import static org.apache.pinot.common.function.scalar.StringFunctions.toBase64;
+import static org.apache.pinot.common.function.scalar.StringFunctions.toUtf8;
 import static org.apache.pinot.controller.helix.core.PinotHelixResourceManager.EXTERNAL_VIEW_CHECK_INTERVAL_MS;
 import static org.apache.pinot.controller.helix.core.PinotHelixResourceManager.EXTERNAL_VIEW_ONLINE_SEGMENTS_MAX_WAIT_MS;
 import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.SKIP_INDEXES;
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertNotEquals;
+import static org.testng.Assert.assertNotNull;
+import static org.testng.Assert.assertTrue;
+import static org.testng.Assert.fail;
 
 
 /**

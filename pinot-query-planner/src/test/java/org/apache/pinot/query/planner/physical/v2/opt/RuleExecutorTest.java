@@ -31,7 +31,7 @@ import org.apache.pinot.query.planner.physical.v2.PinotDataDistribution;
 import org.testng.annotations.Test;
 
 import static org.mockito.Mockito.mock;
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
 
 
 public class RuleExecutorTest {

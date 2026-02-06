@@ -21,7 +21,7 @@ package org.apache.pinot.query.planner.logical;
 import org.apache.pinot.query.planner.plannode.MailboxSendNode;
 import org.testng.annotations.Test;
 
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
 
 
 public class EquivalentStagesReplacerTest extends StagesTestBase {

@@ -35,7 +35,18 @@ import org.apache.pinot.controller.recommender.rules.impl.RealtimeProvisioningRu
 import org.apache.pinot.controller.recommender.rules.impl.SegmentSizeRule;
 import org.apache.pinot.controller.recommender.rules.impl.VariedLengthDictionaryRule;
 
-import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.*;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_AGGREGATE_METRICS;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_BLOOM_FILTER;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_FLAG_QUERY;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_INVERTED_SORTED_INDEX_JOINT;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_JSON_INDEX;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_KAFKA_PARTITION;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_NO_DICTIONARY_ONHEAP_DICTIONARY_JOINT;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_PINOT_TABLE_PARTITION;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_RANGE_INDEX;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_REALTIME_PROVISIONING;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_SEGMENT_SIZE;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.RulesToExecute.DEFAULT_RECOMMEND_VARIED_LENGTH_DICTIONARY;
 
 
 /**

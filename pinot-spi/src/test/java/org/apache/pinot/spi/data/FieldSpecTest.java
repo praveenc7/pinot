@@ -32,7 +32,16 @@ import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.spi.data.FieldSpec.DataType.*;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.BIG_DECIMAL;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.BOOLEAN;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.BYTES;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.DOUBLE;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.FLOAT;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.INT;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.JSON;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.LONG;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.STRING;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.TIMESTAMP;
 
 
 /**

@@ -65,7 +65,12 @@ import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.common.function.scalar.StringFunctions.*;
+import static org.apache.pinot.common.function.scalar.StringFunctions.decodeUrl;
+import static org.apache.pinot.common.function.scalar.StringFunctions.encodeUrl;
+import static org.apache.pinot.common.function.scalar.StringFunctions.fromBase64;
+import static org.apache.pinot.common.function.scalar.StringFunctions.fromUtf8;
+import static org.apache.pinot.common.function.scalar.StringFunctions.toBase64;
+import static org.apache.pinot.common.function.scalar.StringFunctions.toUtf8;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;

@@ -96,7 +96,13 @@ import org.apache.pinot.spi.utils.TimeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.pinot.segment.spi.AggregationFunctionType.*;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.COUNT;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTHLL;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTHLLPLUS;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.MAX;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.MIN;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.SUM;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.SUMPRECISION;
 
 
 /**

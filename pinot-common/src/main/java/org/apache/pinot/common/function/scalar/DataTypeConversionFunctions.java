@@ -26,7 +26,12 @@ import org.apache.pinot.spi.annotations.ScalarFunction;
 import org.apache.pinot.spi.utils.BigDecimalUtils;
 import org.apache.pinot.spi.utils.BytesUtils;
 
-import static org.apache.pinot.common.utils.PinotDataType.*;
+import static org.apache.pinot.common.utils.PinotDataType.BIG_DECIMAL;
+import static org.apache.pinot.common.utils.PinotDataType.BYTES;
+import static org.apache.pinot.common.utils.PinotDataType.DOUBLE;
+import static org.apache.pinot.common.utils.PinotDataType.INTEGER;
+import static org.apache.pinot.common.utils.PinotDataType.LONG;
+import static org.apache.pinot.common.utils.PinotDataType.STRING;
 
 
 /**

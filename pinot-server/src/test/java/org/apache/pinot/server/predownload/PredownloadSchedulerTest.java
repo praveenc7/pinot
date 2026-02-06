@@ -42,12 +42,29 @@ import org.mockito.MockedStatic;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.server.predownload.PredownloadTestUtil.*;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.CRC;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.DISK_SIZE_BYTES;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.INSTANCE_ID;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.SAMPLE_PROPERTIES_FILE_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.SECOND_SEGMENT_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.SEGMENT_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.TABLE_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.TAG;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.THIRD_SEGMENT_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.createSegmentZKMetadata;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockConstruction;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.when;
 import static org.testng.AssertJUnit.assertEquals;
 
 

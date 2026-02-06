@@ -38,7 +38,7 @@ import static org.apache.pinot.controller.ControllerConf.CONTROLLER_HOST;
 import static org.apache.pinot.controller.ControllerConf.CONTROLLER_PORT;
 import static org.apache.pinot.spi.utils.CommonConstants.Controller.CONFIG_OF_INSTANCE_ID;
 import static org.apache.pinot.spi.utils.CommonConstants.Helix.CONTROLLER_INSTANCE;
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
 
 
 /**

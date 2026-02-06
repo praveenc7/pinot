@@ -112,9 +112,9 @@
 
     <!-- IMPORTS -->
 
-    <!-- No imports statements using '*' notation except static imports -->
+    <!-- No imports statements using '*' notation -->
     <module name="AvoidStarImport">
-      <property name="allowStaticMemberImports" value="true"/>
+      <property name="allowStaticMemberImports" value="false"/>
     </module>
     <!-- no static imports except in tests -->
     <module name="AvoidStaticImport">

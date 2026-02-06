@@ -36,7 +36,12 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.pinot.spi.data.readers.AbstractRecordExtractorTest;
 import org.apache.pinot.spi.data.readers.RecordReader;
 
-import static org.apache.avro.Schema.*;
+import static org.apache.avro.Schema.Field;
+import static org.apache.avro.Schema.Type;
+import static org.apache.avro.Schema.create;
+import static org.apache.avro.Schema.createArray;
+import static org.apache.avro.Schema.createMap;
+import static org.apache.avro.Schema.createRecord;
 
 
 /**

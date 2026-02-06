@@ -30,7 +30,8 @@ import org.apache.pinot.common.auth.AuthProviderUtils;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNull;
 
 
 public class AuthenticationFilterTest {

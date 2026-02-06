@@ -23,7 +23,11 @@ import org.apache.pinot.spi.env.PinotConfiguration;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.controller.helix.core.realtime.SegmentCompletionConfig.*;
+import static org.apache.pinot.controller.helix.core.realtime.SegmentCompletionConfig.DEFAULT_FSM_SCHEME;
+import static org.apache.pinot.controller.helix.core.realtime.SegmentCompletionConfig.DEFAULT_FSM_SCHEME_KEY;
+import static org.apache.pinot.controller.helix.core.realtime.SegmentCompletionConfig.DEFAULT_PAUSELESS_FSM_SCHEME;
+import static org.apache.pinot.controller.helix.core.realtime.SegmentCompletionConfig.DEFAULT_PAUSELESS_FSM_SCHEME_KEY;
+import static org.apache.pinot.controller.helix.core.realtime.SegmentCompletionConfig.FSM_SCHEME;
 
 
 public class SegmentCompletionConfigTest {

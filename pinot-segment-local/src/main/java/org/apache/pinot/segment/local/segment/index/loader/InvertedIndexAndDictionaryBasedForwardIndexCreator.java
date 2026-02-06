@@ -47,7 +47,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.apache.pinot.segment.spi.V1Constants.MetadataKeys.Column.*;
+import static org.apache.pinot.segment.spi.V1Constants.MetadataKeys.Column.DICTIONARY_ELEMENT_SIZE;
+import static org.apache.pinot.segment.spi.V1Constants.MetadataKeys.Column.HAS_DICTIONARY;
+import static org.apache.pinot.segment.spi.V1Constants.MetadataKeys.Column.MAX_MULTI_VALUE_ELEMENTS;
+import static org.apache.pinot.segment.spi.V1Constants.MetadataKeys.Column.TOTAL_NUMBER_OF_ENTRIES;
+import static org.apache.pinot.segment.spi.V1Constants.MetadataKeys.Column.getKeyFor;
 
 
 /**

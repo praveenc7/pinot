@@ -36,7 +36,31 @@ import org.apache.pinot.spi.data.Schema;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.*;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.BOOL_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.BYTES_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.DOUBLE_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.ENUM_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.FLOAT_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.INT_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.LONG_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NESTED_MESSAGE;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NULLABLE_BOOL_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NULLABLE_BYTES_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NULLABLE_DOUBLE_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NULLABLE_FLOAT_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NULLABLE_INT_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NULLABLE_LONG_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NULLABLE_STRING_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.REPEATED_BOOLS;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.REPEATED_BYTES;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.REPEATED_DOUBLES;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.REPEATED_ENUMS;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.REPEATED_FLOATS;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.REPEATED_INTS;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.REPEATED_LONGS;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.REPEATED_NESTED_MESSAGES;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.REPEATED_STRINGS;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.STRING_FIELD;
 import static org.junit.Assert.assertEquals;
 
 public class ProtoBufSchemaUtilsTest {

@@ -66,9 +66,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static java.lang.Math.max;
-import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.*;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.DEFAULT_AVERAGE_NUM_VALUES_PER_ENTRY;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.DEFAULT_LATENCY_SLA;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.DEFAULT_NULL_SIZE;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.DEFAULT_NUM_KAFKA_PARTITIONS;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.DEFAULT_NUM_MESSAGES_PER_SEC_IN_KAFKA_TOPIC;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.DEFAULT_NUM_RECORDS_PER_PUSH;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.DEFAULT_QPS;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.DEFAULT_SEGMENT_FLUSH_TIME;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.EPSILON;
 import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.FlagQueryRuleParams.ERROR_INVALID_COLUMN;
 import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.FlagQueryRuleParams.ERROR_INVALID_QUERY;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.MIN_CARDINALITY;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.NO_SUCH_COL;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.OFFLINE;
 
 
 /**

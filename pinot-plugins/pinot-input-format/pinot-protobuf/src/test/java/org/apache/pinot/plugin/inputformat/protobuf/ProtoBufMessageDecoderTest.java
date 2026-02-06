@@ -27,7 +27,13 @@ import java.util.Set;
 import org.apache.pinot.spi.data.readers.GenericRow;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.*;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NESTED_INT_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NESTED_STRING_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.createComplexTypeRecord;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.getComplexTypeObject;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.getFieldsInSampleRecord;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.getSampleRecordMessage;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.getSourceFieldsForComplexType;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNotNull;
 

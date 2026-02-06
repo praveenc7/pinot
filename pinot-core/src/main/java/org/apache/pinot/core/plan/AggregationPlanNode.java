@@ -39,7 +39,30 @@ import org.apache.pinot.segment.spi.SegmentContext;
 import org.apache.pinot.segment.spi.datasource.DataSource;
 import org.apache.pinot.segment.spi.index.reader.NullValueVectorReader;
 
-import static org.apache.pinot.segment.spi.AggregationFunctionType.*;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.COUNT;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTAVG;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTAVGMV;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNT;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTHLL;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTHLLMV;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTHLLPLUS;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTHLLPLUSMV;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTMV;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTOFFHEAP;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTRAWHLL;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTRAWHLLMV;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTRAWHLLPLUS;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTRAWHLLPLUSMV;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTCOUNTSMARTHLL;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTSUM;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.DISTINCTSUMMV;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.MAX;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.MAXMV;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.MIN;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.MINMAXRANGE;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.MINMAXRANGEMV;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.MINMV;
+import static org.apache.pinot.segment.spi.AggregationFunctionType.SEGMENTPARTITIONEDDISTINCTCOUNT;
 
 
 /**

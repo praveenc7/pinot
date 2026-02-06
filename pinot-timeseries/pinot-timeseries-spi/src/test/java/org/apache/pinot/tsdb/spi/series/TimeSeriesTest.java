@@ -23,7 +23,7 @@ import java.util.Collections;
 import org.apache.pinot.tsdb.spi.TimeBuckets;
 import org.testng.annotations.Test;
 
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
 
 
 public class TimeSeriesTest {

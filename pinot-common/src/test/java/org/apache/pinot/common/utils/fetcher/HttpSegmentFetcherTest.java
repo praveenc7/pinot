@@ -31,7 +31,8 @@ import org.testng.Assert;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.common.utils.fetcher.HttpSegmentFetcher.*;
+import static org.apache.pinot.common.utils.fetcher.HttpSegmentFetcher.CONNECTION_REQUEST_TIMEOUT_CONFIG_KEY;
+import static org.apache.pinot.common.utils.fetcher.HttpSegmentFetcher.SOCKET_TIMEOUT_CONFIG_KEY;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;

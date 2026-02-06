@@ -22,7 +22,8 @@ import java.util.Collections;
 import java.util.List;
 import org.testng.annotations.Test;
 
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertThrows;
 
 
 public class PinotDistMappingTest {

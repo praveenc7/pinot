@@ -22,7 +22,9 @@ import java.util.List;
 import org.apache.calcite.rel.RelDistribution;
 import org.testng.annotations.Test;
 
-import static org.testng.Assert.*;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNotNull;
+import static org.testng.Assert.assertThrows;
 
 
 public class ExchangeStrategyTest {

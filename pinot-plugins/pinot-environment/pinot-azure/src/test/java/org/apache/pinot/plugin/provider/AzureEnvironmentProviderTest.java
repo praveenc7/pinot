@@ -35,7 +35,11 @@ import static org.apache.hc.core5.http.HttpStatus.SC_NOT_FOUND;
 import static org.apache.hc.core5.http.HttpStatus.SC_OK;
 import static org.apache.pinot.plugin.provider.AzureEnvironmentProvider.IMDS_ENDPOINT;
 import static org.apache.pinot.plugin.provider.AzureEnvironmentProvider.MAX_RETRY;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.initMocks;
 
 

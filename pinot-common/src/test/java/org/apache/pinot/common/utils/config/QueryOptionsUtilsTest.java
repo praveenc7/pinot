@@ -27,7 +27,24 @@ import java.util.Set;
 import org.apache.pinot.spi.config.table.FieldConfig;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.*;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.ENABLE_NULL_HANDLING;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.GROUP_TRIM_THRESHOLD;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MAX_EXECUTION_THREADS;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MAX_INITIAL_RESULT_HOLDER_CAPACITY;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MAX_QUERY_RESPONSE_SIZE_BYTES;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MAX_ROWS_IN_JOIN;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MAX_ROWS_IN_WINDOW;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MAX_SERVER_RESPONSE_SIZE_BYTES;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MAX_STREAMING_PENDING_BLOCKS;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MIN_BROKER_GROUP_TRIM_SIZE;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MIN_SEGMENT_GROUP_TRIM_SIZE;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MIN_SERVER_GROUP_TRIM_SIZE;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MULTI_STAGE_LEAF_LIMIT;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.NUM_GROUPS_LIMIT;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.NUM_REPLICA_GROUPS_TO_QUERY;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.SKIP_INDEXES;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.TIMEOUT_MS;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.USE_MULTISTAGE_ENGINE;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.fail;
 

@@ -21,7 +21,11 @@ package org.apache.pinot.controller.recommender.rules.io.params;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
 
-import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.PartitionRule.*;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.PartitionRule.DEFAULT_KAFKA_NUM_MESSAGES_PER_SEC_PER_PARTITION;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.PartitionRule.DEFAULT_THRESHOLD_MAX_IN_LENGTH;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.PartitionRule.DEFAULT_THRESHOLD_MAX_LATENCY_SLA_PARTITION;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.PartitionRule.DEFAULT_THRESHOLD_MIN_QPS_PARTITION;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.PartitionRule.DEFAULT_THRESHOLD_RATIO_MIN_DIMENSION_PARTITION_TOP_CANDIDATES;
 
 
 /**

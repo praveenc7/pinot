@@ -57,7 +57,13 @@ import org.apache.pinot.spi.utils.builder.TableNameBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.pinot.spi.utils.CommonConstants.Server.SegmentCompletionProtocol.*;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.SegmentCompletionProtocol.CONFIG_OF_CONTROLLER_HTTPS_ENABLED;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.SegmentCompletionProtocol.CONFIG_OF_CONTROLLER_HTTPS_PORT;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.SegmentCompletionProtocol.CONFIG_OF_PROTOCOL;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.SegmentCompletionProtocol.CONFIG_OF_SEGMENT_UPLOADER_AUTH;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.SegmentCompletionProtocol.CONFIG_OF_SEGMENT_UPLOAD_REQUEST_TIMEOUT_MS;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.SegmentCompletionProtocol.DEFAULT_OTHER_REQUESTS_TIMEOUT;
+import static org.apache.pinot.spi.utils.CommonConstants.Server.SegmentCompletionProtocol.DEFAULT_SEGMENT_UPLOAD_REQUEST_TIMEOUT_MS;
 
 
 /**

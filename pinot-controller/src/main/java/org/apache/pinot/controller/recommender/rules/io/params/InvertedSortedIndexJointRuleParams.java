@@ -21,7 +21,16 @@ package org.apache.pinot.controller.recommender.rules.io.params;
 import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.annotation.Nulls;
 
-import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.*;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.DEFAULT_MAX_NUM_ITERATION_WITHOUT_GAIN;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.DEFAULT_PERCENT_SELECT_FOR_FUNCTION;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.DEFAULT_PERCENT_SELECT_FOR_ISNULL;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.DEFAULT_PERCENT_SELECT_FOR_RANGE;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.DEFAULT_PERCENT_SELECT_FOR_REGEX;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.DEFAULT_PERCENT_SELECT_FOR_TEXT_MATCH;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.DEFAULT_THRESHOLD_MIN_AND_PREDICATE_INCREMENTAL_VOTE;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.DEFAULT_THRESHOLD_RATIO_MIN_AND_PREDICATE_TOP_CANDIDATES;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.DEFAULT_THRESHOLD_RATIO_MIN_GAIN_DIFF_BETWEEN_ITERATION;
+import static org.apache.pinot.controller.recommender.rules.io.params.RecommenderConstants.InvertedSortedIndexJointRule.DEFAULT_THRESHOLD_RATIO_MIN_NESI_FOR_TOP_CANDIDATES;
 
 
 /**

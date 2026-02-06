@@ -34,7 +34,9 @@ import org.apache.pinot.spi.metrics.PinotMetricName;
 import org.apache.pinot.spi.metrics.PinotMetricReporter;
 import org.apache.pinot.spi.metrics.PinotMetricsRegistry;
 
-import static org.apache.pinot.spi.utils.CommonConstants.*;
+import static org.apache.pinot.spi.utils.CommonConstants.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT;
+import static org.apache.pinot.spi.utils.CommonConstants.OTEL_EXPORTER_OTLP_METRICS_EXPORT_INTERVAL_SECONDS;
+import static org.apache.pinot.spi.utils.CommonConstants.OTEL_EXPORTER_OTLP_METRICS_HEADERS;
 
 
 @AutoService(PinotMetricsFactory.class)

@@ -24,7 +24,15 @@ import org.testng.Assert;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.*;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.BOOL_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.DOUBLE_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.ENUM_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.INT_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NESTED_MESSAGE;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NULLABLE_BYTES_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NULLABLE_FLOAT_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.NULLABLE_LONG_FIELD;
+import static org.apache.pinot.plugin.inputformat.protobuf.ProtoBufTestDataGenerator.STRING_FIELD;
 
 
 public class ProtoBufUtilsTest {

@@ -40,14 +40,32 @@ import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.server.predownload.PredownloadTestUtil.*;
-import static org.mockito.ArgumentMatchers.*;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.CLUSTER_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.CRC;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.INSTANCE_ID;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.SECOND_SEGMENT_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.SEGMENT_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.SESSION_ID;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.TABLE_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.THIRD_SEGMENT_NAME;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.ZK_ADDRESS;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.createSegmentZKMetadata;
+import static org.apache.pinot.server.predownload.PredownloadTestUtil.getPinotConfiguration;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertThrows;
-import static org.testng.AssertJUnit.*;
+import static org.testng.AssertJUnit.assertEquals;
+import static org.testng.AssertJUnit.assertFalse;
+import static org.testng.AssertJUnit.assertNotNull;
+import static org.testng.AssertJUnit.assertNull;
+import static org.testng.AssertJUnit.assertTrue;
 
 
 public class PredownloadZKClientTest {

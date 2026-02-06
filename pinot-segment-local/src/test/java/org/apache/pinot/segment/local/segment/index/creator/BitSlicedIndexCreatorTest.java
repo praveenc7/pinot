@@ -41,7 +41,12 @@ import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
 import static org.apache.pinot.segment.spi.V1Constants.Indexes.BITMAP_RANGE_INDEX_FILE_EXTENSION;
-import static org.apache.pinot.spi.data.FieldSpec.DataType.*;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.DOUBLE;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.FLOAT;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.INT;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.LONG;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.STRING;
+import static org.apache.pinot.spi.data.FieldSpec.DataType.TIMESTAMP;
 import static org.testng.Assert.assertEquals;
 
 

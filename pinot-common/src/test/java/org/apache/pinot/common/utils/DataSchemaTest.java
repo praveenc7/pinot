@@ -26,7 +26,24 @@ import org.apache.pinot.spi.utils.BytesUtils;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
-import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.*;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.BIG_DECIMAL;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.BOOLEAN_ARRAY;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.BYTES;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.BYTES_ARRAY;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.DOUBLE;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.DOUBLE_ARRAY;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.FLOAT;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.FLOAT_ARRAY;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.INT;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.INT_ARRAY;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.LONG;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.LONG_ARRAY;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.OBJECT;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.STRING;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.STRING_ARRAY;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.TIMESTAMP;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.TIMESTAMP_ARRAY;
+import static org.apache.pinot.common.utils.DataSchema.ColumnDataType.fromDataType;
 
 
 public class DataSchemaTest {
