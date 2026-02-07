@@ -18,6 +18,7 @@
  */
 package org.apache.pinot.segment.spi.partition;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.io.Serializable;
 import java.util.Map;
 import javax.annotation.Nullable;
@@ -56,5 +57,17 @@ public interface PartitionFunction extends Serializable {
   @Nullable
   default Map<String, String> getFunctionConfig() {
     return null;
+  }
+
+  /**
+   * Returns a unique key identifying this partition function configuration.
+   * Two partition functions with the same key will produce identical partition IDs for any given input value.
+   * This is used for caching partition computations during segment pruning.
+   *
+   * @return A string key uniquely identifying this partition function's configuration
+   */
+  @JsonIgnore
+  default String getPartitionFunctionKey() {
+    return getName() + "_" + getNumPartitions();
   }
 }

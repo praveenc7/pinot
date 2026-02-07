@@ -363,6 +363,60 @@ public class PartitionFunctionTest {
     assertEquals(partitionFunction.getPartition("Physics"), 0);
   }
 
+  @Test
+  public void testPartitionFunctionKey() {
+    // Test Modulo partition function key
+    PartitionFunction moduloFunction = PartitionFunctionFactory.getPartitionFunction("Modulo", 10, null);
+    assertEquals(moduloFunction.getPartitionFunctionKey(), "Modulo_10");
+
+    // Test HashCode partition function key
+    PartitionFunction hashCodeFunction = PartitionFunctionFactory.getPartitionFunction("HashCode", 20, null);
+    assertEquals(hashCodeFunction.getPartitionFunctionKey(), "HashCode_20");
+
+    // Test Murmur partition function key
+    PartitionFunction murmurFunction = PartitionFunctionFactory.getPartitionFunction("Murmur", 15, null);
+    assertEquals(murmurFunction.getPartitionFunctionKey(), "Murmur_15");
+
+    // Test Murmur3 partition function key with default config (no seed, x86 variant)
+    PartitionFunction murmur3Function = PartitionFunctionFactory.getPartitionFunction("Murmur3", 25, null);
+    assertEquals(murmur3Function.getPartitionFunctionKey(), "Murmur3_25_0_x86");
+
+    // Test Murmur3 partition function key with custom seed
+    Map<String, String> murmur3Config = new HashMap<>();
+    murmur3Config.put("seed", "42");
+    PartitionFunction murmur3WithSeed = PartitionFunctionFactory.getPartitionFunction("Murmur3", 25, murmur3Config);
+    assertEquals(murmur3WithSeed.getPartitionFunctionKey(), "Murmur3_25_42_x86");
+
+    // Test Murmur3 partition function key with x64 variant
+    Map<String, String> murmur3X64Config = new HashMap<>();
+    murmur3X64Config.put("variant", "x64_32");
+    PartitionFunction murmur3X64 = PartitionFunctionFactory.getPartitionFunction("Murmur3", 30, murmur3X64Config);
+    assertEquals(murmur3X64.getPartitionFunctionKey(), "Murmur3_30_0_x64");
+
+    // Test ByteArray partition function key
+    PartitionFunction byteArrayFunction = PartitionFunctionFactory.getPartitionFunction("ByteArray", 12, null);
+    assertEquals(byteArrayFunction.getPartitionFunctionKey(), "ByteArray_12");
+
+    // Test BoundedColumnValue partition function key
+    Map<String, String> boundedConfig = new HashMap<>();
+    boundedConfig.put("columnValues", "a|b|c");
+    boundedConfig.put("columnValuesDelimiter", "|");
+    PartitionFunction boundedFunction =
+        PartitionFunctionFactory.getPartitionFunction("BoundedColumnValue", 4, boundedConfig);
+    assertEquals(boundedFunction.getPartitionFunctionKey(), "BoundedColumnValue_4_a|b|c_|");
+
+    // Verify that two partition functions with same config produce same key
+    PartitionFunction murmur3Function2 = PartitionFunctionFactory.getPartitionFunction("Murmur3", 25, null);
+    assertEquals(murmur3Function.getPartitionFunctionKey(), murmur3Function2.getPartitionFunctionKey());
+
+    // Verify that partition functions with different configs produce different keys
+    Map<String, String> differentSeedConfig = new HashMap<>();
+    differentSeedConfig.put("seed", "100");
+    PartitionFunction murmur3DifferentSeed =
+        PartitionFunctionFactory.getPartitionFunction("Murmur3", 25, differentSeedConfig);
+    assertTrue(!murmur3Function.getPartitionFunctionKey().equals(murmur3DifferentSeed.getPartitionFunctionKey()));
+  }
+
   private void testBasicProperties(PartitionFunction partitionFunction, String functionName, int numPartitions) {
     testBasicProperties(partitionFunction, functionName, numPartitions, null);
   }

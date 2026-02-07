@@ -89,4 +89,9 @@ public class Murmur3PartitionFunction implements PartitionFunction {
   public String toString() {
     return NAME;
   }
+
+  @Override
+  public String getPartitionFunctionKey() {
+    return NAME + "_" + _numPartitions + "_" + _seed + "_" + (_useX64 ? "x64" : "x86");
+  }
 }

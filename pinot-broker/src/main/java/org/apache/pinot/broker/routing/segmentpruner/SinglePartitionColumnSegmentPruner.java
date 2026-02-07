@@ -18,6 +18,8 @@
  */
 package org.apache.pinot.broker.routing.segmentpruner;
 
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +36,7 @@ import org.apache.pinot.common.request.Expression;
 import org.apache.pinot.common.request.Function;
 import org.apache.pinot.common.request.Identifier;
 import org.apache.pinot.common.request.context.RequestContextUtils;
+import org.apache.pinot.segment.spi.partition.PartitionFunction;
 import org.apache.pinot.sql.FilterKind;
 
 
@@ -96,62 +99,123 @@ public class SinglePartitionColumnSegmentPruner implements SegmentPruner {
     if (filterExpression == null) {
       return segments;
     }
+
+    // Cache of partition function key -> query partition IDs
+    // This avoids recomputing partition IDs for each segment when they share the same partition function
+    Map<String, Set<Integer>> queryPartitionIdsByFunction = new HashMap<>();
+
     Set<String> selectedSegments = new HashSet<>();
     for (String segment : segments) {
       SegmentPartitionInfo partitionInfo = _partitionInfoMap.get(segment);
-      if (partitionInfo == null || partitionInfo == SegmentPartitionUtils.INVALID_PARTITION_INFO || isPartitionMatch(
-          filterExpression, partitionInfo)) {
+      if (partitionInfo == null || partitionInfo == SegmentPartitionUtils.INVALID_PARTITION_INFO) {
+        // No partition info available, include segment to be safe
+        selectedSegments.add(segment);
+        continue;
+      }
+
+      PartitionFunction partitionFunction = partitionInfo.getPartitionFunction();
+      String partitionFunctionKey = partitionFunction.getPartitionFunctionKey();
+
+      // Get or compute the query partition IDs for this partition function
+      Set<Integer> queryPartitionIds = queryPartitionIdsByFunction.computeIfAbsent(
+          partitionFunctionKey,
+          k -> extractPartitionIds(filterExpression, partitionFunction)
+      );
+
+      // null means the filter doesn't constrain the partition column, so all segments match
+      // Otherwise, check if segment's partitions intersect with query's partition IDs
+      if (queryPartitionIds == null || hasIntersection(partitionInfo.getPartitions(), queryPartitionIds)) {
         selectedSegments.add(segment);
       }
     }
     return selectedSegments;
   }
 
-  private boolean isPartitionMatch(Expression filterExpression, SegmentPartitionInfo partitionInfo) {
+  /**
+   * Extracts the set of partition IDs from the filter expression that match the partition column.
+   *
+   * @param filterExpression The filter expression to analyze
+   * @param partitionFunction The partition function to use for computing partition IDs
+   * @return Set of partition IDs that match the filter, or null if the filter doesn't constrain
+   *         the partition column (meaning all partitions match)
+   */
+  @Nullable
+  private Set<Integer> extractPartitionIds(Expression filterExpression, PartitionFunction partitionFunction) {
     Function function = filterExpression.getFunctionCall();
     FilterKind filterKind = FilterKind.valueOf(function.getOperator());
     List<Expression> operands = function.getOperands();
+
     switch (filterKind) {
-      case AND:
+      case AND: {
+        // For AND: intersection of partition sets from children
+        // If any child returns empty set, result is empty
+        // If all children return null, result is null
+        Set<Integer> result = null;
         for (Expression child : operands) {
-          if (!isPartitionMatch(child, partitionInfo)) {
-            return false;
+          Set<Integer> childPartitions = extractPartitionIds(child, partitionFunction);
+          if (childPartitions != null) {
+            if (childPartitions.isEmpty()) {
+              // Short-circuit: empty set AND anything = empty set
+              return Collections.emptySet();
+            }
+            if (result == null) {
+              result = new HashSet<>(childPartitions);
+            } else {
+              result.retainAll(childPartitions);
+              if (result.isEmpty()) {
+                return Collections.emptySet();
+              }
+            }
           }
         }
-        return true;
-      case OR:
+        return result;
+      }
+      case OR: {
+        // For OR: union of partition sets from children
+        // If any child returns null, result is null (that child matches all partitions)
+        Set<Integer> result = new HashSet<>();
         for (Expression child : operands) {
-          if (isPartitionMatch(child, partitionInfo)) {
-            return true;
+          Set<Integer> childPartitions = extractPartitionIds(child, partitionFunction);
+          if (childPartitions == null) {
+            // Short-circuit: null (all partitions) OR anything = null (all partitions)
+            return null;
           }
+          result.addAll(childPartitions);
         }
-        return false;
+        return result;
+      }
       case EQUALS: {
         Identifier identifier = operands.get(0).getIdentifier();
         if (identifier != null && identifier.getName().equals(_partitionColumn)) {
-          return partitionInfo.getPartitions().contains(partitionInfo.getPartitionFunction()
-              .getPartition(RequestContextUtils.getStringValue(operands.get(1))));
-        } else {
-          return true;
+          int partitionId = partitionFunction.getPartition(RequestContextUtils.getStringValue(operands.get(1)));
+          return Collections.singleton(partitionId);
         }
+        // Not on partition column, doesn't constrain partitions
+        return null;
       }
       case IN: {
         Identifier identifier = operands.get(0).getIdentifier();
         if (identifier != null && identifier.getName().equals(_partitionColumn)) {
+          Set<Integer> partitionIds = new HashSet<>();
           int numOperands = operands.size();
           for (int i = 1; i < numOperands; i++) {
-            if (partitionInfo.getPartitions().contains(partitionInfo.getPartitionFunction()
-                .getPartition(RequestContextUtils.getStringValue(operands.get(i))))) {
-              return true;
-            }
+            partitionIds.add(partitionFunction.getPartition(RequestContextUtils.getStringValue(operands.get(i))));
           }
-          return false;
-        } else {
-          return true;
+          return partitionIds;
         }
+        // Not on partition column, doesn't constrain partitions
+        return null;
       }
       default:
-        return true;
+        // Other filter types don't constrain the partition column
+        return null;
     }
+  }
+
+  /**
+   * Checks if two sets have any common elements.
+   */
+  private static boolean hasIntersection(Set<Integer> set1, Set<Integer> set2) {
+    return !Collections.disjoint(set1, set2);
   }
 }

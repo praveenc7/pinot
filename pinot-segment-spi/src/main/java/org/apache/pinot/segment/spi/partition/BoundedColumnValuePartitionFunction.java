@@ -95,4 +95,10 @@ public class BoundedColumnValuePartitionFunction implements PartitionFunction {
   public String toString() {
     return getName();
   }
+
+  @Override
+  public String getPartitionFunctionKey() {
+    return NAME + "_" + _numPartitions + "_" + _functionConfig.get(COLUMN_VALUES)
+        + "_" + _functionConfig.get(COLUMN_VALUES_DELIMITER);
+  }
 }

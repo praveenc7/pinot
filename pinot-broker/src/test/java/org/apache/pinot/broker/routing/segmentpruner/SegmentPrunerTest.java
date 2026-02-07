@@ -80,6 +80,15 @@ public class SegmentPrunerTest extends ControllerTest {
   private static final String QUERY_2 = "SELECT * FROM testTable WHERE memberId = 0";
   private static final String QUERY_3 = "SELECT * FROM testTable WHERE memberId IN (1, 2)";
   private static final String QUERY_4 = "SELECT * FROM testTable WHERE memberId = 0 AND memberName = 'xyz'";
+  // OR of two EQUALS on partition column
+  private static final String QUERY_5 = "SELECT * FROM testTable WHERE memberId = 0 OR memberId = 1";
+  // OR with non-partition column - cannot prune, should return all segments
+  private static final String QUERY_6 = "SELECT * FROM testTable WHERE memberId = 0 OR memberName = 'abc'";
+  // Nested AND/OR: AND of (EQUALS) with (OR of two EQUALS)
+  private static final String QUERY_7 = "SELECT * FROM testTable WHERE memberId = 0 AND (memberId = 0 OR memberId = 1)";
+  // AND of two EQUALS with different values - empty intersection, no segments match
+  private static final String QUERY_8 = "SELECT * FROM testTable WHERE memberId = 0 AND memberId = 1";
+
 
   private static final String TIME_QUERY_1 = "SELECT * FROM testTable WHERE timeColumn = 40";
   private static final String TIME_QUERY_2 = "SELECT * FROM testTable WHERE timeColumn BETWEEN 20 AND 30";
@@ -285,6 +294,10 @@ public class SegmentPrunerTest extends ControllerTest {
     BrokerRequest brokerRequest2 = CalciteSqlCompiler.compileToBrokerRequest(QUERY_2);
     BrokerRequest brokerRequest3 = CalciteSqlCompiler.compileToBrokerRequest(QUERY_3);
     BrokerRequest brokerRequest4 = CalciteSqlCompiler.compileToBrokerRequest(QUERY_4);
+    BrokerRequest brokerRequest5 = CalciteSqlCompiler.compileToBrokerRequest(QUERY_5);
+    BrokerRequest brokerRequest6 = CalciteSqlCompiler.compileToBrokerRequest(QUERY_6);
+    BrokerRequest brokerRequest7 = CalciteSqlCompiler.compileToBrokerRequest(QUERY_7);
+    BrokerRequest brokerRequest8 = CalciteSqlCompiler.compileToBrokerRequest(QUERY_8);
 
     // NOTE: Ideal state and external view are not used in the current implementation
     IdealState idealState = Mockito.mock(IdealState.class);
@@ -303,6 +316,10 @@ public class SegmentPrunerTest extends ControllerTest {
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest2, input), input);
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest3, input), input);
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest4, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest5, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest6, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest7, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest8, input), input);
 
     // Segments without metadata (not updated yet) should not be pruned
     String newSegment = "newSegment";
@@ -313,6 +330,10 @@ public class SegmentPrunerTest extends ControllerTest {
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest2, input), input);
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest3, input), input);
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest4, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest5, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest6, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest7, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest8, input), input);
 
     // Segments without partition metadata should not be pruned
     String segmentWithoutPartitionMetadata = "segmentWithoutPartitionMetadata";
@@ -325,6 +346,10 @@ public class SegmentPrunerTest extends ControllerTest {
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest2, input), input);
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest3, input), input);
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest4, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest5, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest6, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest7, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest8, input), input);
 
     // Test different partition functions and number of partitions
     // 0 % 5 = 0; 1 % 5 = 1; 2 % 5 = 2
@@ -340,6 +365,11 @@ public class SegmentPrunerTest extends ControllerTest {
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest1, input), input);
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest2, input), input);
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest3, input), Set.of(segment1));
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest4, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest5, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest6, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest7, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest8, input), Set.of());
 
     // Update partition metadata without refreshing should have no effect
     setSegmentZKPartitionMetadata(OFFLINE_TABLE_NAME, segment0, "Modulo", 4, 1);
@@ -348,6 +378,11 @@ public class SegmentPrunerTest extends ControllerTest {
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest2, input), input);
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest3, input), Set.of(segment1));
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest4, input), input);
+    // Same as above since refresh hasn't happened
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest5, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest6, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest7, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest8, input), Set.of());
 
     // Refresh the changed segment should update the segment pruner
     segmentZkMetadataFetcher.refreshSegment(segment0);
@@ -355,6 +390,10 @@ public class SegmentPrunerTest extends ControllerTest {
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest2, input), Set.of(segment1));
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest3, input), input);
     assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest4, input), Set.of(segment1));
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest5, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest6, input), input);
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest7, input), Set.of(segment1));
+    assertEquals(singlePartitionColumnSegmentPruner.prune(brokerRequest8, input), Set.of());
 
     // Multi-column partitioned segment.
     MultiPartitionColumnsSegmentPruner multiPartitionColumnsSegmentPruner =
