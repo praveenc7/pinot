@@ -22,7 +22,6 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import java.time.Clock;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -172,15 +171,27 @@ public class ReplicaGroupInstanceSelector extends BaseInstanceSelector {
       int roundRobinInstanceIdx = requestId % candidates.size();
       SegmentInstanceCandidate selectedInstance = candidates.get(roundRobinInstanceIdx);
 
-      // Adaptive Server Selection logic
+      // Adaptive Server Selection logic: find the candidate with the best (lowest) rank.
+      // Falls back to round-robin if any candidate is missing from the rank map.
       if (!serverRankMap.isEmpty()) {
-        // Use instance with the best rank if all servers have stats populated, if not use round-robin selected instance
-        selectedInstance = candidates.stream()
-            .anyMatch(candidate -> !serverRankMap.containsKey(candidate.getInstance()))
-            ? candidates.get(roundRobinInstanceIdx)
-            : candidates.stream()
-                .min(Comparator.comparingInt(candidate -> serverRankMap.get(candidate.getInstance())))
-                .orElse(candidates.get(roundRobinInstanceIdx));
+        int bestRank = Integer.MAX_VALUE;
+        SegmentInstanceCandidate bestCandidate = null;
+        for (int i = 0; i < candidates.size(); i++) {
+          SegmentInstanceCandidate candidate = candidates.get(i);
+          Integer rank = serverRankMap.get(candidate.getInstance());
+          if (rank == null) {
+            // Not all servers have stats populated, fall back to round-robin
+            bestCandidate = null;
+            break;
+          }
+          if (rank < bestRank) {
+            bestRank = rank;
+            bestCandidate = candidate;
+          }
+        }
+        if (bestCandidate != null) {
+          selectedInstance = bestCandidate;
+        }
       }
       replicaGroupToSegmentCount.merge(selectedInstance.getReplicaGroup(), 1, Integer::sum);
       // This can only be offline when it is a new segment. And such segment is marked as optional segment so that
