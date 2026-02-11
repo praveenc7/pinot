@@ -19,6 +19,7 @@
 package org.apache.pinot.common.restlet.resources;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Preconditions;
 import java.util.Collections;
@@ -35,6 +36,7 @@ import javax.annotation.Nullable;
  * 2. segmentsTo : merged segments.
  * 3. customMap : custom map.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class StartReplaceSegmentsRequest {
   private final List<String> _segmentsFrom;
   private final List<String> _segmentsTo;

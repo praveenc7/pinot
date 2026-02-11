@@ -149,7 +149,6 @@ public class SegmentLineage {
     for (Map.Entry<String, List<String>> listField : listFields.entrySet()) {
       String lineageId = listField.getKey();
       List<String> value = listField.getValue();
-      Preconditions.checkState(value.size() == 4);
       List<String> segmentsFrom = Arrays.asList(StringUtils.split(value.get(0), COMMA_SEPARATOR));
       List<String> segmentsTo = Arrays.asList(StringUtils.split(value.get(1), COMMA_SEPARATOR));
       LineageEntryState state = LineageEntryState.valueOf(value.get(2));
