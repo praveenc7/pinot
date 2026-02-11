@@ -47,6 +47,7 @@ jobs:
 
       # Compute a unique release version: <base>-li-<run>
       - name: Compute & set version
+        id: version
         shell: bash
         run: |
           set -euo pipefail
@@ -78,6 +79,7 @@ jobs:
 
           NEW_VERSION="${BASE}-${SUFFIX}"
           echo "Setting project version to: ${NEW_VERSION}"
+          echo "release_version=${NEW_VERSION}" >> "$GITHUB_OUTPUT"
 
           mvn -B -q -Pli-publish versions:set -DnewVersion="${NEW_VERSION}" -DgenerateBackupPoms=false
           mvn -B -q -Pli-publish versions:commit
@@ -108,6 +110,14 @@ jobs:
             -s ci.settings.xml \
             -DretryFailedDeploymentCount=5 \
             -DaltDeploymentRepository=central::default::https://linkedin.jfrog.io/artifactory/pinot
+
+      - name: Create git tag for release
+        if: success()
+        run: |
+          TAG="release/${{ steps.version.outputs.release_version }}"
+          echo "Creating tag: ${TAG}"
+          git tag "${TAG}"
+          git push origin "${TAG}"
 
       - name: Print pinot-lnkd-deps tree
         if: success()
