@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
@@ -244,12 +245,13 @@ public class TableSizeReaderTest {
       }
     });
 
-    when(_helix.getDataInstanceAdminEndpoints(ArgumentMatchers.anySet())).thenAnswer(new Answer<Object>() {
-      @Override
-      public Object answer(InvocationOnMock invocationOnMock) throws Throwable {
-        return serverEndpoints(servers);
-      }
-    });
+    when(_helix.getDataInstanceAdminEndpoints(ArgumentMatchers.anySet(), anyBoolean())).thenAnswer(
+        new Answer<Object>() {
+          @Override
+          public Object answer(InvocationOnMock invocationOnMock) throws Throwable {
+            return serverEndpoints(servers);
+          }
+        });
 
     TableSizeReader reader = new TableSizeReader(_executor, _connectionManager, _controllerMetrics, _helix,
         _leadControllerManager);
@@ -426,5 +428,100 @@ public class TableSizeReaderTest {
     assertEquals(MetricValueUtils
             .getTableGaugeValue(_controllerMetrics, tableNameWithType, ControllerGauge.LARGEST_SEGMENT_SIZE_ON_SERVER),
         120);
+  }
+
+  /**
+   * Tests that getTableSubtypeSize is lenient when getDataInstanceAdminEndpoints throws
+   * InvalidConfigException for a server whose InstanceConfig is missing from ZK (e.g. a
+   * decommissioned server still referenced in IdealState). The missing server's segments should
+   * be estimated using sizes reported by other healthy replicas, rather than failing the entire
+   * size read.
+   */
+  @Test
+  public void testGetTableSubTypeSizeWithMissingInstanceConfig() throws InvalidConfigException {
+    // Setup: server0 and server1 are healthy, "server_missing" has no InstanceConfig in ZK.
+    // server_missing hosts segments s2 and s3 (same as some segments on server0).
+    String ghostServer = "server_missing";
+    List<String> ghostSegments = Arrays.asList("s2", "s3");
+
+    // server0 hosts: s2, s3, s6
+    // server1 hosts: s2, s5
+    // server_missing hosts: s2, s3
+    Map<String, List<String>> serverToSegmentsMap = new HashMap<>();
+    serverToSegmentsMap.put("server0", _serverMap.get("server0")._segments);
+    serverToSegmentsMap.put("server1", _serverMap.get("server1")._segments);
+    serverToSegmentsMap.put(ghostServer, ghostSegments);
+
+    when(_helix.getServerToSegmentsMap(anyString(), any(), anyBoolean())).thenReturn(serverToSegmentsMap);
+
+    // With bestEffort=true, getDataInstanceAdminEndpoints skips the ghost server (missing InstanceConfig)
+    // and returns endpoints only for healthy servers. This simulates the InstanceConfig being missing for
+    // the ghost server while other servers are fine.
+    when(_helix.getDataInstanceAdminEndpoints(ArgumentMatchers.anySet(), ArgumentMatchers.eq(true)))
+        .thenAnswer(invocation -> {
+          Set<String> instances = invocation.getArgument(0);
+          BiMap<String, String> endpointMap = HashBiMap.create(instances.size());
+          for (String server : instances) {
+            if (server.equals(ghostServer)) {
+              // Ghost server has no InstanceConfig — bestEffort skips it
+              continue;
+            }
+            endpointMap.put(server, _serverMap.get(server)._endpoint);
+          }
+          return endpointMap;
+        });
+
+    TableSizeReader reader = new TableSizeReader(_executor, _connectionManager, _controllerMetrics, _helix,
+        _leadControllerManager);
+    TableSizeReader.TableSizeDetails tableSizeDetails = reader.getTableSizeDetails("offline", TIMEOUT_MSEC, true);
+
+    TableSizeReader.TableSubTypeSizeDetails offlineSizes = tableSizeDetails._offlineSegments;
+    assertNotNull(offlineSizes);
+
+    // All 4 unique segments should be present: s2, s3, s5, s6
+    assertEquals(offlineSizes._segments.size(), 4);
+
+    // No segment should be completely missing — each has at least one healthy server reporting
+    assertEquals(offlineSizes._missingSegments, 0);
+
+    // s2: server0 (120) + server1 (120) + ghost (-1)
+    //   reported = 240, estimated = 240 + 1*120 = 360
+    long s2Size = FakeSizeServer.getSegmentSize("s2"); // 120
+    TableSizeReader.SegmentSizeDetails s2Details = offlineSizes._segments.get("s2");
+    assertNotNull(s2Details);
+    assertEquals(s2Details._serverInfo.size(), 3);
+    assertEquals(s2Details._reportedSizeInBytes, 2 * s2Size);
+    assertEquals(s2Details._estimatedSizeInBytes, 3 * s2Size);
+
+    // s3: server0 (130) + ghost (-1)
+    //   reported = 130, estimated = 130 + 1*130 = 260
+    long s3Size = FakeSizeServer.getSegmentSize("s3"); // 130
+    TableSizeReader.SegmentSizeDetails s3Details = offlineSizes._segments.get("s3");
+    assertNotNull(s3Details);
+    assertEquals(s3Details._serverInfo.size(), 2);
+    assertEquals(s3Details._reportedSizeInBytes, s3Size);
+    assertEquals(s3Details._estimatedSizeInBytes, 2 * s3Size);
+
+    // s5: server1 (150) only — no ghost involvement, fully reported
+    long s5Size = FakeSizeServer.getSegmentSize("s5"); // 150
+    TableSizeReader.SegmentSizeDetails s5Details = offlineSizes._segments.get("s5");
+    assertNotNull(s5Details);
+    assertEquals(s5Details._reportedSizeInBytes, s5Size);
+    assertEquals(s5Details._estimatedSizeInBytes, s5Size);
+
+    // s6: server0 (160) only — no ghost involvement, fully reported
+    long s6Size = FakeSizeServer.getSegmentSize("s6"); // 160
+    TableSizeReader.SegmentSizeDetails s6Details = offlineSizes._segments.get("s6");
+    assertNotNull(s6Details);
+    assertEquals(s6Details._reportedSizeInBytes, s6Size);
+    assertEquals(s6Details._estimatedSizeInBytes, s6Size);
+
+    // Overall: estimated > reported because ghost server's segments are estimated
+    assertTrue(offlineSizes._estimatedSizeInBytes > offlineSizes._reportedSizeInBytes);
+
+    // Total reported = 240 + 130 + 150 + 160 = 680
+    // Total estimated = 360 + 260 + 150 + 160 = 930
+    assertEquals(offlineSizes._reportedSizeInBytes, 680);
+    assertEquals(offlineSizes._estimatedSizeInBytes, 930);
   }
 }

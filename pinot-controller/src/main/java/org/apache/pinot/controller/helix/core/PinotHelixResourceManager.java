@@ -3812,12 +3812,28 @@ public class PinotHelixResourceManager {
    */
   public BiMap<String, String> getDataInstanceAdminEndpoints(Set<String> instances)
       throws InvalidConfigException {
+    return getDataInstanceAdminEndpoints(instances, false);
+  }
+
+  /**
+   * Provides admin endpoints for the provided data instances.
+   * @param instances instances for which to read endpoints
+   * @param bestEffort when true, skip instances whose admin endpoint cannot be resolved (e.g. missing
+   *                   InstanceConfig) instead of failing the entire call. Skipped instances are logged as warnings.
+   * @return returns map of instances to their admin endpoints.
+   */
+  public BiMap<String, String> getDataInstanceAdminEndpoints(Set<String> instances, boolean bestEffort)
+      throws InvalidConfigException {
     BiMap<String, String> endpointToInstance = HashBiMap.create(instances.size());
     for (String instance : instances) {
       String instanceAdminEndpoint;
       try {
         instanceAdminEndpoint = _instanceAdminEndpointCache.get(instance);
       } catch (Exception e) {
+        if (bestEffort) {
+          LOGGER.warn("Failed to get admin endpoint for instance: {}, skipping", instance, e);
+          continue;
+        }
         String errorMessage = "Caught exception while getting instance admin endpoint for instance: " + instance
             + ". Error message: " + e.getMessage();
         LOGGER.error(errorMessage, e);

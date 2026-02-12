@@ -250,7 +250,11 @@ public class TableSizeReader {
     Map<String, List<String>> serverToSegmentsMap = _helixResourceManager.getServerToSegmentsMap(tableNameWithType,
         null, includeReplacedSegments);
     ServerTableSizeReader serverTableSizeReader = new ServerTableSizeReader(_executor, _connectionManager);
-    BiMap<String, String> endpoints = _helixResourceManager.getDataInstanceAdminEndpoints(serverToSegmentsMap.keySet());
+    // Use bestEffort=true so that a missing InstanceConfig for one server (e.g. a decommissioned server still
+    // referenced in IdealState) does not block the entire size read. Skipped servers remain in serverToSegmentsMap,
+    // so the downstream estimation logic treats them identically to unresponsive servers.
+    BiMap<String, String> endpoints =
+        _helixResourceManager.getDataInstanceAdminEndpoints(serverToSegmentsMap.keySet(), true);
     Map<String, List<SegmentSizeInfo>> serverToSegmentSizeInfoListMap =
         serverTableSizeReader.getSegmentSizeInfoFromServers(endpoints, tableNameWithType, timeoutMs);
 
