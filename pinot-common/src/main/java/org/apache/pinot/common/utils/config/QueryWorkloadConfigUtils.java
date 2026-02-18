@@ -65,8 +65,6 @@ public class QueryWorkloadConfigUtils {
   }
 
   private static final Logger LOGGER = org.slf4j.LoggerFactory.getLogger(QueryWorkloadConfigUtils.class);
-  private static final HttpClient HTTP_CLIENT = new HttpClient(HttpClientConfig.DEFAULT_HTTP_CLIENT_CONFIG,
-      TlsUtils.getSslContext());
   private static final Random RANDOM = new Random();
 
   /**
@@ -185,35 +183,40 @@ public class QueryWorkloadConfigUtils {
           .build();
       AtomicReference<Map<String, InstanceCost>> workloadToInstanceCost = new AtomicReference<>(null);
       RetryPolicy retryPolicy = RetryPolicies.exponentialBackoffRetryPolicy(3, 3000L, 1.2f);
-      retryPolicy.attempt(() -> {
-        try {
-          SimpleHttpResponse response = HttpClient.wrapAndThrowHttpException(
-              HTTP_CLIENT.sendRequest(request, HttpClient.DEFAULT_SOCKET_TIMEOUT_MS));
-          if (response.getStatusCode() == HttpStatus.SC_OK) {
-            workloadToInstanceCost.set(JsonUtils.stringToObject(response.getResponse(), new TypeReference<>() { }));
-            LOGGER.info("Successfully fetched query workload configs from controller: {}, Instance: {}",
-                    controllerUrl, instanceId);
-            return true;
-          }
-          return false;
-        } catch (Exception e) {
-          if (e instanceof HttpErrorStatusException) {
-            HttpErrorStatusException httpErrorStatusException = (HttpErrorStatusException) e;
-            // Non-retriable errors
-            if (httpErrorStatusException.getStatusCode() == HttpStatus.SC_BAD_REQUEST
-                || httpErrorStatusException.getStatusCode() == HttpStatus.SC_FORBIDDEN
-                || httpErrorStatusException.getStatusCode() == HttpStatus.SC_NOT_FOUND) {
-              LOGGER.info("Non-retriable error while fetching query workload configs from controller: {}, Instance: {},"
-                      + " status code: {}",
-                  controllerUrl, instanceId, httpErrorStatusException.getStatusCode());
+      // Use a local HttpClient so that the connection pool and its SSL buffers are released after this
+      // one-time startup call, instead of leaking them for the lifetime of the process via a static field.
+      try (HttpClient httpClient = new HttpClient(HttpClientConfig.DEFAULT_HTTP_CLIENT_CONFIG,
+          TlsUtils.getSslContext())) {
+        retryPolicy.attempt(() -> {
+          try {
+            SimpleHttpResponse response = HttpClient.wrapAndThrowHttpException(
+                httpClient.sendRequest(request, HttpClient.DEFAULT_SOCKET_TIMEOUT_MS));
+            if (response.getStatusCode() == HttpStatus.SC_OK) {
+              workloadToInstanceCost.set(JsonUtils.stringToObject(response.getResponse(), new TypeReference<>() { }));
+              LOGGER.info("Successfully fetched query workload configs from controller: {}, Instance: {}",
+                      controllerUrl, instanceId);
               return true;
             }
+            return false;
+          } catch (Exception e) {
+            if (e instanceof HttpErrorStatusException) {
+              HttpErrorStatusException httpErrorStatusException = (HttpErrorStatusException) e;
+              // Non-retriable errors
+              if (httpErrorStatusException.getStatusCode() == HttpStatus.SC_BAD_REQUEST
+                  || httpErrorStatusException.getStatusCode() == HttpStatus.SC_FORBIDDEN
+                  || httpErrorStatusException.getStatusCode() == HttpStatus.SC_NOT_FOUND) {
+                LOGGER.info("Non-retriable error while fetching query workload configs from controller: {},"
+                        + " Instance: {}, status code: {}",
+                    controllerUrl, instanceId, httpErrorStatusException.getStatusCode());
+                return true;
+              }
+            }
+            LOGGER.warn("Failed to fetch query workload configs from controller: {}, Instance: {}", controllerUrl,
+                instanceId, e);
+            return false;
           }
-          LOGGER.warn("Failed to fetch query workload configs from controller: {}, Instance: {}", controllerUrl,
-              instanceId, e);
-          return false;
-        }
-      });
+        });
+      }
       Map<String, InstanceCost> instanceCostMap = workloadToInstanceCost.get();
       if (instanceCostMap != null) {
         instanceCostMap.forEach((workloadName, instanceCost) ->
