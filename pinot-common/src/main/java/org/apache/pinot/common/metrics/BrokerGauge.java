@@ -97,7 +97,9 @@ public enum BrokerGauge implements AbstractMetrics.Gauge {
   MAILBOX_SERVER_CACHE_SIZE_SMALL("bytes", true),
   MAILBOX_SERVER_CACHE_SIZE_NORMAL("bytes", true),
   MAILBOX_SERVER_THREADLOCALCACHE("bytes", true),
-  MAILBOX_SERVER_CHUNK_SIZE("bytes", true);
+  MAILBOX_SERVER_CHUNK_SIZE("bytes", true),
+  // Workload config fetch status: 1 = success, 0 = failure
+  WORKLOAD_CONFIG_FETCH_STATUS("status", true);
 
   private final String _brokerGaugeName;
   private final String _unit;

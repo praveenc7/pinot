@@ -120,7 +120,9 @@ public enum ServerGauge implements AbstractMetrics.Gauge {
   MAILBOX_SERVER_CHUNK_SIZE("bytes", true),
 
   // how many message are there in the server's message queue in helix
-  HELIX_MESSAGES_COUNT("count", true);
+  HELIX_MESSAGES_COUNT("count", true),
+  // Workload config fetch status: 1 = success, 0 = failure
+  WORKLOAD_CONFIG_FETCH_STATUS("status", true);
 
   private final String _gaugeName;
   private final String _unit;
