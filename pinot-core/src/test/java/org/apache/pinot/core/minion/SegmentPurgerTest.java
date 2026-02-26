@@ -205,7 +205,7 @@ public class SegmentPurgerTest {
     TableConfig tableConfigWithStarTree = new TableConfigBuilder(TableType.OFFLINE)
         .setTableName(TABLE_NAME)
         .setStarTreeIndexConfigs(Collections.singletonList(
-            new StarTreeIndexConfig(List.of(D1, D2), null, null, List.of("SUM__d2"), 10000)))
+            new StarTreeIndexConfig(List.of(D1, D2), null, List.of("SUM__d2"), null, 10000)))
         .build();
 
     SegmentPurger.RecordPurger recordPurger = row -> row.getValue(D1).equals(0);
@@ -224,7 +224,7 @@ public class SegmentPurgerTest {
     TableConfig tableConfigWithStarTree = new TableConfigBuilder(TableType.OFFLINE)
         .setTableName(TABLE_NAME)
         .setStarTreeIndexConfigs(Collections.singletonList(
-            new StarTreeIndexConfig(List.of(D1, D2), null, null, List.of("SUM__d2"), 10000)))
+            new StarTreeIndexConfig(List.of(D1, D2), null, List.of("SUM__d2"), null, 10000)))
         .build();
     tableConfigWithStarTree.getIndexingConfig().setEnableDynamicStarTreeCreation(true);
 
