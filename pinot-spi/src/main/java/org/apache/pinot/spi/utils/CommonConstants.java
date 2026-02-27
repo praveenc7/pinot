@@ -493,6 +493,8 @@ public class CommonConstants {
     // When the server instance's pool field is null or the pool contains multi distinguished group value, the broker
     // would set the group to -1 in the routing table for that server.
     public static final int FALLBACK_REPLICA_GROUP_ID = -1;
+    // Admin API port for broker, to be used admin operations.
+    public static final String CONFIG_OF_BROKER_ADMIN_API_PORT = "pinot.broker.adminapi.port";
 
     public static class Request {
       public static final String SQL = "sql";
