@@ -77,14 +77,15 @@ public enum ControllerMeter implements AbstractMetrics.Meter {
   // Tracks failures encountered while fetching partition group metadata
   PARTITION_GROUP_METADATA_FETCH_ERROR("failures", true),
   // Query workload propagation metrics
-  QUERY_WORKLOAD_PROPAGATION_COUNT("count", false),
-  QUERY_WORKLOAD_PROPAGATION_FAILED("count", false),
-  QUERY_WORKLOAD_MESSAGES_COUNT("count", false),
-  QUERY_WORKLOAD_MESSAGES_FAILED("count", false),
+  QUERY_WORKLOAD_PROPAGATION_COUNT("count", true),
+  QUERY_WORKLOAD_PROPAGATION_ERROR("count", true),
+  QUERY_WORKLOAD_MESSAGES_COUNT("count", true),
+  QUERY_WORKLOAD_MESSAGES_ERROR("count", true),
   QUERY_WORKLOAD_COMPUTE_INSTANCE_COST_COUNT("count", true),
-  QUERY_WORKLOAD_COMPUTE_INSTANCE_COST_FAILED("count", true),
+  QUERY_WORKLOAD_COMPUTE_INSTANCE_COST_ERROR("count", true),
   QUERY_WORKLOAD_LISTENER_CHANGES_COUNT("count", true),
-  QUERY_WORKLOAD_REQUEST_DROPPED("count", true);
+  QUERY_WORKLOAD_REQUEST_DROPPED("count", true),
+  QUERY_WORKLOAD_HTTP_CALLBACK_DROPPED("count", true);
 
   private final String _brokerMeterName;
   private final String _unit;
