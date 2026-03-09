@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -765,6 +766,240 @@ public class RetentionManagerTest {
     when(pinotHelixResourceManager.getHelixAdmin()).thenReturn(helixAdmin);
 
     return pinotHelixResourceManager;
+  }
+
+  @Test
+  public void testRetentionManagerSegmentRecentCreationGuardConfig() {
+    ControllerConf conf = new ControllerConf(
+        Map.of(ControllerConf.ControllerPeriodicTasksConf.SKIP_PURGING_RECENTLY_CREATED_SEGMENT_THRESHOLD_MS, 100L));
+    assertEquals(100L, conf.getSegmentRecentGuardCreateTimeMs());
+
+    conf = new ControllerConf();
+    // verify default value i.e disabled
+    assertEquals(-1L, conf.getSegmentRecentGuardCreateTimeMs());
+  }
+
+  @Test
+  public void tesRetentionForOfflineTableWithCreateTimeGuard() {
+    // setup
+    String offlineTableName = "myTable_OFFLINE";
+    IngestionConfig ingestionConfig = new IngestionConfig();
+    ingestionConfig.setBatchIngestionConfig(
+        new BatchIngestionConfig(null, "APPEND", "DAILY", false));
+
+    SegmentsValidationAndRetentionConfig segmentsValidationAndRetentionConfig =
+        new SegmentsValidationAndRetentionConfig();
+    segmentsValidationAndRetentionConfig.setTimeColumnName("ms");
+    segmentsValidationAndRetentionConfig.setRetentionTimeUnit("DAYS");
+    segmentsValidationAndRetentionConfig.setRetentionTimeValue("10");
+
+    TableConfig offlineTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(offlineTableName)
+        .setTimeColumnName("ms")
+        .setTimeType("MILLISECONDS")
+        .setRetentionTimeValue("10")
+        .setRetentionTimeUnit("DAYS")
+        .build();
+    offlineTableConfig.setValidationConfig(segmentsValidationAndRetentionConfig);
+
+    List<SegmentZKMetadata> segmentsZKMetadata = new ArrayList<>();
+    long now = System.currentTimeMillis();
+
+    // create time 1 hour ago, end time 60 days ago, should be skipped for deletion due to recent creation time
+    SegmentZKMetadata createTimeGuardedSegment = new SegmentZKMetadata("segment_to_be_skipped");
+    createTimeGuardedSegment.setCreationTime(now - TimeUnit.HOURS.toMillis(1));
+    createTimeGuardedSegment.setTimeUnit(TimeUnit.DAYS);
+    createTimeGuardedSegment.setEndTime(TimeUnit.MILLISECONDS.toDays(now) - 60);
+
+    SegmentZKMetadata toBePurgedSegment = new SegmentZKMetadata("segment_to_be_purged");
+    toBePurgedSegment.setCreationTime(-1);
+    toBePurgedSegment.setTimeUnit(TimeUnit.DAYS);
+    toBePurgedSegment.setEndTime(TimeUnit.MILLISECONDS.toDays(now) - 60);
+
+    segmentsZKMetadata.add(createTimeGuardedSegment);
+    segmentsZKMetadata.add(toBePurgedSegment);
+
+    PinotHelixResourceManager mockPinotHelixResourceManager = mock(PinotHelixResourceManager.class);
+    when(mockPinotHelixResourceManager.getOfflineTableConfig(offlineTableName)).thenReturn(offlineTableConfig);
+    when(mockPinotHelixResourceManager.getSegmentsZKMetadata(offlineTableName)).thenReturn(segmentsZKMetadata);
+
+    InstanceConfig instanceConfig = new InstanceConfig("Broker_localhost_1234");
+    instanceConfig.setHostName("localhost");
+    instanceConfig.setPort("8000");
+
+    when(mockPinotHelixResourceManager.getBrokerInstancesConfigsFor(offlineTableConfig.getTableName()))
+        .thenReturn(Collections.singletonList(instanceConfig));
+
+    CompletionServiceHelper mockServiceHelper = mock(CompletionServiceHelper.class);
+
+    ControllerConf controllerConf = new ControllerConf(Map.of(
+            ControllerConf.ControllerPeriodicTasksConf.SKIP_PURGING_RECENTLY_CREATED_SEGMENT_THRESHOLD_MS,
+            Duration.ofHours(24).toMillis()));
+    controllerConf.setControllerBrokerProtocol("http");
+    controllerConf.setRetentionControllerFrequencyInSeconds(0);
+    controllerConf.setDeletedSegmentsRetentionInDays(0);
+    controllerConf.setUntrackedSegmentDeletionEnabled(false);
+
+    BrokerServiceHelper brokerServiceHelper =
+        new BrokerServiceHelper(mockPinotHelixResourceManager, controllerConf, null, null);
+    brokerServiceHelper.setCompletionServiceHelper(mockServiceHelper);
+
+    // test
+    RetentionManager retentionManager =
+        new RetentionManager(mockPinotHelixResourceManager, null, controllerConf, mock(ControllerMetrics.class),
+            brokerServiceHelper);
+    retentionManager.manageRetentionForTable(offlineTableConfig);
+
+    // Verify deleteSegments is called for segment_to_be_purged segment only.
+    verify(mockPinotHelixResourceManager, times(1))
+        .deleteSegments(eq(offlineTableName), eq(List.of("segment_to_be_purged")));
+  }
+
+  @Test
+  public void tesRetentionForRealTimeTableWithCreateTimeGuard() {
+    // setup
+    String realtimeTableName = "myTable_REALTIME";
+    IngestionConfig ingestionConfig = new IngestionConfig();
+    ingestionConfig.setBatchIngestionConfig(
+        new BatchIngestionConfig(null, "APPEND", "DAILY", false));
+
+    SegmentsValidationAndRetentionConfig segmentsValidationAndRetentionConfig =
+        new SegmentsValidationAndRetentionConfig();
+    segmentsValidationAndRetentionConfig.setTimeColumnName("ms");
+    segmentsValidationAndRetentionConfig.setRetentionTimeUnit("DAYS");
+    segmentsValidationAndRetentionConfig.setRetentionTimeValue("10");
+
+    TableConfig realtimeTableConfig = new TableConfigBuilder(TableType.REALTIME).setTableName(realtimeTableName)
+        .setTimeColumnName("ms").setTimeType("MILLISECONDS").setRetentionTimeValue("10").setRetentionTimeUnit("DAYS")
+        .setIngestionConfig(ingestionConfig)
+        .build();
+    realtimeTableConfig.setValidationConfig(segmentsValidationAndRetentionConfig);
+
+    List<SegmentZKMetadata> segmentsZKMetadata = new ArrayList<>();
+    long now = System.currentTimeMillis();
+
+    // create time 1 hour ago, end time 60 days ago, should be skipped for deletion due to recent creation time
+    SegmentZKMetadata createTimeGuardedSegment = new SegmentZKMetadata("segment_to_be_skipped");
+    createTimeGuardedSegment.setCreationTime(now - TimeUnit.HOURS.toMillis(1));
+    createTimeGuardedSegment.setTimeUnit(TimeUnit.DAYS);
+    createTimeGuardedSegment.setEndTime(TimeUnit.MILLISECONDS.toDays(now) - 60);
+
+    SegmentZKMetadata toBePurgedSegment = new SegmentZKMetadata("segment_to_be_purged");
+    toBePurgedSegment.setCreationTime(-1);
+    toBePurgedSegment.setTimeUnit(TimeUnit.DAYS);
+    toBePurgedSegment.setEndTime(TimeUnit.MILLISECONDS.toDays(now) - 60);
+
+    segmentsZKMetadata.add(createTimeGuardedSegment);
+    segmentsZKMetadata.add(toBePurgedSegment);
+
+    PinotHelixResourceManager mockPinotHelixResourceManager = mock(PinotHelixResourceManager.class);
+    when(mockPinotHelixResourceManager.getRealtimeTableConfig(realtimeTableName)).thenReturn(realtimeTableConfig);
+    when(mockPinotHelixResourceManager.getSegmentsZKMetadata(realtimeTableName)).thenReturn(segmentsZKMetadata);
+
+    InstanceConfig instanceConfig = new InstanceConfig("Broker_localhost_1234");
+    instanceConfig.setHostName("localhost");
+    instanceConfig.setPort("8000");
+
+    when(mockPinotHelixResourceManager.getBrokerInstancesConfigsFor(realtimeTableName))
+        .thenReturn(Collections.singletonList(instanceConfig));
+    HelixAdmin helixAdmin = mock(HelixAdmin.class);
+    when(helixAdmin.getResourceIdealState(HELIX_CLUSTER_NAME, REALTIME_TABLE_NAME)).thenReturn(null);
+    when(mockPinotHelixResourceManager.getHelixAdmin()).thenReturn(helixAdmin);
+
+    CompletionServiceHelper mockServiceHelper = mock(CompletionServiceHelper.class);
+
+    ControllerConf controllerConf = new ControllerConf(Map.of(
+        ControllerConf.ControllerPeriodicTasksConf.SKIP_PURGING_RECENTLY_CREATED_SEGMENT_THRESHOLD_MS,
+        Duration.ofHours(24).toMillis()));
+    controllerConf.setControllerBrokerProtocol("http");
+    controllerConf.setRetentionControllerFrequencyInSeconds(0);
+    controllerConf.setDeletedSegmentsRetentionInDays(0);
+    controllerConf.setUntrackedSegmentDeletionEnabled(false);
+
+    BrokerServiceHelper brokerServiceHelper =
+        new BrokerServiceHelper(mockPinotHelixResourceManager, controllerConf, null, null);
+    brokerServiceHelper.setCompletionServiceHelper(mockServiceHelper);
+
+    // test
+    RetentionManager retentionManager =
+        new RetentionManager(mockPinotHelixResourceManager, null, controllerConf, mock(ControllerMetrics.class),
+            brokerServiceHelper);
+    retentionManager.manageRetentionForTable(realtimeTableConfig);
+
+    // Verify deleteSegments is called for segment_to_be_purged segment only.
+    verify(mockPinotHelixResourceManager, times(1))
+        .deleteSegments(eq(realtimeTableName), eq(List.of("segment_to_be_purged")));
+  }
+
+  @Test
+  public void testRetentionForOfflineTableWhenCreateTimeGuardIsDisabled() {
+    // setup
+    String offlineTableName = "myTable_OFFLINE";
+    IngestionConfig ingestionConfig = new IngestionConfig();
+    ingestionConfig.setBatchIngestionConfig(
+        new BatchIngestionConfig(null, "APPEND", "DAILY", false));
+
+    SegmentsValidationAndRetentionConfig segmentsValidationAndRetentionConfig
+        = new SegmentsValidationAndRetentionConfig();
+    segmentsValidationAndRetentionConfig.setTimeColumnName("ms");
+    segmentsValidationAndRetentionConfig.setRetentionTimeUnit("DAYS");
+    segmentsValidationAndRetentionConfig.setRetentionTimeValue("10");
+
+    TableConfig offlineTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(offlineTableName)
+        .setTimeColumnName("ms")
+        .setTimeType("MILLISECONDS")
+        .setRetentionTimeValue("10")
+        .setRetentionTimeUnit("DAYS")
+        .build();
+    offlineTableConfig.setValidationConfig(segmentsValidationAndRetentionConfig);
+
+    List<SegmentZKMetadata> segmentsZKMetadata = new ArrayList<>();
+    long today = TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis());
+
+    SegmentZKMetadata createTimeGuardedSegment = new SegmentZKMetadata("segment_to_be_skipped");
+    createTimeGuardedSegment.setCreationTime(today - 1);
+    createTimeGuardedSegment.setTimeUnit(TimeUnit.DAYS);
+    createTimeGuardedSegment.setEndTime(today - 60);
+
+    SegmentZKMetadata toBePurgedSegment = new SegmentZKMetadata("segment_to_be_purged");
+    toBePurgedSegment.setTimeUnit(TimeUnit.DAYS);
+    toBePurgedSegment.setEndTime(today - 60);
+
+    segmentsZKMetadata.add(createTimeGuardedSegment);
+    segmentsZKMetadata.add(toBePurgedSegment);
+
+    PinotHelixResourceManager mockPinotHelixResourceManager = mock(PinotHelixResourceManager.class);
+    when(mockPinotHelixResourceManager.getOfflineTableConfig(offlineTableName)).thenReturn(offlineTableConfig);
+    when(mockPinotHelixResourceManager.getSegmentsZKMetadata(offlineTableName)).thenReturn(segmentsZKMetadata);
+
+    InstanceConfig instanceConfig = new InstanceConfig("Broker_localhost_1234");
+    instanceConfig.setHostName("localhost");
+    instanceConfig.setPort("8000");
+
+    when(mockPinotHelixResourceManager.getBrokerInstancesConfigsFor(offlineTableConfig.getTableName()))
+        .thenReturn(Collections.singletonList(instanceConfig));
+
+    CompletionServiceHelper mockServiceHelper = mock(CompletionServiceHelper.class);
+
+    ControllerConf controllerConf = new ControllerConf(
+        Map.of(ControllerConf.ControllerPeriodicTasksConf.SKIP_PURGING_RECENTLY_CREATED_SEGMENT_THRESHOLD_MS, -1L));
+    controllerConf.setControllerBrokerProtocol("http");
+    controllerConf.setRetentionControllerFrequencyInSeconds(0);
+    controllerConf.setDeletedSegmentsRetentionInDays(0);
+    controllerConf.setUntrackedSegmentDeletionEnabled(false);
+
+    BrokerServiceHelper brokerServiceHelper =
+        new BrokerServiceHelper(mockPinotHelixResourceManager, controllerConf, null, null);
+    brokerServiceHelper.setCompletionServiceHelper(mockServiceHelper);
+
+    // test
+    RetentionManager retentionManager =
+        new RetentionManager(mockPinotHelixResourceManager, null, controllerConf, mock(ControllerMetrics.class),
+            brokerServiceHelper);
+    retentionManager.manageRetentionForTable(offlineTableConfig);
+
+    // Verify deleteSegments is called for segment_to_be_skipped and segment_to_be_purged segment.
+    verify(mockPinotHelixResourceManager, times(1))
+        .deleteSegments(eq(offlineTableName), eq(List.of("segment_to_be_skipped", "segment_to_be_purged")));
   }
 
   private SegmentZKMetadata createSegmentZKMetadata(String segmentName, int replicaCount, long segmentCreationTime) {

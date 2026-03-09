@@ -56,14 +56,21 @@ import org.apache.helix.model.builder.HelixConfigScopeBuilder;
 import org.apache.pinot.client.PinotConnection;
 import org.apache.pinot.client.PinotDriver;
 import org.apache.pinot.common.exception.HttpErrorStatusException;
+import org.apache.pinot.common.metadata.ZKMetadataProvider;
 import org.apache.pinot.common.metadata.segment.SegmentZKMetadata;
+import org.apache.pinot.common.metrics.ControllerGauge;
+import org.apache.pinot.common.metrics.ControllerMetrics;
+import org.apache.pinot.common.metrics.MetricValueUtils;
 import org.apache.pinot.common.response.server.TableIndexMetadataResponse;
 import org.apache.pinot.common.utils.DataSchema;
 import org.apache.pinot.common.utils.FileUploadDownloadClient;
 import org.apache.pinot.common.utils.ServiceStatus;
 import org.apache.pinot.common.utils.SimpleHttpResponse;
 import org.apache.pinot.common.utils.http.HttpClient;
+import org.apache.pinot.controller.ControllerConf;
+import org.apache.pinot.controller.helix.core.retention.RetentionManager;
 import org.apache.pinot.core.operator.query.NonScanBasedAggregationOperator;
+import org.apache.pinot.core.periodictask.PeriodicTask;
 import org.apache.pinot.segment.spi.index.ForwardIndexConfig;
 import org.apache.pinot.segment.spi.index.StandardIndexes;
 import org.apache.pinot.segment.spi.index.startree.AggregationFunctionColumnPair;
@@ -75,6 +82,7 @@ import org.apache.pinot.spi.config.table.QueryConfig;
 import org.apache.pinot.spi.config.table.StarTreeIndexConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
+import org.apache.pinot.spi.config.table.ingestion.BatchIngestionConfig;
 import org.apache.pinot.spi.config.table.ingestion.IngestionConfig;
 import org.apache.pinot.spi.config.table.ingestion.TransformConfig;
 import org.apache.pinot.spi.data.DateTimeFieldSpec;
@@ -123,6 +131,7 @@ public class OfflineClusterIntegrationTest extends BaseClusterIntegrationTestSet
   private static final int NUM_SERVERS = 1;
   private static final int NUM_SEGMENTS = 12;
   private static final String SEGMENT_UPLOAD_TEST_TABLE = "segmentUploadTestTable";
+  private static final String RETENTION_GUARD_TEST_TABLE = "retentionGuardTestTable";
 
   // For table config refresh test, make an expensive query to ensure the query won't finish in 5ms
   private static final String TEST_TIMEOUT_QUERY =
@@ -4349,5 +4358,170 @@ public class OfflineClusterIntegrationTest extends BaseClusterIntegrationTestSet
       // AvgDelay can be negative, so just verify it's a number
       assertNotNull(row.get(4), "AvgDelay should not be null");
     }
+  }
+
+  /**
+   * Verifies that {@link RetentionManager} respects the create-time guard for offline segments.
+   *
+   * <p>Four segments are uploaded to a dedicated test table and their ZK metadata is overwritten
+   * to produce four distinct cases:
+   * <ol>
+   *   <li><b>Guarded</b>: endTime beyond retention, creationTime 1 hour ago — delegate returns
+   *       {@code true}, guard fires and overrides it — must NOT be purged, counter = 1.</li>
+   *   <li><b>Purgeable</b>: endTime beyond retention, creationTime 48 hours ago — delegate returns
+   *       {@code true}, guard does not fire — must be purged.</li>
+   *   <li><b>Legacy</b>: endTime beyond retention, creationTime -1 (unset) — delegate returns
+   *       {@code true}, guard is skipped — must be purged.</li>
+   *   <li><b>Within-retention</b>: endTime within retention, creationTime 1 hour ago — delegate
+   *       returns {@code false} first, guard never runs — must NOT be purged, counter stays at 1.</li>
+   * </ol>
+   *
+   * <p>Case 4 specifically validates the new delegate-first evaluation order: the guard only fires
+   * when the delegate has already decided to purge the segment. A segment that is not purgeable
+   * per the retention strategy is not affected by the guard at all.
+   *
+   * <p>After running the retention manager, the test asserts that the guarded and within-retention
+   * segments remain, the purgeable and legacy segments are deleted, and the
+   * {@code RETENTION_MANAGER_SEGMENTS_SKIPPED_BY_CREATE_TIME} gauge equals 1.
+   */
+  @Test
+  public void testRetentionManagerCreateTimeGuard()
+      throws Exception {
+    String offlineTableName = TableNameBuilder.OFFLINE.tableNameWithType(RETENTION_GUARD_TEST_TABLE);
+
+    // Create a dedicated schema and table with 10-day retention and APPEND ingestion type
+    Schema schema = createSchema();
+    schema.setSchemaName(RETENTION_GUARD_TEST_TABLE);
+    addSchema(schema);
+
+    IngestionConfig ingestionConfig = new IngestionConfig();
+    ingestionConfig.setBatchIngestionConfig(new BatchIngestionConfig(null, "APPEND", "DAILY", false));
+
+    TableConfig tableConfig = new TableConfigBuilder(TableType.OFFLINE)
+        .setTableName(RETENTION_GUARD_TEST_TABLE)
+        .setTimeColumnName(getTimeColumnName())
+        .setRetentionTimeUnit("DAYS")
+        .setRetentionTimeValue("10")
+        .setIngestionConfig(ingestionConfig)
+        .build();
+    addTableConfig(tableConfig);
+
+    // Upload 4 segments from the pre-built test data in _tarDir
+    File[] segmentFiles = _tarDir.listFiles();
+    assertNotNull(segmentFiles);
+    assertTrue(segmentFiles.length >= 4, "Expected at least 4 pre-built segment files in _tarDir");
+
+    URI uploadUri = URI.create(getControllerRequestURLBuilder().forSegmentUpload());
+    try (FileUploadDownloadClient client = new FileUploadDownloadClient()) {
+      for (int i = 0; i < 4; i++) {
+        client.uploadSegment(uploadUri, segmentFiles[i].getName(), segmentFiles[i],
+            RETENTION_GUARD_TEST_TABLE, TableType.OFFLINE);
+      }
+    }
+
+    // Wait for all 4 segments to be registered in ZK before modifying their metadata
+    TestUtils.waitForCondition(
+        aVoid -> _helixResourceManager.getSegmentsZKMetadata(offlineTableName).size() == 4,
+        30_000L, "Timed out waiting for 4 segments to appear in ZK");
+
+    // Rewrite ZK metadata for each segment to set up the four test scenarios.
+    List<SegmentZKMetadata> segments = _helixResourceManager.getSegmentsZKMetadata(offlineTableName);
+    long nowInMillis = System.currentTimeMillis();
+
+    long endTime60DaysAgo = nowInMillis - TimeUnit.DAYS.toMillis(60);
+
+    // Segment 0: endTime beyond retention, creationTime 1 hour ago.
+    // Delegate returns true (expired) → guard fires → NOT purgeable. Counter = 1.
+    SegmentZKMetadata guardedSegment = segments.get(0);
+    guardedSegment.setTimeUnit(TimeUnit.MILLISECONDS);
+    guardedSegment.setEndTime(endTime60DaysAgo);
+    guardedSegment.setCreationTime(nowInMillis - Duration.ofHours(1).toMillis());
+    ZKMetadataProvider.setSegmentZKMetadata(_helixResourceManager.getPropertyStore(), offlineTableName,
+        guardedSegment);
+
+    // Segment 1: endTime beyond retention, creationTime 48 hours ago.
+    // Delegate returns true (expired) → guard does not fire (outside window) → purgeable.
+    SegmentZKMetadata purgedSegment = segments.get(1);
+    purgedSegment.setTimeUnit(TimeUnit.MILLISECONDS);
+    purgedSegment.setEndTime(endTime60DaysAgo);
+    purgedSegment.setCreationTime(nowInMillis - Duration.ofHours(48).toMillis());
+    ZKMetadataProvider.setSegmentZKMetadata(_helixResourceManager.getPropertyStore(), offlineTableName,
+        purgedSegment);
+
+    // Segment 2: endTime beyond retention, creationTime = -1 (legacy/unset).
+    // Delegate returns true (expired) → guard is skipped (creationTime == -1) → purgeable.
+    SegmentZKMetadata legacySegment = segments.get(2);
+    legacySegment.setTimeUnit(TimeUnit.MILLISECONDS);
+    legacySegment.setEndTime(endTime60DaysAgo);
+    legacySegment.setCreationTime(-1L);
+    ZKMetadataProvider.setSegmentZKMetadata(_helixResourceManager.getPropertyStore(), offlineTableName,
+        legacySegment);
+
+    // Segment 3: endTime within retention (5 days ago), creationTime 1 hour ago.
+    // Delegate returns false (within 10-day retention) → guard never runs → NOT purgeable.
+    // Counter stays at 1, demonstrating that the guard only fires when the delegate already
+    // decided to purge the segment.
+    SegmentZKMetadata withinRetentionSegment = segments.get(3);
+    withinRetentionSegment.setTimeUnit(TimeUnit.MILLISECONDS);
+    withinRetentionSegment.setEndTime(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(5));
+    withinRetentionSegment.setCreationTime(System.currentTimeMillis() - Duration.ofHours(1).toMillis());
+    ZKMetadataProvider.setSegmentZKMetadata(_helixResourceManager.getPropertyStore(), offlineTableName,
+        withinRetentionSegment);
+
+    // Build a RetentionManager with the 24-hour create-time guard enabled and invoke its retention
+    // logic directly via manageRetentionForTable. This bypasses the periodic-task machinery
+    // (including the isLeaderForTable filter in runTask) so the test is not sensitive to whether
+    // the LeadControllerManager has processed the leadership assignment for this newly created table.
+    ControllerConf retentionConf = new ControllerConf(Map.of(
+        ControllerConf.ControllerPeriodicTasksConf.SKIP_PURGING_RECENTLY_CREATED_SEGMENT_THRESHOLD_MS,
+        Duration.ofHours(24).toMillis()));
+    retentionConf.setUntrackedSegmentDeletionEnabled(false);
+
+    RetentionManager retentionManager = new RetentionManager(
+        _helixResourceManager,
+        _controllerStarter.getLeadControllerManager(),
+        retentionConf,
+        ControllerMetrics.get(),
+        null /* BrokerServiceHelper — only needed for hybrid tables */);
+
+    Properties taskProperties = new Properties();
+    taskProperties.put(PeriodicTask.PROPERTY_KEY_TABLE_NAME, offlineTableName);
+    retentionManager.start();
+    retentionManager.run(taskProperties);
+
+    // The guard fires only when the delegate has already decided to purge the segment.
+    // Only segment 0 (expired + recently created) was actively saved by the guard; segment 3
+    // (within retention) was left untouched by the delegate before the guard even ran.
+    assertEquals(
+        MetricValueUtils.getTableGaugeValue(ControllerMetrics.get(), offlineTableName,
+            ControllerGauge.NUM_SEGMENTS_SKIPPED_PURGE_BY_CREATE_TIME),
+        1L, "Guard should fire only for the segment that was expired AND within the guard window");
+
+    TestUtils.waitForCondition(
+        aVoid -> _helixResourceManager.getSegmentsZKMetadata(offlineTableName).size() < 4,
+        30_000L, "Timed out waiting for segments are deleted by RetentionManager");
+
+    List<SegmentZKMetadata> remaining = _helixResourceManager.getSegmentsZKMetadata(offlineTableName);
+    assertEquals(remaining.size(), 2,
+        "Expected 2 remaining segments: the guarded segment and the within-retention segment");
+    List<String> remainingNames = remaining.stream()
+        .map(SegmentZKMetadata::getSegmentName)
+        .collect(java.util.stream.Collectors.toList());
+
+    // Guarded: expired but recently created — guard fired, NOT purged
+    assertTrue(remainingNames.contains(guardedSegment.getSegmentName()),
+        "Expired + recently-created segment must be protected by the create-time guard");
+    // Within retention: not yet expired — delegate returned false, guard never ran
+    assertTrue(remainingNames.contains(withinRetentionSegment.getSegmentName()),
+        "Within-retention segment must remain (delegate returned false, guard did not fire)");
+    // Purgeable: expired, old creation time — neither guard nor delegate saved it
+    assertFalse(remainingNames.contains(purgedSegment.getSegmentName()),
+        "Expired segment outside the guard window must be purged");
+    // Legacy: expired, creationTime unset — guard skipped, delegate decided to purge
+    assertFalse(remainingNames.contains(legacySegment.getSegmentName()),
+        "Expired segment with unset creationTime must be purged");
+
+    dropOfflineTable(RETENTION_GUARD_TEST_TABLE);
+    deleteSchema(RETENTION_GUARD_TEST_TABLE);
   }
 }

@@ -196,6 +196,9 @@ public enum ControllerGauge implements AbstractMetrics.Gauge {
   // Metric used to track errors during the periodic table retention management
   RETENTION_MANAGER_ERROR("retentionManagerError", false),
 
+  // Metric used to track skipped segments during the periodic table retention management
+  NUM_SEGMENTS_SKIPPED_PURGE_BY_CREATE_TIME("numSegmentsSkippedPurgeByCreateTime", false),
+
   // Gauge to reflect whether pauseless is enabled or not
   PAUSELESS_CONSUMPTION_ENABLED("pauselessConsumptionEnabled", false),
 

@@ -47,6 +47,7 @@ import org.apache.pinot.controller.ControllerConf;
 import org.apache.pinot.controller.LeadControllerManager;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
 import org.apache.pinot.controller.helix.core.periodictask.ControllerPeriodicTask;
+import org.apache.pinot.controller.helix.core.retention.strategy.CreateTimeGuardRetentionStrategy;
 import org.apache.pinot.controller.helix.core.retention.strategy.RetentionStrategy;
 import org.apache.pinot.controller.helix.core.retention.strategy.TimeRetentionStrategy;
 import org.apache.pinot.controller.util.BrokerServiceHelper;
@@ -83,6 +84,7 @@ public class RetentionManager extends ControllerPeriodicTask<Void> {
   private static final Logger LOGGER = LoggerFactory.getLogger(RetentionManager.class);
   private final boolean _isHybridTableRetentionStrategyEnabled;
   private final BrokerServiceHelper _brokerServiceHelper;
+  private final long _segmentRecentCreationGuardMs;
 
   public RetentionManager(PinotHelixResourceManager pinotHelixResourceManager,
       LeadControllerManager leadControllerManager, ControllerConf config, ControllerMetrics controllerMetrics,
@@ -93,7 +95,9 @@ public class RetentionManager extends ControllerPeriodicTask<Void> {
     _untrackedSegmentDeletionEnabled = config.getUntrackedSegmentDeletionEnabled();
     _isHybridTableRetentionStrategyEnabled = config.isHybridTableRetentionStrategyEnabled();
     _brokerServiceHelper = brokerServiceHelper;
-    LOGGER.info("Starting RetentionManager with runFrequencyInSeconds: {}", getIntervalInSeconds());
+    _segmentRecentCreationGuardMs = config.getSegmentRecentGuardCreateTimeMs();
+    LOGGER.info("Starting RetentionManager with runFrequencyInSeconds: {}, segmentRecentCreationGuardMs: {}",
+        getIntervalInSeconds(), _segmentRecentCreationGuardMs);
   }
 
   @Override
@@ -120,7 +124,8 @@ public class RetentionManager extends ControllerPeriodicTask<Void> {
     _pinotHelixResourceManager.getSegmentDeletionManager().removeAgedDeletedSegments(_leadControllerManager);
   }
 
-  private void manageRetentionForTable(TableConfig tableConfig) {
+  @VisibleForTesting
+  void manageRetentionForTable(TableConfig tableConfig) {
     String tableNameWithType = tableConfig.getTableName();
     LOGGER.info("Start managing retention for table: {}", tableNameWithType);
 
@@ -137,10 +142,15 @@ public class RetentionManager extends ControllerPeriodicTask<Void> {
         validationConfig.getUntrackedSegmentsDeletionBatchSize() != null ? Integer.parseInt(
             validationConfig.getUntrackedSegmentsDeletionBatchSize()) : DEFAULT_UNTRACKED_SEGMENTS_DELETION_BATCH_SIZE;
 
-    RetentionStrategy retentionStrategy;
+    CreateTimeGuardRetentionStrategy createTimeGuardRetentionStrategy;
     try {
-      retentionStrategy = new TimeRetentionStrategy(TimeUnit.valueOf(retentionTimeUnit.toUpperCase()),
+      RetentionStrategy retentionStrategy = new TimeRetentionStrategy(TimeUnit.valueOf(retentionTimeUnit.toUpperCase()),
           Long.parseLong(retentionTimeValue));
+      createTimeGuardRetentionStrategy = new CreateTimeGuardRetentionStrategy(
+          retentionStrategy,
+          _segmentRecentCreationGuardMs,
+          System::currentTimeMillis
+      );
     } catch (Exception e) {
       LOGGER.warn("Invalid retention time: {} {} for table: {}, skip", retentionTimeUnit, retentionTimeValue,
           tableNameWithType);
@@ -149,7 +159,8 @@ public class RetentionManager extends ControllerPeriodicTask<Void> {
 
     // Scan all segment ZK metadata and purge segments if necessary
     if (TableNameBuilder.isOfflineTableResource(tableNameWithType)) {
-      manageRetentionForOfflineTable(tableNameWithType, retentionStrategy, untrackedSegmentsDeletionBatchSize);
+      manageRetentionForOfflineTable(tableNameWithType, createTimeGuardRetentionStrategy,
+          untrackedSegmentsDeletionBatchSize);
     } else {
       String rawTableName = TableNameBuilder.extractRawTableName(tableNameWithType);
       TableConfig offlineTableConfig = _pinotHelixResourceManager.getOfflineTableConfig(rawTableName);
@@ -158,9 +169,19 @@ public class RetentionManager extends ControllerPeriodicTask<Void> {
         // TODO: handle the orphan segment deletion for hybrid table
         manageRetentionForHybridTable(tableConfig, offlineTableConfig);
       } else {
-        manageRetentionForRealtimeTable(tableNameWithType, retentionStrategy, untrackedSegmentsDeletionBatchSize);
+        manageRetentionForRealtimeTable(tableNameWithType, createTimeGuardRetentionStrategy,
+            untrackedSegmentsDeletionBatchSize);
       }
     }
+
+    if (!createTimeGuardRetentionStrategy.getSegmentsSkippedPurgeByCreateTime().isEmpty()) {
+      LOGGER.warn("Skipped deleting {} segments for table: {} as they are recently created. Segment names: {}",
+          createTimeGuardRetentionStrategy.getSegmentsSkippedPurgeByCreateTime().size(), tableNameWithType,
+          createTimeGuardRetentionStrategy.getSegmentsSkippedPurgeByCreateTime());
+    }
+    _controllerMetrics.setOrUpdateTableGauge(tableNameWithType,
+        ControllerGauge.NUM_SEGMENTS_SKIPPED_PURGE_BY_CREATE_TIME,
+        createTimeGuardRetentionStrategy.getSegmentsSkippedPurgeByCreateTime().size());
   }
 
   private void manageRetentionForOfflineTable(String offlineTableName, RetentionStrategy retentionStrategy,
