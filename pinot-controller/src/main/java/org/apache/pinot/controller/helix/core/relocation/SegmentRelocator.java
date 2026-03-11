@@ -265,6 +265,13 @@ public class SegmentRelocator extends ControllerPeriodicTask<Void> {
     }
   }
 
+  @Override
+  protected void nonLeaderCleanup(List<String> tableNamesWithType) {
+    for (String tableNameWithType : tableNamesWithType) {
+      _controllerMetrics.removeTableGauge(tableNameWithType, ControllerGauge.SEGMENT_RELOCATION_FAILURE);
+    }
+  }
+
   private void emitTableRelocationErrorMetrics(String tableNameWithType, boolean failure) {
     _controllerMetrics.setValueOfTableGauge(
         tableNameWithType, ControllerGauge.SEGMENT_RELOCATION_FAILURE, failure ? 1 : 0);

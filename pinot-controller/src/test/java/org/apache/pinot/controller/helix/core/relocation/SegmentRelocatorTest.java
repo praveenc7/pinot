@@ -33,12 +33,15 @@ import org.apache.helix.ClusterMessagingService;
 import org.apache.helix.Criteria;
 import org.apache.helix.zookeeper.datamodel.ZNRecord;
 import org.apache.pinot.common.messages.SegmentReloadMessage;
+import org.apache.pinot.common.metrics.ControllerGauge;
 import org.apache.pinot.common.metrics.ControllerMetrics;
+import org.apache.pinot.common.metrics.MetricValueUtils;
 import org.apache.pinot.controller.ControllerConf;
 import org.apache.pinot.controller.LeadControllerManager;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
 import org.apache.pinot.controller.helix.core.rebalance.TableRebalanceManager;
 import org.apache.pinot.controller.util.TableTierReader;
+import org.apache.pinot.spi.metrics.PinotMetricUtils;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.util.TestUtils;
 import org.mockito.ArgumentCaptor;
@@ -49,6 +52,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
@@ -204,6 +208,70 @@ public class SegmentRelocatorTest {
     } finally {
       runner.shutdownNow();
     }
+  }
+
+  private static SegmentRelocator createSegmentRelocator(ControllerMetrics controllerMetrics) {
+    ControllerConf conf = mock(ControllerConf.class);
+    when(conf.isSegmentRelocatorRebalanceTablesSequentially()).thenReturn(false);
+    return new SegmentRelocator(mock(TableRebalanceManager.class), mock(PinotHelixResourceManager.class),
+        mock(LeadControllerManager.class), conf, controllerMetrics, mock(ExecutorService.class),
+        mock(HttpClientConnectionManager.class));
+  }
+
+  @Test
+  public void testNonLeaderCleanupRemovesGaugeAfterFailure() {
+    // Simulate: this controller previously failed relocation for a table (gauge = 1),
+    // then lost leadership. The gauge must be removed so stale alerts do not fire.
+    ControllerMetrics controllerMetrics = new ControllerMetrics(PinotMetricUtils.getPinotMetricsRegistry());
+    SegmentRelocator relocator = createSegmentRelocator(controllerMetrics);
+    String tableNameWithType = "testTable_nonLeaderCleanupAfterFailure_OFFLINE";
+
+    controllerMetrics.setValueOfTableGauge(tableNameWithType, ControllerGauge.SEGMENT_RELOCATION_FAILURE, 1);
+    assertTrue(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.SEGMENT_RELOCATION_FAILURE), "Gauge should exist before cleanup");
+    assertEquals(MetricValueUtils.getTableGaugeValue(controllerMetrics, tableNameWithType,
+        ControllerGauge.SEGMENT_RELOCATION_FAILURE), 1L);
+
+    relocator.nonLeaderCleanup(List.of(tableNameWithType));
+
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.SEGMENT_RELOCATION_FAILURE),
+        "Gauge should be removed after losing leadership to prevent stale alerts");
+  }
+
+  @Test
+  public void testNonLeaderCleanupOnlyRemovesSpecifiedTables() {
+    // Gauges for tables that this controller is still the leader for must not be removed.
+    ControllerMetrics controllerMetrics = new ControllerMetrics(PinotMetricUtils.getPinotMetricsRegistry());
+    SegmentRelocator relocator = createSegmentRelocator(controllerMetrics);
+    String lostLeadershipTable = "testTable_lostLeadership_OFFLINE";
+    String retainedLeadershipTable = "testTable_retainedLeadership_OFFLINE";
+
+    controllerMetrics.setValueOfTableGauge(lostLeadershipTable, ControllerGauge.SEGMENT_RELOCATION_FAILURE, 1);
+    controllerMetrics.setValueOfTableGauge(retainedLeadershipTable, ControllerGauge.SEGMENT_RELOCATION_FAILURE, 1);
+
+    relocator.nonLeaderCleanup(List.of(lostLeadershipTable));
+
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, lostLeadershipTable,
+        ControllerGauge.SEGMENT_RELOCATION_FAILURE),
+        "Gauge for table that lost leadership should be removed");
+    assertTrue(MetricValueUtils.tableGaugeExists(controllerMetrics, retainedLeadershipTable,
+        ControllerGauge.SEGMENT_RELOCATION_FAILURE),
+        "Gauge for table still under leadership should be retained");
+  }
+
+  @Test
+  public void testNonLeaderCleanupWithNoGaugeIsNoop() {
+    // Calling nonLeaderCleanup for a table that never had a gauge emitted should not throw.
+    ControllerMetrics controllerMetrics = new ControllerMetrics(PinotMetricUtils.getPinotMetricsRegistry());
+    SegmentRelocator relocator = createSegmentRelocator(controllerMetrics);
+    String tableNameWithType = "testTable_noGauge_OFFLINE";
+
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.SEGMENT_RELOCATION_FAILURE), "Gauge should not exist before cleanup");
+    relocator.nonLeaderCleanup(List.of(tableNameWithType));
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.SEGMENT_RELOCATION_FAILURE), "Gauge should still not exist after cleanup");
   }
 
   private static ZNRecord createSegmentMetadataZNRecord(String segmentName, String tierName) {
