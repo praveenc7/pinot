@@ -77,6 +77,8 @@ public interface InstanceDataManagerConfig {
 
   String getSegmentPeerDownloadScheme();
 
+  boolean isPeerDownloadFallbackToDeepStoreEnabled();
+
   PinotConfiguration getUpsertConfig();
 
   PinotConfiguration getDedupConfig();

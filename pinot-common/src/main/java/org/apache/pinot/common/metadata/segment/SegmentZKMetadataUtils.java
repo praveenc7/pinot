@@ -47,7 +47,7 @@ public class SegmentZKMetadataUtils {
       String downloadUrl, @Nullable String crypterName, long segmentSizeInBytes) {
     SegmentZKMetadata segmentZKMetadata = new SegmentZKMetadata(segmentMetadata.getName());
     updateSegmentZKMetadata(tableNameWithType, segmentZKMetadata, segmentMetadata, downloadUrl, crypterName,
-        segmentSizeInBytes, null, true);
+        segmentSizeInBytes, null, null, true);
     return segmentZKMetadata;
   }
 
@@ -57,7 +57,7 @@ public class SegmentZKMetadataUtils {
   public static void refreshSegmentZKMetadata(String tableNameWithType, SegmentZKMetadata segmentZKMetadata,
       SegmentMetadata segmentMetadata, String downloadUrl, @Nullable String crypterName, long segmentSizeInBytes) {
     updateSegmentZKMetadata(tableNameWithType, segmentZKMetadata, segmentMetadata, downloadUrl, crypterName,
-        segmentSizeInBytes, null, false);
+        segmentSizeInBytes, null, null, false);
   }
 
   /**
@@ -66,7 +66,7 @@ public class SegmentZKMetadataUtils {
   public static void updateCommittingSegmentZKMetadata(String realtimeTableName, SegmentZKMetadata segmentZKMetadata,
       SegmentMetadata segmentMetadata, String downloadUrl, long segmentSizeInBytes, String endOffset) {
     updateSegmentZKMetadata(realtimeTableName, segmentZKMetadata, segmentMetadata, downloadUrl, null,
-        segmentSizeInBytes, endOffset, false);
+        segmentSizeInBytes, endOffset, null, false);
   }
 
   public static void updateSegmentZKTimeInterval(SegmentZKMetadata segmentZKMetadata,
@@ -86,7 +86,7 @@ public class SegmentZKMetadataUtils {
 
   private static void updateSegmentZKMetadata(String tableNameWithType, SegmentZKMetadata segmentZKMetadata,
       SegmentMetadata segmentMetadata, String downloadUrl, @Nullable String crypterName, long segmentSizeInBytes,
-      @Nullable String endOffset, boolean newSegment) {
+      @Nullable String endOffset, @Nullable String sourceServer, boolean newSegment) {
     String segmentName = segmentZKMetadata.getSegmentName();
 
     if (endOffset != null) {
@@ -163,6 +163,9 @@ public class SegmentZKMetadataUtils {
     segmentZKMetadata.setDownloadUrl(downloadUrl);
     segmentZKMetadata.setCrypterName(crypterName);
     segmentZKMetadata.setSizeInBytes(segmentSizeInBytes);
+    if (sourceServer != null) {
+      segmentZKMetadata.setSourceServer(sourceServer);
+    }
 
     // Set partition metadata
     Map<String, ColumnPartitionMetadata> columnPartitionMap = new HashMap<>();

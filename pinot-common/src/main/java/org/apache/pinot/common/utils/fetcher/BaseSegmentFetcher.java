@@ -43,12 +43,18 @@ public abstract class BaseSegmentFetcher implements SegmentFetcher {
   public static final int DEFAULT_RETRY_COUNT = 3;
   public static final int DEFAULT_RETRY_WAIT_MS = 100;
   public static final double DEFAULT_RETRY_DELAY_SCALE_FACTOR = 5;
+  public static final String PEER_RETRY_COUNT_CONFIG_KEY = "peer.retry.count";
+  public static final String PEER_RETRY_WAIT_MS_CONFIG_KEY = "peer.retry.wait.ms";
+  public static final int DEFAULT_PEER_RETRY_COUNT = 5;
+  public static final long DEFAULT_PEER_RETRY_WAIT_MS = 30_000;
 
   protected final Logger _logger = LoggerFactory.getLogger(getClass().getSimpleName());
 
   protected int _retryCount;
   protected int _retryWaitMs;
   protected double _retryDelayScaleFactor;
+  protected int _peerRetryCount;
+  protected long _peerRetryWaitMs;
   protected AuthProvider _authProvider;
 
   @Override
@@ -56,6 +62,8 @@ public abstract class BaseSegmentFetcher implements SegmentFetcher {
     _retryCount = config.getProperty(RETRY_COUNT_CONFIG_KEY, DEFAULT_RETRY_COUNT);
     _retryWaitMs = config.getProperty(RETRY_WAIT_MS_CONFIG_KEY, DEFAULT_RETRY_WAIT_MS);
     _retryDelayScaleFactor = config.getProperty(RETRY_DELAY_SCALE_FACTOR_CONFIG_KEY, DEFAULT_RETRY_DELAY_SCALE_FACTOR);
+    _peerRetryCount = config.getProperty(PEER_RETRY_COUNT_CONFIG_KEY, DEFAULT_PEER_RETRY_COUNT);
+    _peerRetryWaitMs = config.getProperty(PEER_RETRY_WAIT_MS_CONFIG_KEY, DEFAULT_PEER_RETRY_WAIT_MS);
     _authProvider = AuthProviderUtils.extractAuthProvider(config, CommonConstants.KEY_OF_AUTH);
     doInit(config);
     _logger.info("Initialized with retryCount: {}, retryWaitMs: {}, retryDelayScaleFactor: {}", _retryCount,
@@ -139,6 +147,33 @@ public abstract class BaseSegmentFetcher implements SegmentFetcher {
       _logger.info("Download segment {} successfully with {} attempts.", segmentName, attempt + 1);
     } catch (Exception e) {
       _logger.error("Failed to download segment {} after retries.", segmentName, e);
+      throw e;
+    }
+  }
+
+  /**
+   * Fetches a segment from peers with fixed-delay retry, for peer-to-peer downloads.
+   * Uses separate retry configuration to avoid interfering with the exponential backoff used for deep store downloads.
+   */
+  @Override
+  public void fetchSegmentToLocalWithPeerRetry(String segmentName, Supplier<List<URI>> uriSupplier, File dest)
+      throws Exception {
+    try {
+      int attempt = RetryPolicies.fixedDelayRetryPolicy(_peerRetryCount, _peerRetryWaitMs).attempt(() -> {
+        List<URI> suppliedURIs = uriSupplier.get();
+        for (URI uri : suppliedURIs) {
+          try {
+            fetchSegmentToLocalWithoutRetry(uri, dest);
+            return true;
+          } catch (Exception e) {
+            _logger.warn("Download segment {} from peer {} failed.", segmentName, uri, e);
+          }
+        }
+        return false;
+      });
+      _logger.info("Download segment {} from peer successfully with {} attempts.", segmentName, attempt + 1);
+    } catch (Exception e) {
+      _logger.error("Failed to download segment {} from peers after {} retries.", segmentName, _peerRetryCount, e);
       throw e;
     }
   }

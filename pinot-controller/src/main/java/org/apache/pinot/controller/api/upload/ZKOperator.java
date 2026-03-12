@@ -77,8 +77,8 @@ public class ZKOperator {
   public void completeSegmentOperations(TableConfig tableConfig, SegmentMetadata segmentMetadata,
       FileUploadType uploadType, @Nullable URI finalSegmentLocationURI, File segmentFile,
       @Nullable String sourceDownloadURIStr, String segmentDownloadURIStr, @Nullable String crypterName,
-      long segmentSizeInBytes, boolean enableParallelPushProtection, boolean allowRefresh, HttpHeaders headers)
-      throws Exception {
+      long segmentSizeInBytes, boolean enableParallelPushProtection, boolean allowRefresh,
+      boolean enablePeerDownload, HttpHeaders headers) throws Exception {
     String tableNameWithType = tableConfig.getTableName();
     String segmentName = segmentMetadata.getName();
     boolean refreshOnly =
@@ -105,7 +105,7 @@ public class ZKOperator {
       LOGGER.info("Adding new segment: {} to table: {}", segmentName, tableNameWithType);
       processNewSegment(tableConfig, segmentMetadata, uploadType, finalSegmentLocationURI, segmentFile,
           sourceDownloadURIStr, segmentDownloadURIStr, crypterName, segmentSizeInBytes, enableParallelPushProtection,
-          headers);
+          enablePeerDownload, headers);
     } else {
       // Refresh an existing segment
       if (!allowRefresh) {
@@ -256,11 +256,15 @@ public class ZKOperator {
     }
   }
 
+  // TODO: peer download (sourceServer) is not supported for segment refresh because the refreshed segment
+  // is always fetched from deep store; enablePeerDownload only applies to new segment uploads via
+  // processNewSegment. Supporting peer download for refresh would require a separate design and implementation.
   private void processExistingSegment(TableConfig tableConfig, SegmentMetadata segmentMetadata,
       FileUploadType uploadType, ZNRecord existingSegmentMetadataZNRecord, @Nullable URI finalSegmentLocationURI,
       File segmentFile, @Nullable String sourceDownloadURIStr, String segmentDownloadURIStr,
       @Nullable String crypterName, long segmentSizeInBytes, boolean enableParallelPushProtection, HttpHeaders headers)
       throws Exception {
+
     String tableNameWithType = tableConfig.getTableName();
     String segmentName = segmentMetadata.getName();
     int expectedVersion = existingSegmentMetadataZNRecord.getVersion();
@@ -427,7 +431,7 @@ public class ZKOperator {
   private void processNewSegment(TableConfig tableConfig, SegmentMetadata segmentMetadata, FileUploadType uploadType,
       @Nullable URI finalSegmentLocationURI, File segmentFile, @Nullable String sourceDownloadURIStr,
       String segmentDownloadURIStr, @Nullable String crypterName, long segmentSizeInBytes,
-      boolean enableParallelPushProtection, HttpHeaders headers)
+      boolean enableParallelPushProtection, boolean enablePeerDownload, HttpHeaders headers)
       throws Exception {
     String tableNameWithType = tableConfig.getTableName();
     String segmentName = segmentMetadata.getName();
@@ -445,7 +449,7 @@ public class ZKOperator {
         finalSegmentLocationURI, enableParallelPushProtection, segmentUploadStartTime);
 
     try {
-      _pinotHelixResourceManager.assignSegment(tableConfig, segmentZKMetadata);
+      _pinotHelixResourceManager.assignSegment(tableConfig, segmentZKMetadata, enablePeerDownload);
     } catch (Exception e) {
       // assignTableSegment removes the zk entry.
       // Call deleteSegment to remove the segment from permanent location if needed.
@@ -456,7 +460,18 @@ public class ZKOperator {
     }
 
     if (enableParallelPushProtection) {
+      // releaseParallelPushLock writes the full segmentZKMetadata to ZK (including sourceServer if set)
       releaseParallelPushLock(tableNameWithType, segmentZKMetadata, segmentUploadStartTime);
+    } else if (enablePeerDownload && segmentZKMetadata.getSourceServer() != null) {
+      // No parallel push lock release to piggyback on — persist sourceServer explicitly.
+      // expectedVersion is 0: ZK record was created by assignSegment and no subsequent writes have occurred.
+      if (_pinotHelixResourceManager.updateZkMetadata(tableNameWithType, segmentZKMetadata, 0)) {
+        LOGGER.info("Set sourceServer: {} for segment: {} of table: {}",
+            segmentZKMetadata.getSourceServer(), segmentName, tableNameWithType);
+      } else {
+        LOGGER.warn("Failed to persist sourceServer for segment: {} of table: {}, servers will fall back to deep store",
+            segmentName, tableNameWithType);
+      }
     }
   }
 

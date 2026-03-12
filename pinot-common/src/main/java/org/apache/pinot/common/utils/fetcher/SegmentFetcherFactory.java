@@ -178,19 +178,17 @@ public class SegmentFetcherFactory {
   }
 
   public static void fetchAndDecryptSegmentToLocal(String segmentName, String scheme, Supplier<List<URI>> uriSupplier,
-      File dest, @Nullable String crypterName)
+      File dest, @Nullable String crypterName, boolean usePeerRetry)
       throws Exception {
     SegmentFetcher segmentFetcher = getSegmentFetcher(scheme);
-    if (crypterName == null) {
-      segmentFetcher.fetchSegmentToLocal(segmentName, uriSupplier, dest);
+    File downloadDest = crypterName != null ? new File(dest.getPath() + ENCODED_SUFFIX) : dest;
+    if (usePeerRetry) {
+      segmentFetcher.fetchSegmentToLocalWithPeerRetry(segmentName, uriSupplier, downloadDest);
     } else {
-      // download
-      File tempDownloadedFile = new File(dest.getPath() + ENCODED_SUFFIX);
-      segmentFetcher.fetchSegmentToLocal(segmentName, uriSupplier, tempDownloadedFile);
-
-      // decrypt
-      PinotCrypter crypter = PinotCrypterFactory.create(crypterName);
-      crypter.decrypt(tempDownloadedFile, dest);
+      segmentFetcher.fetchSegmentToLocal(segmentName, uriSupplier, downloadDest);
+    }
+    if (crypterName != null) {
+      PinotCrypterFactory.create(crypterName).decrypt(downloadDest, dest);
     }
   }
 }

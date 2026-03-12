@@ -640,6 +640,71 @@ public class BaseTableDataManagerTest {
     }
   }
 
+  /**
+   * Tests that SEGMENT_DOWNLOAD_FROM_PEERS_FAILURES metric is emitted inside downloadSegmentFromPeers
+   * when peer download fails. With peer.retry.count=0 the retry policy exhausts immediately without
+   * making any network calls, so no HTTP server or Helix setup is needed.
+   */
+  @Test
+  public void testDownloadFromPeersEmitsFailureMetricOnRetryExhaustion()
+      throws Exception {
+    // Configure segment fetcher with 0 peer retries so it fails immediately
+    Map<String, Object> properties = new HashMap<>();
+    properties.put(BaseSegmentFetcher.PEER_RETRY_COUNT_CONFIG_KEY, 0);
+    properties.put(BaseSegmentFetcher.PEER_RETRY_WAIT_MS_CONFIG_KEY, 0);
+    SegmentFetcherFactory.init(new PinotConfiguration(properties));
+
+    // Create a table config with peer download scheme enabled
+    org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig validationConfig =
+        new org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig();
+    validationConfig.setPeerSegmentDownloadScheme(org.apache.pinot.spi.utils.CommonConstants.HTTP_PROTOCOL);
+    TableConfig peerTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).build();
+    peerTableConfig.setValidationConfig(validationConfig);
+
+    OfflineTableDataManager tableDataManager = createTableManagerWithConfig(peerTableConfig);
+
+    // Use a real download URL so downloadSegment doesn't fail before reaching peer logic,
+    // but set sourceServer so shouldAttemptPeerToPeerDownload() returns true and peer path is taken.
+    SegmentZKMetadata zkMetadata = new SegmentZKMetadata(SEGMENT_NAME);
+    zkMetadata.setDownloadUrl("http://unreachable-placeholder/segment");
+    zkMetadata.setSourceServer("Server_otherHost_9000");
+
+    // Capture the ServerMetrics mock before calling download
+    ServerMetrics serverMetrics = ServerMetrics.get();
+    org.mockito.Mockito.reset(serverMetrics);
+
+    try {
+      tableDataManager.downloadSegment(zkMetadata);
+      fail("Expected peer download to fail");
+    } catch (Exception e) {
+      // expected — peer retries exhausted
+    }
+
+    // Verify SEGMENT_DOWNLOAD_FROM_PEERS_FAILURES was emitted inside downloadSegmentFromPeers
+    org.mockito.Mockito.verify(serverMetrics).addMeteredTableValue(
+        org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
+        org.mockito.Mockito.eq(org.apache.pinot.common.metrics.ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_FAILURES),
+        org.mockito.Mockito.eq(1L));
+    // And SEGMENT_DOWNLOAD_FROM_PEERS_SUCCESS must NOT have been emitted
+    org.mockito.Mockito.verify(serverMetrics, org.mockito.Mockito.never()).addMeteredTableValue(
+        org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
+        org.mockito.Mockito.eq(org.apache.pinot.common.metrics.ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_SUCCESS),
+        org.mockito.Mockito.anyLong());
+
+    // Restore default segment fetcher config so other tests are not affected
+    initSegmentFetcher();
+  }
+
+  private static OfflineTableDataManager createTableManagerWithConfig(TableConfig tableConfig) {
+    InstanceDataManagerConfig config = createDefaultInstanceDataManagerConfig();
+    when(config.getInstanceId()).thenReturn("Server_localhost_7050");
+    OfflineTableDataManager tableDataManager = new OfflineTableDataManager();
+    tableDataManager.init(config, mock(HelixManager.class), new SegmentLocks(), tableConfig, SCHEMA,
+        new SegmentReloadSemaphore(1), Executors.newSingleThreadExecutor(), null, null,
+        SEGMENT_OPERATIONS_THROTTLER, null);
+    return tableDataManager;
+  }
+
   // Has to be public class for the class loader to work.
   public static class FakePinotCrypter implements PinotCrypter {
     private File _origFile;

@@ -142,7 +142,7 @@ public abstract class BaseTaskExecutor implements PinotTaskExecutor {
                   segmentName, peerDownloadScheme);
           Collections.shuffle(uris);
           return uris;
-        }, tarredSegmentFile, crypterName);
+        }, tarredSegmentFile, crypterName, false);
         // untar the segment file
         indexDir = TarCompressionUtils.untar(tarredSegmentFile, segmentDir).get(0);
       } else {

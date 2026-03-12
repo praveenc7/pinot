@@ -134,6 +134,9 @@ public abstract class BaseTableDataManager implements TableDataManager {
   protected AuthProvider _authProvider;
   @Nullable
   protected String _peerDownloadScheme;
+  private boolean _peerDownloadFallbackToDeepStore;
+
+
   protected long _streamSegmentDownloadUntarRateLimitBytesPerSec;
   protected boolean _isStreamSegmentDownloadUntar;
   @Nullable
@@ -217,6 +220,7 @@ public abstract class BaseTableDataManager implements TableDataManager {
               _peerDownloadScheme), "Unsupported peer download scheme: %s for table: %s", _peerDownloadScheme,
           _tableNameWithType);
     }
+    _peerDownloadFallbackToDeepStore = instanceDataManagerConfig.isPeerDownloadFallbackToDeepStoreEnabled();
 
     _streamSegmentDownloadUntarRateLimitBytesPerSec =
         instanceDataManagerConfig.getStreamSegmentDownloadUntarRateLimit();
@@ -937,10 +941,36 @@ public abstract class BaseTableDataManager implements TableDataManager {
     String downloadUrl = zkMetadata.getDownloadUrl();
     Preconditions.checkState(downloadUrl != null,
         "Failed to find download URL in ZK metadata for segment: %s of table: %s", segmentName, _tableNameWithType);
+    // Check if peer-to-peer download should be attempted based on sourceServer
+    String sourceServer = zkMetadata.getSourceServer();
+    boolean shouldAttemptPeerDownload = shouldAttemptPeerToPeerDownload(sourceServer);
+    _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_TOTAL, 1);
     try {
-      if (!CommonConstants.Segment.METADATA_URI_FOR_PEER_DOWNLOAD.equals(downloadUrl)) {
+      if (shouldAttemptPeerDownload) {
+        // Peer download with retry (handled inside fetchSegmentToLocalWithPeerRetry)
         try {
-          return downloadSegmentFromDeepStore(zkMetadata);
+          File result = downloadSegmentFromPeers(zkMetadata);
+          _logger.info("Peer download completed successfully for segment: {} of table: {} from source server: {}",
+              segmentName, _tableNameWithType, sourceServer);
+          return result;
+        } catch (Exception e) {
+          if (_peerDownloadFallbackToDeepStore) {
+            _logger.warn("Peer-to-peer download failed for segment: {} of table: {}, falling back to deep store",
+                segmentName, _tableNameWithType, e);
+          } else {
+            throw new Exception(
+                "Peer-to-peer download failed for segment: " + segmentName + " of table: " + _tableNameWithType, e);
+          }
+        }
+        File result = downloadSegmentFromDeepStore(zkMetadata);
+        _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FROM_REMOTE, 1);
+        return result;
+      } else if (!CommonConstants.Segment.METADATA_URI_FOR_PEER_DOWNLOAD.equals(downloadUrl)) {
+        // Existing flow: download from deep store with optional peer fallback
+        try {
+          File result = downloadSegmentFromDeepStore(zkMetadata);
+          _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FROM_REMOTE, 1);
+          return result;
         } catch (Exception e) {
           if (_peerDownloadScheme != null) {
             _logger.warn("Caught exception while downloading segment: {} from: {}, trying to download from peers",
@@ -957,6 +987,35 @@ public abstract class BaseTableDataManager implements TableDataManager {
       _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FAILURES, 1);
       throw e;
     }
+  }
+
+  /**
+   * Determines if peer-to-peer download should be attempted.
+   * Returns true if:
+   * 1. sourceServer is set in metadata
+   * 2. This server's instanceId does NOT match the sourceServer
+   * 3. Peer download scheme is configured
+   */
+  private boolean shouldAttemptPeerToPeerDownload(String sourceServer) {
+    if (StringUtils.isEmpty(sourceServer)) {
+      return false;
+    }
+
+    if (_peerDownloadScheme == null) {
+      _logger.warn("sourceServer is set to: {} but peer download scheme is not configured", sourceServer);
+      return false;
+    }
+
+    // Check if this server is the source server
+    boolean isSourceServer = _instanceId.equals(sourceServer);
+    if (isSourceServer) {
+      _logger.info("This server ({}) is the source server, will download from deep store", _instanceId);
+      return false;
+    }
+
+    _logger.info("This server ({}) is not the source server ({}), will attempt peer-to-peer download",
+        _instanceId, sourceServer);
+    return true;
   }
 
   protected File downloadSegmentFromDeepStore(SegmentZKMetadata zkMetadata)
@@ -1054,11 +1113,12 @@ public abstract class BaseTableDataManager implements TableDataManager {
                 _peerDownloadScheme);
         Collections.shuffle(peerServerURIs);
         return peerServerURIs;
-      }, segmentTarFile, zkMetadata.getCrypterName());
+      }, segmentTarFile, zkMetadata.getCrypterName(), true);
       _logger.info("Downloaded tarred segment: {} from peers to: {}, file length: {}", segmentName, segmentTarFile,
           segmentTarFile.length());
       File indexDir = untarAndMoveSegment(segmentName, segmentTarFile, tempRootDir);
       _logger.info("Downloaded segment: {} from peers to: {}", segmentName, indexDir);
+      _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_SUCCESS, 1);
       return indexDir;
     } catch (Exception e) {
       _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_FAILURES, 1);
