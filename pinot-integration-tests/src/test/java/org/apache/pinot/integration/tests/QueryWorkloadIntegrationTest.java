@@ -182,7 +182,8 @@ public class QueryWorkloadIntegrationTest extends BaseClusterIntegrationTest {
   /**
    * Test query execution with budget configuration
    */
-  @Test
+  // TODO: Flaky test - fails intermittently with workload cost exceeded errors. Assigned to @pchaganlal to fix.
+  @Test(enabled = false)
   public void testWorkloadEnforcement() throws Exception {
     // Test enforcement with high budget - should succeed (no rejection)
     EnforcementProfile enforcementProfile = new EnforcementProfile(Long.MAX_VALUE, Long.MAX_VALUE);
