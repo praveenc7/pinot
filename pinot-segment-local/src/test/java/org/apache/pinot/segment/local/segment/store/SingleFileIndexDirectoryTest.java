@@ -23,11 +23,13 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -55,6 +57,7 @@ import org.testng.annotations.Test;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertTrue;
 
 
@@ -349,6 +352,48 @@ public class SingleFileIndexDirectoryTest implements PinotBuffersAfterMethodChec
         + "baz.inverted_index.startOffset = 1124\nbaz.inverted_index.size = 200\n"
         + "\\=special.inverted_index.startOffset = 1324\n\\=special.inverted_index.size = 200\n"
         + "period.\\:colon.inverted_index.startOffset = 1524\nperiod.\\:colon.inverted_index.size = 200\n");
+  }
+
+  @Test
+  public void testCloseAlwaysClearsStateEvenOnCleanupFailure()
+      throws Exception {
+    // Create two indices so there is something to remove and trigger cleanup on close.
+    try (SingleFileIndexDirectory sfd = new SingleFileIndexDirectory(TEMP_DIR, _segmentMetadata, ReadMode.mmap)) {
+      sfd.newBuffer("col1", StandardIndexes.forward(), 1024);
+      sfd.newBuffer("col2", StandardIndexes.dictionary(), 1024);
+    }
+
+    SingleFileIndexDirectory sfd = new SingleFileIndexDirectory(TEMP_DIR, _segmentMetadata, ReadMode.mmap);
+    // Marking an index for removal causes _shouldCleanupRemovedIndices = true,
+    // so cleanupRemovedIndices() is invoked inside close().
+    sfd.removeIndex("col1", StandardIndexes.forward());
+
+    // Force cleanupRemovedIndices() to fail by pre-creating the temp index file as a directory.
+    // RandomAccessFile cannot open a directory for writing, so copyIndices() will throw IOException.
+    File tmpIndexFile = new File(TEMP_DIR, V1Constants.INDEX_FILE_NAME + ".tmp");
+    assertTrue(tmpIndexFile.mkdir());
+
+    IOException caughtException = null;
+    try {
+      sfd.close();
+    } catch (IOException e) {
+      caughtException = e;
+    } finally {
+      FileUtils.deleteDirectory(tmpIndexFile);
+    }
+
+    assertNotNull(caughtException, "Expected close() to propagate IOException from cleanupRemovedIndices()");
+
+    // Both collections must be cleared even though cleanupRemovedIndices() threw.
+    Field columnEntriesField = SingleFileIndexDirectory.class.getDeclaredField("_columnEntries");
+    columnEntriesField.setAccessible(true);
+    assertTrue(((Map<?, ?>) columnEntriesField.get(sfd)).isEmpty(),
+        "_columnEntries should be empty after close() even when cleanup fails");
+
+    Field allocBuffersField = SingleFileIndexDirectory.class.getDeclaredField("_allocBuffers");
+    allocBuffersField.setAccessible(true);
+    assertTrue(((List<?>) allocBuffersField.get(sfd)).isEmpty(),
+        "_allocBuffers should be empty after close() even when cleanup fails");
   }
 
   @Test

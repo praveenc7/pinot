@@ -352,11 +352,14 @@ class SingleFileIndexDirectory extends ColumnIndexDirectory {
     }
     // Cleanup removed indices after closing and flushing buffers, so
     // that potential index updates can be persisted across cleanups.
-    if (_shouldCleanupRemovedIndices) {
-      cleanupRemovedIndices();
+    try {
+      if (_shouldCleanupRemovedIndices) {
+        cleanupRemovedIndices();
+      }
+    } finally {
+      _columnEntries.clear();
+      _allocBuffers.clear();
     }
-    _columnEntries.clear();
-    _allocBuffers.clear();
   }
 
   @Override
