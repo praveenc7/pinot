@@ -284,6 +284,7 @@ public class RealtimeSegmentValidationManager extends ControllerPeriodicTask<Rea
       if (TableNameBuilder.isRealtimeTableResource(tableNameWithType)) {
         _validationMetrics.cleanupTotalDocumentCountGauge(tableNameWithType);
         _controllerMetrics.removeTableMeter(tableNameWithType, ControllerMeter.DELETED_TMP_SEGMENT_COUNT);
+        _controllerMetrics.removeTableGauge(tableNameWithType, ControllerGauge.RESOURCE_UTILIZATION_LIMIT_EXCEEDED);
       }
     }
   }

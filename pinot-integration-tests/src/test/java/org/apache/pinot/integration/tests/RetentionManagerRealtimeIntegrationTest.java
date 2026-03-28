@@ -321,7 +321,7 @@ public class RetentionManagerRealtimeIntegrationTest extends BaseClusterIntegrat
     // Gauge must reflect exactly 1 segment skipped by the create-time guard
     assertEquals(
         MetricValueUtils.getTableGaugeValue(ControllerMetrics.get(), realtimeTableName,
-            ControllerGauge.NUM_SEGMENTS_SKIPPED_PURGE_BY_CREATE_TIME),
+            ControllerGauge.NUM_SEGMENTS_SKIPPED_RETENTION_BY_CREATE_TIME),
         1L, "Expected gauge to reflect 1 segment skipped by the create-time guard");
 
     TestUtils.waitForCondition(

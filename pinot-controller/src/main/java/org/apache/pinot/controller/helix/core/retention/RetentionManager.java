@@ -124,6 +124,16 @@ public class RetentionManager extends ControllerPeriodicTask<Void> {
     _pinotHelixResourceManager.getSegmentDeletionManager().removeAgedDeletedSegments(_leadControllerManager);
   }
 
+  @Override
+  protected void nonLeaderCleanup(List<String> tableNamesWithType) {
+    for (String tableNameWithType : tableNamesWithType) {
+      _controllerMetrics.removeTableGauge(tableNameWithType,
+          ControllerGauge.NUM_SEGMENTS_SKIPPED_RETENTION_BY_CREATE_TIME);
+      _controllerMetrics.removeTableGauge(tableNameWithType, ControllerGauge.UNTRACKED_SEGMENTS_COUNT);
+      _controllerMetrics.removeTableGauge(tableNameWithType, ControllerGauge.RETENTION_MANAGER_ERROR);
+    }
+  }
+
   @VisibleForTesting
   void manageRetentionForTable(TableConfig tableConfig) {
     String tableNameWithType = tableConfig.getTableName();
@@ -180,7 +190,7 @@ public class RetentionManager extends ControllerPeriodicTask<Void> {
           createTimeGuardRetentionStrategy.getSegmentsSkippedPurgeByCreateTime());
     }
     _controllerMetrics.setOrUpdateTableGauge(tableNameWithType,
-        ControllerGauge.NUM_SEGMENTS_SKIPPED_PURGE_BY_CREATE_TIME,
+        ControllerGauge.NUM_SEGMENTS_SKIPPED_RETENTION_BY_CREATE_TIME,
         createTimeGuardRetentionStrategy.getSegmentsSkippedPurgeByCreateTime().size());
   }
 

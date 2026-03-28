@@ -39,7 +39,9 @@ import org.apache.helix.model.InstanceConfig;
 import org.apache.helix.store.zk.ZkHelixPropertyStore;
 import org.apache.helix.zookeeper.datamodel.ZNRecord;
 import org.apache.pinot.common.metadata.segment.SegmentZKMetadata;
+import org.apache.pinot.common.metrics.ControllerGauge;
 import org.apache.pinot.common.metrics.ControllerMetrics;
+import org.apache.pinot.common.metrics.MetricValueUtils;
 import org.apache.pinot.common.utils.LLCSegmentName;
 import org.apache.pinot.controller.ControllerConf;
 import org.apache.pinot.controller.LeadControllerManager;
@@ -1010,6 +1012,81 @@ public class RetentionManagerTest {
 
     segmentMetadata.setNumReplicas(replicaCount);
     return segmentMetadata;
+  }
+
+  private static RetentionManager createRetentionManager(ControllerMetrics controllerMetrics) {
+    ControllerConf conf = new ControllerConf();
+    conf.setRetentionControllerFrequencyInSeconds(0);
+    conf.setUntrackedSegmentDeletionEnabled(false);
+    return new RetentionManager(mock(PinotHelixResourceManager.class), mock(LeadControllerManager.class), conf,
+        controllerMetrics, mock(BrokerServiceHelper.class));
+  }
+
+  @Test
+  public void testNonLeaderCleanupRemovesGauges() {
+    ControllerMetrics controllerMetrics = new ControllerMetrics(PinotMetricUtils.getPinotMetricsRegistry());
+    RetentionManager retentionManager = createRetentionManager(controllerMetrics);
+    String tableNameWithType = "testTable_nonLeaderCleanup_OFFLINE";
+
+    controllerMetrics.setValueOfTableGauge(tableNameWithType,
+        ControllerGauge.NUM_SEGMENTS_SKIPPED_RETENTION_BY_CREATE_TIME, 5);
+    controllerMetrics.setValueOfTableGauge(tableNameWithType, ControllerGauge.UNTRACKED_SEGMENTS_COUNT, 3);
+    controllerMetrics.setValueOfTableGauge(tableNameWithType, ControllerGauge.RETENTION_MANAGER_ERROR, 1);
+
+    assertTrue(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.NUM_SEGMENTS_SKIPPED_RETENTION_BY_CREATE_TIME));
+    assertTrue(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.UNTRACKED_SEGMENTS_COUNT));
+    assertTrue(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.RETENTION_MANAGER_ERROR));
+
+    retentionManager.nonLeaderCleanup(List.of(tableNameWithType));
+
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.NUM_SEGMENTS_SKIPPED_RETENTION_BY_CREATE_TIME),
+        "NUM_SEGMENTS_SKIPPED_RETENTION_BY_CREATE_TIME gauge should be removed after losing leadership");
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.UNTRACKED_SEGMENTS_COUNT),
+        "UNTRACKED_SEGMENTS_COUNT gauge should be removed after losing leadership");
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.RETENTION_MANAGER_ERROR),
+        "RETENTION_MANAGER_ERROR gauge should be removed after losing leadership");
+  }
+
+  @Test
+  public void testNonLeaderCleanupOnlyRemovesSpecifiedTables() {
+    ControllerMetrics controllerMetrics = new ControllerMetrics(PinotMetricUtils.getPinotMetricsRegistry());
+    RetentionManager retentionManager = createRetentionManager(controllerMetrics);
+    String lostLeadershipTable = "testTable_lostLeadership_OFFLINE";
+    String retainedLeadershipTable = "testTable_retainedLeadership_OFFLINE";
+
+    controllerMetrics.setValueOfTableGauge(lostLeadershipTable, ControllerGauge.RETENTION_MANAGER_ERROR, 1);
+    controllerMetrics.setValueOfTableGauge(retainedLeadershipTable, ControllerGauge.RETENTION_MANAGER_ERROR, 1);
+
+    retentionManager.nonLeaderCleanup(List.of(lostLeadershipTable));
+
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, lostLeadershipTable,
+        ControllerGauge.RETENTION_MANAGER_ERROR),
+        "Gauge for table that lost leadership should be removed");
+    assertTrue(MetricValueUtils.tableGaugeExists(controllerMetrics, retainedLeadershipTable,
+        ControllerGauge.RETENTION_MANAGER_ERROR),
+        "Gauge for table still under leadership should be retained");
+  }
+
+  @Test
+  public void testNonLeaderCleanupWithNoGaugeIsNoop() {
+    ControllerMetrics controllerMetrics = new ControllerMetrics(PinotMetricUtils.getPinotMetricsRegistry());
+    RetentionManager retentionManager = createRetentionManager(controllerMetrics);
+    String tableNameWithType = "testTable_noGauge_OFFLINE";
+
+    retentionManager.nonLeaderCleanup(List.of(tableNameWithType));
+
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.RETENTION_MANAGER_ERROR));
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.UNTRACKED_SEGMENTS_COUNT));
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.NUM_SEGMENTS_SKIPPED_RETENTION_BY_CREATE_TIME));
   }
 
   private SegmentZKMetadata mockSegmentZKMetadata(long startTime, long endTime, TimeUnit timeUnit) {

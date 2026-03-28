@@ -4494,7 +4494,7 @@ public class OfflineClusterIntegrationTest extends BaseClusterIntegrationTestSet
     // (within retention) was left untouched by the delegate before the guard even ran.
     assertEquals(
         MetricValueUtils.getTableGaugeValue(ControllerMetrics.get(), offlineTableName,
-            ControllerGauge.NUM_SEGMENTS_SKIPPED_PURGE_BY_CREATE_TIME),
+            ControllerGauge.NUM_SEGMENTS_SKIPPED_RETENTION_BY_CREATE_TIME),
         1L, "Guard should fire only for the segment that was expired AND within the guard window");
 
     TestUtils.waitForCondition(

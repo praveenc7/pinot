@@ -18,13 +18,18 @@
  */
 package org.apache.pinot.controller.validation;
 
+import java.util.List;
+import org.apache.pinot.common.metrics.ControllerGauge;
 import org.apache.pinot.common.metrics.ControllerMetrics;
+import org.apache.pinot.common.metrics.MetricValueUtils;
+import org.apache.pinot.common.metrics.ValidationMetrics;
 import org.apache.pinot.controller.ControllerConf;
 import org.apache.pinot.controller.api.resources.PauseStatusDetails;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
 import org.apache.pinot.controller.helix.core.realtime.PinotLLCRealtimeSegmentManager;
 import org.apache.pinot.spi.config.table.PauseState;
 import org.apache.pinot.spi.config.table.TableConfig;
+import org.apache.pinot.spi.metrics.PinotMetricUtils;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.testng.Assert;
@@ -35,6 +40,8 @@ import org.testng.annotations.Test;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertTrue;
 
 
 public class RealtimeSegmentValidationManagerTest {
@@ -113,5 +120,73 @@ public class RealtimeSegmentValidationManagerTest {
     boolean result = _realtimeSegmentValidationManager.shouldEnsureConsuming(tableName);
 
     Assert.assertEquals(result, expectedResult);
+  }
+
+  @Test
+  public void testNonLeaderCleanupRemovesResourceUtilizationGauge() {
+    ControllerMetrics controllerMetrics = new ControllerMetrics(PinotMetricUtils.getPinotMetricsRegistry());
+    ValidationMetrics validationMetrics = new ValidationMetrics(controllerMetrics.getMetricsRegistry());
+    ControllerConf controllerConf = new ControllerConf();
+    RealtimeSegmentValidationManager manager =
+        new RealtimeSegmentValidationManager(controllerConf, mock(PinotHelixResourceManager.class), null,
+            mock(PinotLLCRealtimeSegmentManager.class), validationMetrics, controllerMetrics,
+            mock(StorageQuotaChecker.class),
+            mock(ResourceUtilizationManager.class));
+    String tableNameWithType = "testTable_REALTIME";
+
+    controllerMetrics.setValueOfTableGauge(tableNameWithType, ControllerGauge.RESOURCE_UTILIZATION_LIMIT_EXCEEDED, 1);
+    assertTrue(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+        ControllerGauge.RESOURCE_UTILIZATION_LIMIT_EXCEEDED));
+
+    manager.nonLeaderCleanup(List.of(tableNameWithType));
+
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, tableNameWithType,
+            ControllerGauge.RESOURCE_UTILIZATION_LIMIT_EXCEEDED),
+        "RESOURCE_UTILIZATION_LIMIT_EXCEEDED gauge should be removed after losing leadership");
+  }
+
+  @Test
+  public void testNonLeaderCleanupOnlyAffectsSpecifiedTables() {
+    ControllerMetrics controllerMetrics = new ControllerMetrics(PinotMetricUtils.getPinotMetricsRegistry());
+    ValidationMetrics validationMetrics = new ValidationMetrics(controllerMetrics.getMetricsRegistry());
+    ControllerConf controllerConf = new ControllerConf();
+    RealtimeSegmentValidationManager manager =
+        new RealtimeSegmentValidationManager(controllerConf, mock(PinotHelixResourceManager.class), null,
+            mock(PinotLLCRealtimeSegmentManager.class), validationMetrics, controllerMetrics,
+            mock(StorageQuotaChecker.class),
+            mock(ResourceUtilizationManager.class));
+    String lostTable = "lostTable_REALTIME";
+    String retainedTable = "retainedTable_REALTIME";
+
+    controllerMetrics.setValueOfTableGauge(lostTable, ControllerGauge.RESOURCE_UTILIZATION_LIMIT_EXCEEDED, 1);
+    controllerMetrics.setValueOfTableGauge(retainedTable, ControllerGauge.RESOURCE_UTILIZATION_LIMIT_EXCEEDED, 1);
+
+    manager.nonLeaderCleanup(List.of(lostTable));
+
+    assertFalse(MetricValueUtils.tableGaugeExists(controllerMetrics, lostTable,
+            ControllerGauge.RESOURCE_UTILIZATION_LIMIT_EXCEEDED),
+        "Gauge for table that lost leadership should be removed");
+    assertTrue(MetricValueUtils.tableGaugeExists(controllerMetrics, retainedTable,
+            ControllerGauge.RESOURCE_UTILIZATION_LIMIT_EXCEEDED),
+        "Gauge for table still under leadership should be retained");
+  }
+
+  @Test
+  public void testNonLeaderCleanupSkipsOfflineTables() {
+    ControllerMetrics controllerMetrics = new ControllerMetrics(PinotMetricUtils.getPinotMetricsRegistry());
+    ControllerConf controllerConf = new ControllerConf();
+    RealtimeSegmentValidationManager manager =
+        new RealtimeSegmentValidationManager(controllerConf, mock(PinotHelixResourceManager.class), null,
+            mock(PinotLLCRealtimeSegmentManager.class), null, controllerMetrics, mock(StorageQuotaChecker.class),
+            mock(ResourceUtilizationManager.class));
+    String offlineTable = "testTable_OFFLINE";
+
+    controllerMetrics.setValueOfTableGauge(offlineTable, ControllerGauge.RESOURCE_UTILIZATION_LIMIT_EXCEEDED, 1);
+
+    manager.nonLeaderCleanup(List.of(offlineTable));
+
+    assertTrue(MetricValueUtils.tableGaugeExists(controllerMetrics, offlineTable,
+        ControllerGauge.RESOURCE_UTILIZATION_LIMIT_EXCEEDED),
+        "Gauge for offline table should not be removed by RealtimeSegmentValidationManager");
   }
 }
