@@ -28,11 +28,11 @@ import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.metrics.PinotMetricUtils;
 import org.apache.pinot.spi.metrics.PinotMetricsRegistry;
+import org.apache.pinot.util.TestUtils;
 import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import static org.mockito.Mockito.mock;
-import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertTrue;
 
 
@@ -62,7 +62,8 @@ public class QueryServerTest {
     assertTrue(connectionOk(serverAddress));
 
     server.shutDown();
-    assertFalse(connectionOk(serverAddress));
+    TestUtils.waitForCondition(aVoid -> !connectionOk(serverAddress),
+        5000L, "Failed to shut down the server");
   }
 
   private static boolean connectionOk(InetSocketAddress address) {
