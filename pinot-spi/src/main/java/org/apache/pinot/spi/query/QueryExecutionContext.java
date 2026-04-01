@@ -29,6 +29,7 @@ import javax.annotation.concurrent.GuardedBy;
 import org.apache.pinot.spi.exception.QueryErrorCode;
 import org.apache.pinot.spi.exception.TerminationException;
 import org.apache.pinot.spi.utils.CommonConstants.Accounting;
+import org.apache.pinot.spi.utils.CommonConstants.Broker;
 import org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey;
 import org.apache.pinot.spi.utils.CommonConstants.Query.Request.MetadataKeys;
 
@@ -56,6 +57,7 @@ public class QueryExecutionContext {
   private final long _passiveDeadlineMs;
   private final String _brokerId;
   private final String _instanceId;
+  private final String _queryHash;
 
   @GuardedBy("this")
   private final List<Future<?>> _tasks = new ArrayList<>();
@@ -63,7 +65,7 @@ public class QueryExecutionContext {
   private volatile TerminationException _terminateException;
 
   public QueryExecutionContext(QueryType queryType, long requestId, String cid, String workloadName, long startTimeMs,
-      long activeDeadlineMs, long passiveDeadlineMs, String brokerId, String instanceId) {
+      long activeDeadlineMs, long passiveDeadlineMs, String brokerId, String instanceId, String queryHash) {
     _queryType = queryType;
     _requestId = requestId;
     _cid = cid;
@@ -73,6 +75,7 @@ public class QueryExecutionContext {
     _passiveDeadlineMs = passiveDeadlineMs;
     _brokerId = brokerId;
     _instanceId = instanceId;
+    _queryHash = queryHash;
   }
 
   public static QueryExecutionContext forMseServerRequest(Map<String, String> requestMetadata, String instanceId) {
@@ -89,8 +92,9 @@ public class QueryExecutionContext {
     long activeDeadlineMs = startTimeMs + timeoutMs;
     long passiveDeadlineMs = activeDeadlineMs + extraPassiveTimeoutMs;
     String brokerId = requestMetadata.getOrDefault(MetadataKeys.BROKER_ID, "unknown");
+    String queryHash = requestMetadata.getOrDefault(QueryOptionKey.QUERY_HASH, Broker.DEFAULT_QUERY_HASH);
     return new QueryExecutionContext(QueryType.MSE, requestId, cid, workloadName, startTimeMs, activeDeadlineMs,
-        passiveDeadlineMs, brokerId, instanceId);
+        passiveDeadlineMs, brokerId, instanceId, queryHash);
   }
 
   public static QueryExecutionContext forTseServerRequest(Map<String, String> requestMetadata, String instanceId) {
@@ -103,20 +107,21 @@ public class QueryExecutionContext {
     String workloadName = requestMetadata.getOrDefault(QueryOptionKey.WORKLOAD_NAME, Accounting.DEFAULT_WORKLOAD_NAME);
     long deadlineMs = Long.parseLong(requestMetadata.get(MetadataKeys.TimeSeries.DEADLINE_MS));
     String brokerId = requestMetadata.getOrDefault(MetadataKeys.BROKER_ID, "unknown");
+    String queryHash = requestMetadata.getOrDefault(QueryOptionKey.QUERY_HASH, Broker.DEFAULT_QUERY_HASH);
     return new QueryExecutionContext(QueryType.TSE, requestId, cid, workloadName, startTimeMs, deadlineMs, deadlineMs,
-        brokerId, instanceId);
+        brokerId, instanceId, queryHash);
   }
 
   @VisibleForTesting
   public static QueryExecutionContext forSseTest() {
     return new QueryExecutionContext(QueryType.SSE, 123L, "cid", Accounting.DEFAULT_WORKLOAD_NAME,
-        System.currentTimeMillis(), Long.MAX_VALUE, Long.MAX_VALUE, "brokerId", "instanceId");
+        System.currentTimeMillis(), Long.MAX_VALUE, Long.MAX_VALUE, "brokerId", "instanceId", "");
   }
 
   @VisibleForTesting
   public static QueryExecutionContext forMseTest() {
     return new QueryExecutionContext(QueryType.MSE, 123L, "cid", Accounting.DEFAULT_WORKLOAD_NAME,
-        System.currentTimeMillis(), Long.MAX_VALUE, Long.MAX_VALUE, "brokerId", "instanceId");
+        System.currentTimeMillis(), Long.MAX_VALUE, Long.MAX_VALUE, "brokerId", "instanceId", "");
   }
 
   public QueryType getQueryType() {
@@ -153,6 +158,10 @@ public class QueryExecutionContext {
 
   public String getInstanceId() {
     return _instanceId;
+  }
+
+  public String getQueryHash() {
+    return _queryHash;
   }
 
   /// Adds a task to the execution context. If the query has been terminated, cancels the task immediately without

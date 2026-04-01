@@ -31,6 +31,7 @@ import org.apache.pinot.common.response.broker.QueryProcessingException;
 import org.apache.pinot.spi.auth.broker.RequesterIdentity;
 import org.apache.pinot.spi.exception.QueryErrorCode;
 import org.apache.pinot.spi.trace.DefaultRequestContext;
+import org.apache.pinot.spi.trace.QueryFingerprint;
 import org.apache.pinot.spi.trace.RequestContext;
 import org.mockito.Mock;
 import org.mockito.Mockito;
@@ -86,7 +87,7 @@ public class QueryLoggerTest {
   public void shouldFormatLogLineProperly() {
     // Given:
     Mockito.when(_logRateLimiter.tryAcquire()).thenReturn(true);
-    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 456);
+    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 456, null);
     QueryLogger queryLogger = new QueryLogger(_logRateLimiter, 100, true, true, _logger, _droppedRateLimiter);
 
     // When:
@@ -97,6 +98,7 @@ public class QueryLoggerTest {
     //@formatter:off
     Assert.assertEquals(_infoLog.get(0), "requestId=123,"
         + "table=table,"
+        + "queryHash=,"
         + "timeMs=456,"
         + "docs=1/2,"
         + "entries=3/4,"
@@ -125,7 +127,7 @@ public class QueryLoggerTest {
   public void shouldOmitClientId() {
     // Given:
     Mockito.when(_logRateLimiter.tryAcquire()).thenReturn(true);
-    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 456);
+    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 456, null);
     QueryLogger queryLogger = new QueryLogger(_logRateLimiter, 100, false, true, _logger, _droppedRateLimiter);
 
     // When:
@@ -141,7 +143,7 @@ public class QueryLoggerTest {
   public void shouldNotForceLog() {
     // Given:
     Mockito.when(_logRateLimiter.tryAcquire()).thenReturn(false);
-    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 456);
+    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 456, null);
     QueryLogger queryLogger = new QueryLogger(_logRateLimiter, 100, true, true, _logger, _droppedRateLimiter);
 
     // When:
@@ -155,7 +157,7 @@ public class QueryLoggerTest {
   public void shouldForceLogWhenNumGroupsLimitIsReached() {
     // Given:
     Mockito.when(_logRateLimiter.tryAcquire()).thenReturn(false);
-    QueryLogger.QueryLogParams params = generateParams(true, true, 0, 456);
+    QueryLogger.QueryLogParams params = generateParams(true, true, 0, 456, null);
     QueryLogger queryLogger = new QueryLogger(_logRateLimiter, 100, true, true, _logger, _droppedRateLimiter);
 
     // When:
@@ -169,7 +171,7 @@ public class QueryLoggerTest {
   public void shouldForceLogWhenExceptionsExist() {
     // Given:
     Mockito.when(_logRateLimiter.tryAcquire()).thenReturn(false);
-    QueryLogger.QueryLogParams params = generateParams(false, false, 1, 456);
+    QueryLogger.QueryLogParams params = generateParams(false, false, 1, 456, null);
     QueryLogger queryLogger = new QueryLogger(_logRateLimiter, 100, true, true, _logger, _droppedRateLimiter);
 
     // When:
@@ -183,7 +185,7 @@ public class QueryLoggerTest {
   public void shouldForceLogWhenTimeIsMoreThanOneSecond() {
     // Given:
     Mockito.when(_logRateLimiter.tryAcquire()).thenReturn(false);
-    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 1456);
+    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 1456, null);
     QueryLogger queryLogger = new QueryLogger(_logRateLimiter, 100, true, true, _logger, _droppedRateLimiter);
 
     // When:
@@ -217,7 +219,7 @@ public class QueryLoggerTest {
       return true;
     }).thenReturn(true);
 
-    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 456);
+    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 456, null);
     QueryLogger queryLogger = new QueryLogger(_logRateLimiter, 100, true, true, _logger, _droppedRateLimiter);
 
     ExecutorService executorService = Executors.newFixedThreadPool(4);
@@ -245,12 +247,51 @@ public class QueryLoggerTest {
     Assert.assertEquals((long) _numDropped.get(0), 2L);
   }
 
+  @Test
+  public void shouldEmitQueryHashWhenSet() {
+    // Given:
+    Mockito.when(_logRateLimiter.tryAcquire()).thenReturn(true);
+    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 456,
+      new QueryFingerprint("abc", "SELECT * FROM foo"));
+    QueryLogger queryLogger = new QueryLogger(_logRateLimiter, 100, true, true, _logger, _droppedRateLimiter);
+
+    // When:
+    queryLogger.log(params);
+
+    // Then:
+    Assert.assertEquals(_infoLog.size(), 1);
+    String logLine = _infoLog.get(0);
+    Assert.assertTrue(logLine.contains("queryHash=abc"),
+        "Expected queryHash in log. Got: " + logLine);
+  }
+
+  @Test
+  public void shouldEmitEmptyQueryHashWhenNotSet() {
+    // Given:
+    Mockito.when(_logRateLimiter.tryAcquire()).thenReturn(true);
+    QueryLogger.QueryLogParams params = generateParams(false, false, 0, 456, null);
+    QueryLogger queryLogger = new QueryLogger(_logRateLimiter, 100, true, true, _logger, _droppedRateLimiter);
+
+    // When:
+    queryLogger.log(params);
+
+    // Then:
+    Assert.assertEquals(_infoLog.size(), 1);
+    String logLine = _infoLog.get(0);
+    Assert.assertTrue(logLine.contains("queryHash=,"),
+        "Expected empty queryHash field. Got: " + logLine);
+  }
+
   private QueryLogger.QueryLogParams generateParams(boolean numGroupsLimitReached, boolean numGroupsWarningLimitReached,
-      int numExceptions, long timeUsedMs) {
+      int numExceptions, long timeUsedMs, QueryFingerprint queryFingerprint) {
     RequestContext requestContext = new DefaultRequestContext();
     requestContext.setRequestId(123);
     requestContext.setQuery("SELECT * FROM foo");
     requestContext.setNumUnavailableSegments(21);
+
+    if (queryFingerprint != null) {
+      requestContext.setQueryFingerprint(queryFingerprint);
+    }
 
     BrokerResponseNative response = new BrokerResponseNative();
     response.setNumGroupsLimitReached(numGroupsLimitReached);

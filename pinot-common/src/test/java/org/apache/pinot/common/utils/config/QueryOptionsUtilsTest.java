@@ -42,6 +42,7 @@ import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOpt
 import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.MULTI_STAGE_LEAF_LIMIT;
 import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.NUM_GROUPS_LIMIT;
 import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.NUM_REPLICA_GROUPS_TO_QUERY;
+import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.QUERY_HASH;
 import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.SKIP_INDEXES;
 import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.TIMEOUT_MS;
 import static org.apache.pinot.spi.utils.CommonConstants.Broker.Request.QueryOptionKey.USE_MULTISTAGE_ENGINE;
@@ -160,6 +161,27 @@ public class QueryOptionsUtilsTest {
         }
       }
     }
+  }
+
+  @Test
+  public void testGetQueryHashWithValue() {
+    Map<String, String> queryOptions = Map.of(QUERY_HASH, "abc123def456");
+    String actualHash = QueryOptionsUtils.getQueryHash(queryOptions);
+    assertEquals(actualHash, "abc123def456");
+  }
+
+  @Test
+  public void testGetQueryHashWithEmptyString() {
+    Map<String, String> queryOptions = Map.of(QUERY_HASH, "");
+    String actualHash = QueryOptionsUtils.getQueryHash(queryOptions);
+    assertEquals(actualHash, "");
+  }
+
+  @Test
+  public void testGetQueryHashWithoutValue() {
+    Map<String, String> queryOptions = new HashMap<>();
+    String actualHash = QueryOptionsUtils.getQueryHash(queryOptions);
+    assertEquals(actualHash, "");
   }
 
   private static Object getValue(Map<String, String> map, String key) {
