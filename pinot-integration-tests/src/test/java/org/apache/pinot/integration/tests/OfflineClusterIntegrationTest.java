@@ -4498,7 +4498,7 @@ public class OfflineClusterIntegrationTest extends BaseClusterIntegrationTestSet
         1L, "Guard should fire only for the segment that was expired AND within the guard window");
 
     TestUtils.waitForCondition(
-        aVoid -> _helixResourceManager.getSegmentsZKMetadata(offlineTableName).size() < 4,
+        aVoid -> _helixResourceManager.getSegmentsZKMetadata(offlineTableName).size() == 2,
         30_000L, "Timed out waiting for segments are deleted by RetentionManager");
 
     List<SegmentZKMetadata> remaining = _helixResourceManager.getSegmentsZKMetadata(offlineTableName);
