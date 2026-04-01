@@ -69,6 +69,10 @@ public class SortedForwardIndexReaderTest implements PinotBuffersAfterMethodChec
         for (int docId = startDocIdArray[i]; docId <= endDocIdArray[i]; docId++) {
           Assert.assertEquals(reader.getDictId(docId, readerContext), i);
         }
+        // Verify getDocIds() returns correct start/end for each dictionary id
+        org.apache.pinot.spi.utils.Pairs.IntPair docIdRange = reader.getDocIds(i);
+        Assert.assertEquals(docIdRange.getLeft(), startDocIdArray[i]);
+        Assert.assertEquals(docIdRange.getRight(), endDocIdArray[i]);
       }
     }
 

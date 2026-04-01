@@ -112,7 +112,25 @@ public class SortedIndexReaderImpl implements SortedIndexReader<SortedIndexReade
 
   @Override
   public Pairs.IntPair getDocIds(int dictId) {
-    return new Pairs.IntPair(_reader.getInt(2 * dictId), _reader.getInt(2 * dictId + 1));
+    // The sorted index stores 2 x 4-byte ints (startDocId, endDocId) per dictionary ID,
+    // laid out contiguously in big-endian order. For 3 dictionary IDs (6 int entries):
+    //
+    //  int index:   [  0  ][  1  ][  2  ][  3  ][  4  ][  5  ]
+    //  byte offset:  0     4     8    12    16    20    24
+    //               [start][end  ][start][end  ][start][end  ]
+    //               |<- dictId=0->|<- dictId=1->|<- dictId=2->|
+    //
+    // Old (2 x 4-byte reads):
+    //   dictId=0: getInt(0) @ byte 0, getInt(1) @ byte 4
+    //   dictId=1: getInt(2) @ byte 8, getInt(3) @ byte 12
+    //   dictId=2: getInt(4) @ byte 16, getInt(5) @ byte 20
+    //
+    // New (single 8-byte read — getLong(i) reads at byte offset i*8):
+    //   dictId=0: getLong(0) @ bytes 0-7   → high 32 bits = start, low 32 bits = end
+    //   dictId=1: getLong(1) @ bytes 8-15  → high 32 bits = start, low 32 bits = end
+    //   dictId=2: getLong(2) @ bytes 16-23 → high 32 bits = start, low 32 bits = end
+    long pair = _reader.getLong(dictId);
+    return new Pairs.IntPair((int) (pair >>> 32), (int) pair);
   }
 
   @Override
