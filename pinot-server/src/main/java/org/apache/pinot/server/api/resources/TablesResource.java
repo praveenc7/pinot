@@ -33,6 +33,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -43,6 +45,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.inject.Named;
+import javax.net.ssl.SSLEngine;
 import javax.ws.rs.DefaultValue;
 import javax.ws.rs.Encoded;
 import javax.ws.rs.GET;
@@ -106,6 +109,8 @@ import org.apache.pinot.spi.stream.ConsumerPartitionState;
 import org.apache.pinot.spi.utils.CommonConstants.Helix.StateModel.SegmentStateModel;
 import org.apache.pinot.spi.utils.JsonUtils;
 import org.apache.pinot.spi.utils.builder.TableNameBuilder;
+import org.glassfish.grizzly.http.server.Request;
+import org.glassfish.grizzly.ssl.SSLUtils;
 import org.roaringbitmap.buffer.MutableRoaringBitmap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -443,12 +448,13 @@ public class TablesResource {
       @ApiParam(value = "Name of the table with type REALTIME OR OFFLINE", required = true, example = "myTable_OFFLINE")
       @PathParam("tableNameWithType") String tableNameWithType,
       @ApiParam(value = "Name of the segment", required = true) @PathParam("segmentName") @Encoded String segmentName,
-      @Context HttpHeaders httpHeaders)
+      @Context HttpHeaders httpHeaders, @Context Request grizzlyRequest)
       throws Exception {
     tableNameWithType = DatabaseUtils.translateTableName(tableNameWithType, httpHeaders);
     LOGGER.info("Received a request to download segment {} for table {}", segmentName, tableNameWithType);
     // Validate data access
-    ServerResourceUtils.validateDataAccess(_accessControlFactory, tableNameWithType, httpHeaders);
+    X509Certificate clientCert = extractClientCert(grizzlyRequest);
+    ServerResourceUtils.validateDataAccess(_accessControlFactory, tableNameWithType, httpHeaders, clientCert);
 
     TableDataManager tableDataManager =
         ServerResourceUtils.checkGetTableDataManager(_serverInstance, tableNameWithType);
@@ -1191,5 +1197,26 @@ public class TablesResource {
     } catch (Exception e) {
       throw new WebApplicationException(e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR);
     }
+  }
+
+  /**
+   * Extracts the client TLS certificate from a Grizzly request, if present.
+   * This keeps Grizzly-specific cert extraction in the transport layer.
+   */
+  private static X509Certificate extractClientCert(Request grizzlyRequest) {
+    if (grizzlyRequest != null) {
+      try {
+        SSLEngine sslEngine = SSLUtils.getSSLEngine(grizzlyRequest.getContext().getConnection());
+        if (sslEngine != null) {
+          Certificate[] peerCerts = sslEngine.getSession().getPeerCertificates();
+          if (peerCerts.length > 0 && peerCerts[0] instanceof X509Certificate) {
+            return (X509Certificate) peerCerts[0];
+          }
+        }
+      } catch (Exception e) {
+        LOGGER.warn("Failed to extract client cert from request", e);
+      }
+    }
+    return null;
   }
 }

@@ -18,6 +18,8 @@
  */
 package org.apache.pinot.server.api.resources;
 
+import java.security.cert.X509Certificate;
+import javax.annotation.Nullable;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.Response;
@@ -27,7 +29,6 @@ import org.apache.pinot.server.access.AccessControl;
 import org.apache.pinot.server.access.AccessControlFactory;
 import org.apache.pinot.server.access.HttpRequesterIdentity;
 import org.apache.pinot.server.starter.ServerInstance;
-import org.apache.pinot.spi.auth.server.RequesterIdentity;
 
 
 /**
@@ -62,11 +63,24 @@ public class ServerResourceUtils {
 
   public static void validateDataAccess(AccessControlFactory accessControlFactory, String tableNameWithType,
       HttpHeaders httpHeaders) {
+    validateDataAccess(accessControlFactory, tableNameWithType, httpHeaders, null);
+  }
+
+  /**
+   * Validates data access, optionally attaching a TLS client certificate to the requester identity.
+   * This allows AccessControl implementations to authorize server-to-server calls (e.g. peer segment
+   * download) by cert principal without requiring a DataVault identity token.
+   */
+  public static void validateDataAccess(AccessControlFactory accessControlFactory, String tableNameWithType,
+      HttpHeaders httpHeaders, @Nullable X509Certificate clientCert) {
     boolean hasDataAccess;
     try {
       AccessControl accessControl = accessControlFactory.create();
-      RequesterIdentity httpRequestIdentity = new HttpRequesterIdentity(httpHeaders);
-      hasDataAccess = accessControl.hasDataAccess(httpRequestIdentity, tableNameWithType);
+      HttpRequesterIdentity identity = new HttpRequesterIdentity(httpHeaders);
+      if (clientCert != null) {
+        identity.setClientCert(clientCert);
+      }
+      hasDataAccess = accessControl.hasDataAccess(identity, tableNameWithType);
     } catch (Exception e) {
       throw new WebApplicationException("Caught exception while validating access to table: " + tableNameWithType,
           Response.Status.INTERNAL_SERVER_ERROR);

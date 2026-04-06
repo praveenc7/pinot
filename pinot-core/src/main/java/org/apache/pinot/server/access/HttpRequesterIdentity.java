@@ -20,16 +20,19 @@ package org.apache.pinot.server.access;
 
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
+import java.security.cert.X509Certificate;
 import javax.ws.rs.core.HttpHeaders;
 import org.apache.pinot.spi.auth.server.RequesterIdentity;
 
 
 /**
- * Identity container for HTTP requests with (optional) authorization headers
+ * Identity container for HTTP requests with (optional) authorization headers and TLS client cert.
  */
 public class HttpRequesterIdentity extends RequesterIdentity {
   private Multimap<String, String> _httpHeaders;
   private String _endpointUrl;
+  /** TLS client certificate from the mTLS handshake, or null if the request came over plain HTTP. */
+  private X509Certificate _clientCert;
 
   public HttpRequesterIdentity(HttpHeaders httpHeaders) {
     _httpHeaders = HashMultimap.create();
@@ -50,5 +53,13 @@ public class HttpRequesterIdentity extends RequesterIdentity {
 
   public void setEndpointUrl(String endpointUrl) {
     _endpointUrl = endpointUrl;
+  }
+
+  public X509Certificate getClientCert() {
+    return _clientCert;
+  }
+
+  public void setClientCert(X509Certificate clientCert) {
+    _clientCert = clientCert;
   }
 }
