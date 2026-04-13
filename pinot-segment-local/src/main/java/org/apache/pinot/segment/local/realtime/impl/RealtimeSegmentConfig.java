@@ -32,6 +32,7 @@ import org.apache.pinot.segment.local.upsert.PartitionUpsertMetadataManager;
 import org.apache.pinot.segment.spi.index.FieldIndexConfigs;
 import org.apache.pinot.segment.spi.index.FieldIndexConfigsUtil;
 import org.apache.pinot.segment.spi.index.IndexType;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.index.StandardIndexes;
 import org.apache.pinot.segment.spi.memory.PinotDataBufferMemoryManager;
 import org.apache.pinot.segment.spi.partition.PartitionFunction;
@@ -248,7 +249,7 @@ public class RealtimeSegmentConfig {
         String sortedColumn = sortedColumns.get(0);
         FieldIndexConfigs.Builder builder =
             _indexConfigByCol.computeIfAbsent(sortedColumn, k -> new FieldIndexConfigs.Builder());
-        builder.add(StandardIndexes.inverted(), new IndexConfig(false));
+        builder.add(StandardIndexes.inverted(), InvertedIndexConfig.ENABLED);
       }
     }
 

@@ -26,16 +26,39 @@ import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.memory.CleanerUtil;
 import org.roaringbitmap.RoaringBitmap;
 
 
 /**
  * Writer for bitmap inverted index file.
+ *
+ * <p>Two file formats are supported:
+ *
+ * <p><b>VERSION_0 (legacy, no header):</b>
  * <pre>
- * Layout for RoaringBitmap inverted index:
  * |-------------------------------------------------------------------------|
- * |                    Start offset of 1st bitmap                           |
+ * |                    Start offset of 1st bitmap (4 bytes)                 |
+ * |    End offset of 1st bitmap (exclusive) / Start offset of 2nd bitmap    |
+ * |                                   ...                                   |
+ * | End offset of 2nd last bitmap (exclusive) / Start offset of last bitmap |
+ * |                  End offset of last bitmap (exclusive)                  |
+ * |-------------------------------------------------------------------------|
+ * |                           Data for 1st bitmap                           |
+ * |                           Data for 2nd bitmap                           |
+ * |                                   ...                                   |
+ * |                           Data for last bitmap                          |
+ * |-------------------------------------------------------------------------|
+ * </pre>
+ *
+ * <p><b>VERSION_1 (magic + version header, 64-bit offsets):</b>
+ * <pre>
+ * |-------------------------------------------------------------------------|
+ * |                    Magic number (4 bytes)                               |
+ * |                    Version = 1 (4 bytes)                                |
+ * |-------------------------------------------------------------------------|
+ * |                    Start offset of 1st bitmap (8 bytes)                 |
  * |    End offset of 1st bitmap (exclusive) / Start offset of 2nd bitmap    |
  * |                                   ...                                   |
  * | End offset of 2nd last bitmap (exclusive) / Start offset of last bitmap |
@@ -49,6 +72,12 @@ import org.roaringbitmap.RoaringBitmap;
  * </pre>
  */
 public final class BitmapInvertedIndexWriter implements Closeable {
+  // Magic number: "INV\x01". Not a multiple of 4, so it can never equal a VERSION_0 first offset
+  // (which is always (numBitmaps+1)*4, a multiple of 4). Allows unambiguous format detection.
+  public static final int MAGIC_NUMBER = 0x494E5601;
+  // Size of the VERSION_1 header: MAGIC (4 bytes) + VERSION (4 bytes)
+  public static final int HEADER_SIZE_V1 = 2 * Integer.BYTES;
+
   // 264MB - worst case serialized size of a single bitmap with Integer.MAX_VALUE rows
   private static final long MAX_INITIAL_BUFFER_SIZE = 256 << 20;
   // 128KB derived from 1M rows (15 containers), worst case 8KB per container = 120KB + 8KB extra
@@ -58,10 +87,11 @@ public final class BitmapInvertedIndexWriter implements Closeable {
   private ByteBuffer _bitmapBuffer;
   private long _currentBufferPosition;
   private final boolean _ownsChannel;
+  private final int _version;
 
   public BitmapInvertedIndexWriter(File outputFile, int numBitmaps)
       throws IOException {
-    this(new RandomAccessFile(outputFile, "rw").getChannel(), numBitmaps, true);
+    this(new RandomAccessFile(outputFile, "rw").getChannel(), numBitmaps, true, InvertedIndexConfig.DEFAULT_VERSION);
   }
 
   /**
@@ -78,12 +108,32 @@ public final class BitmapInvertedIndexWriter implements Closeable {
    */
   public BitmapInvertedIndexWriter(FileChannel fileChannel, int numBitmaps, boolean ownsChannel)
       throws IOException {
+    this(fileChannel, numBitmaps, ownsChannel, InvertedIndexConfig.DEFAULT_VERSION);
+  }
+
+  /**
+   * Creates a new writer with an explicit format version.
+   */
+  public BitmapInvertedIndexWriter(FileChannel fileChannel, int numBitmaps, boolean ownsChannel, int version)
+      throws IOException {
     _ownsChannel = ownsChannel;
-    int sizeForOffsets = (numBitmaps + 1) * Integer.BYTES;
-    long bitmapBufferEstimate = Math.min(PESSIMISTIC_BITMAP_SIZE_ESTIMATE * numBitmaps, MAX_INITIAL_BUFFER_SIZE);
     _fileChannel = fileChannel;
-    _offsetBuffer = _fileChannel.map(FileChannel.MapMode.READ_WRITE, _fileChannel.position(), sizeForOffsets);
-    _currentBufferPosition = sizeForOffsets + _fileChannel.position();
+    _version = version;
+    long startPosition = _fileChannel.position();
+    if (version == InvertedIndexConfig.VERSION_0) {
+      int sizeForOffsets = (numBitmaps + 1) * Integer.BYTES;
+      _offsetBuffer = _fileChannel.map(FileChannel.MapMode.READ_WRITE, startPosition, sizeForOffsets);
+      _currentBufferPosition = startPosition + sizeForOffsets;
+    } else if (version == InvertedIndexConfig.VERSION_1) {
+      int sizeForHeaderAndOffsets = HEADER_SIZE_V1 + (numBitmaps + 1) * Long.BYTES;
+      _offsetBuffer = _fileChannel.map(FileChannel.MapMode.READ_WRITE, startPosition, sizeForHeaderAndOffsets);
+      _offsetBuffer.putInt(MAGIC_NUMBER);
+      _offsetBuffer.putInt(InvertedIndexConfig.VERSION_1);
+      _currentBufferPosition = startPosition + sizeForHeaderAndOffsets;
+    } else {
+      throw new IllegalArgumentException("Unsupported inverted index version: " + version);
+    }
+    long bitmapBufferEstimate = Math.min(PESSIMISTIC_BITMAP_SIZE_ESTIMATE * numBitmaps, MAX_INITIAL_BUFFER_SIZE);
     mapBitmapBuffer(bitmapBufferEstimate);
   }
 
@@ -91,7 +141,7 @@ public final class BitmapInvertedIndexWriter implements Closeable {
       throws IOException {
     int length = bitmap.serializedSizeInBytes();
     resizeIfNecessary(length);
-    _offsetBuffer.putInt(asUnsignedInt(_currentBufferPosition));
+    putOffset(_currentBufferPosition);
     bitmap.serialize(_bitmapBuffer);
     _currentBufferPosition += length;
   }
@@ -104,9 +154,17 @@ public final class BitmapInvertedIndexWriter implements Closeable {
   public void add(byte[] bitmapBytes, int length)
       throws IOException {
     resizeIfNecessary(length);
-    _offsetBuffer.putInt(asUnsignedInt(_currentBufferPosition));
+    putOffset(_currentBufferPosition);
     _bitmapBuffer.put(bitmapBytes, 0, length);
     _currentBufferPosition += length;
+  }
+
+  private void putOffset(long offset) {
+    if (_version == InvertedIndexConfig.VERSION_1) {
+      _offsetBuffer.putLong(offset);
+    } else {
+      _offsetBuffer.putInt(asUnsignedInt(offset));
+    }
   }
 
   private void resizeIfNecessary(int required)
@@ -138,7 +196,7 @@ public final class BitmapInvertedIndexWriter implements Closeable {
   public void close()
       throws IOException {
     long fileLength = _currentBufferPosition;
-    _offsetBuffer.putInt(asUnsignedInt(fileLength));
+    putOffset(fileLength);
     _fileChannel.truncate(fileLength);
     if (_ownsChannel) {
       _fileChannel.close();

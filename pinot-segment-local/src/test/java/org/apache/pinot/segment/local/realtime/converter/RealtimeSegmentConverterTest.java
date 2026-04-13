@@ -51,6 +51,7 @@ import org.apache.pinot.segment.local.segment.virtualcolumn.VirtualColumnProvide
 import org.apache.pinot.segment.spi.ColumnMetadata;
 import org.apache.pinot.segment.spi.creator.SegmentVersion;
 import org.apache.pinot.segment.spi.index.DictionaryIndexConfig;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.index.StandardIndexes;
 import org.apache.pinot.segment.spi.index.TextIndexConfig;
 import org.apache.pinot.segment.spi.index.column.ColumnIndexContainer;
@@ -58,7 +59,6 @@ import org.apache.pinot.segment.spi.index.metadata.SegmentMetadataImpl;
 import org.apache.pinot.segment.spi.index.reader.TextIndexReader;
 import org.apache.pinot.segment.spi.store.SegmentDirectory;
 import org.apache.pinot.spi.config.table.FieldConfig;
-import org.apache.pinot.spi.config.table.IndexConfig;
 import org.apache.pinot.spi.config.table.SegmentZKPropsConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
@@ -163,7 +163,7 @@ public class RealtimeSegmentConverterTest implements PinotBuffersAfterMethodChec
             .setAvgNumMultiValues(3)
             .setIndex(Sets.newHashSet(LONG_COLUMN2), StandardIndexes.dictionary(), DictionaryIndexConfig.DISABLED)
             .setIndex(Sets.newHashSet(Sets.newHashSet(STRING_COLUMN3)), StandardIndexes.dictionary(), varLengthDictConf)
-            .setIndex(Sets.newHashSet(STRING_COLUMN1), StandardIndexes.inverted(), IndexConfig.ENABLED)
+            .setIndex(Sets.newHashSet(STRING_COLUMN1), StandardIndexes.inverted(), InvertedIndexConfig.ENABLED)
             .setSegmentZKMetadata(getSegmentZKMetadata(segmentName)).setOffHeap(true)
             .setMemoryManager(new DirectMemoryManager(segmentName))
             .setStatsHistory(RealtimeSegmentStatsHistory.deserialzeFrom(new File(tmpDir, "stats")))
@@ -235,7 +235,8 @@ public class RealtimeSegmentConverterTest implements PinotBuffersAfterMethodChec
             .setAvgNumMultiValues(3)
             .setIndex(Sets.newHashSet(LONG_COLUMN2), StandardIndexes.dictionary(), DictionaryIndexConfig.DISABLED)
             .setIndex(Sets.newHashSet(Sets.newHashSet(STRING_COLUMN3)), StandardIndexes.dictionary(), varLengthDictConf)
-            .setIndex(Sets.newHashSet(STRING_COLUMN1, LONG_COLUMN1), StandardIndexes.inverted(), IndexConfig.ENABLED)
+            .setIndex(Sets.newHashSet(STRING_COLUMN1, LONG_COLUMN1), StandardIndexes.inverted(),
+                InvertedIndexConfig.ENABLED)
             .setSegmentZKMetadata(getSegmentZKMetadata(segmentName)).setOffHeap(true)
             .setMemoryManager(new DirectMemoryManager(segmentName))
             .setStatsHistory(RealtimeSegmentStatsHistory.deserialzeFrom(new File(tmpDir, "stats")))
@@ -315,7 +316,7 @@ public class RealtimeSegmentConverterTest implements PinotBuffersAfterMethodChec
             .setAvgNumMultiValues(3)
             .setIndex(Sets.newHashSet(LONG_COLUMN2), StandardIndexes.dictionary(), DictionaryIndexConfig.DISABLED)
             .setIndex(Sets.newHashSet(Sets.newHashSet(STRING_COLUMN3)), StandardIndexes.dictionary(), varLengthDictConf)
-            .setIndex(Sets.newHashSet(STRING_COLUMN1), StandardIndexes.inverted(), IndexConfig.ENABLED)
+            .setIndex(Sets.newHashSet(STRING_COLUMN1), StandardIndexes.inverted(), InvertedIndexConfig.ENABLED)
             .setSegmentZKMetadata(getSegmentZKMetadata(segmentName)).setOffHeap(true)
             .setMemoryManager(new DirectMemoryManager(segmentName))
             .setStatsHistory(RealtimeSegmentStatsHistory.deserialzeFrom(new File(tmpDir, "stats")))
@@ -387,7 +388,8 @@ public class RealtimeSegmentConverterTest implements PinotBuffersAfterMethodChec
             .setAvgNumMultiValues(3)
             .setIndex(Sets.newHashSet(LONG_COLUMN2), StandardIndexes.dictionary(), DictionaryIndexConfig.DISABLED)
             .setIndex(Sets.newHashSet(Sets.newHashSet(STRING_COLUMN3)), StandardIndexes.dictionary(), varLengthDictConf)
-            .setIndex(Sets.newHashSet(STRING_COLUMN1, LONG_COLUMN1), StandardIndexes.inverted(), IndexConfig.ENABLED)
+            .setIndex(Sets.newHashSet(STRING_COLUMN1, LONG_COLUMN1), StandardIndexes.inverted(),
+                InvertedIndexConfig.ENABLED)
             .setSegmentZKMetadata(getSegmentZKMetadata(segmentName)).setOffHeap(true)
             .setMemoryManager(new DirectMemoryManager(segmentName))
             .setStatsHistory(RealtimeSegmentStatsHistory.deserialzeFrom(new File(tmpDir, "stats")))
@@ -615,7 +617,7 @@ public class RealtimeSegmentConverterTest implements PinotBuffersAfterMethodChec
     RealtimeSegmentConfig.Builder realtimeSegmentConfigBuilder =
         new RealtimeSegmentConfig.Builder().setTableNameWithType(tableNameWithType).setSegmentName(segmentName)
             .setStreamName(tableNameWithType).setSchema(schema).setTimeColumnName(DATE_TIME_COLUMN).setCapacity(1000)
-            .setIndex(Sets.newHashSet(LONG_COLUMN1), StandardIndexes.inverted(), IndexConfig.ENABLED)
+            .setIndex(Sets.newHashSet(LONG_COLUMN1), StandardIndexes.inverted(), InvertedIndexConfig.ENABLED)
             .setIndex(Sets.newHashSet(STRING_COLUMN1), StandardIndexes.text(), textIndexConfig)
             .setIndex(Sets.newHashSet(STRING_COLUMN1), StandardIndexes.dictionary(), dictionaryIndexConfig)
             .setSegmentZKMetadata(getSegmentZKMetadata(segmentName))

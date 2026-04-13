@@ -389,7 +389,7 @@ public class MemoryEstimator {
   }
 
   private int countInvertedColumns() {
-    Map<String, IndexConfig> invertedConfig = StandardIndexes.inverted().getConfig(_tableConfig, _schema);
+    Map<String, ? extends IndexConfig> invertedConfig = StandardIndexes.inverted().getConfig(_tableConfig, _schema);
     return (int) invertedConfig.values().stream()
         .filter(IndexConfig::isEnabled)
         .count();

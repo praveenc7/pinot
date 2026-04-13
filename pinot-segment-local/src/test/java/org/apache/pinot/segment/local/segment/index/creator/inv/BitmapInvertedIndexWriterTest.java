@@ -21,6 +21,11 @@ package org.apache.pinot.segment.local.segment.index.creator.inv;
 import com.google.common.collect.Collections2;
 import java.io.File;
 import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
@@ -30,6 +35,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.pinot.segment.local.PinotBuffersAfterMethodCheckRule;
 import org.apache.pinot.segment.local.segment.creator.impl.inv.BitmapInvertedIndexWriter;
 import org.apache.pinot.segment.local.segment.index.readers.BitmapInvertedIndexReader;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.memory.PinotDataBuffer;
 import org.roaringbitmap.RoaringBitmap;
 import org.roaringbitmap.RoaringBitmapWriter;
@@ -42,6 +48,7 @@ import org.testng.annotations.DataProvider;
 import org.testng.annotations.Test;
 
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNotEquals;
 
 
 public class BitmapInvertedIndexWriterTest implements PinotBuffersAfterMethodCheckRule {
@@ -85,21 +92,23 @@ public class BitmapInvertedIndexWriterTest implements PinotBuffersAfterMethodChe
     Collection<List<Integer>> permutations = Collections2.permutations(
         IntStream.range(0, _bitmaps.length + 1).boxed().collect(Collectors.toList())
     );
-    Object[][] testCases = new Object[permutations.size()][];
-    int i = 0;
-    for (List<Integer> permutation : permutations) {
-      int[] ints = new int[permutation.size()];
-      int j = 0;
-      for (Integer boxed : permutation) {
-        ints[j++] = boxed % _bitmaps.length;
+    int[] versions = {InvertedIndexConfig.VERSION_0, InvertedIndexConfig.VERSION_1};
+    List<Object[]> testCases = new ArrayList<>();
+    for (int version : versions) {
+      for (List<Integer> permutation : permutations) {
+        int[] ints = new int[permutation.size()];
+        int j = 0;
+        for (Integer boxed : permutation) {
+          ints[j++] = boxed % _bitmaps.length;
+        }
+        testCases.add(new Object[]{ints, version});
       }
-      testCases[i++] = new Object[] { ints };
     }
-    return testCases;
+    return testCases.toArray(new Object[0][]);
   }
 
   @Test(dataProvider = "bitmaps", testName = "test write bitmaps with permutation = ")
-  public void testWriteBitmaps(int[] indices)
+  public void testWriteBitmaps(int[] indices, int version)
       throws IOException {
     // indirection because TestNG will create huge test names otherwise
     RoaringBitmap[] bitmaps = new RoaringBitmap[indices.length];
@@ -107,22 +116,68 @@ public class BitmapInvertedIndexWriterTest implements PinotBuffersAfterMethodChe
     for (int index : indices) {
       bitmaps[i++] = _bitmaps[index];
     }
-    try (BitmapInvertedIndexWriter writer = new BitmapInvertedIndexWriter(_file, bitmaps.length)) {
+    try (FileChannel channel = new RandomAccessFile(_file, "rw").getChannel();
+        BitmapInvertedIndexWriter writer =
+            new BitmapInvertedIndexWriter(channel, bitmaps.length, true, version)) {
       for (RoaringBitmap bitmap : bitmaps) {
         writer.add(bitmap);
       }
     }
-    verifyReadable(bitmaps);
+    verifyReadable(bitmaps, version);
   }
 
-  private void verifyReadable(RoaringBitmap[] bitmaps)
+  @DataProvider(name = "versions")
+  public Object[][] versions() {
+    return new Object[][]{
+        {InvertedIndexConfig.VERSION_0},
+        {InvertedIndexConfig.VERSION_1}
+    };
+  }
+
+  @Test(dataProvider = "versions")
+  public void testWriteByteArrayBitmaps(int version)
+      throws IOException {
+    RoaringBitmap[] bitmaps = new RoaringBitmap[]{small(), huge(), empty()};
+    try (FileChannel channel = new RandomAccessFile(_file, "rw").getChannel();
+        BitmapInvertedIndexWriter writer =
+            new BitmapInvertedIndexWriter(channel, bitmaps.length, true, version)) {
+      for (RoaringBitmap bitmap : bitmaps) {
+        byte[] bytes = new byte[bitmap.serializedSizeInBytes()];
+        bitmap.serialize(ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN));
+        writer.add(bytes);
+      }
+    }
+    verifyReadable(bitmaps, version);
+  }
+
+  private void verifyReadable(RoaringBitmap[] bitmaps, int version)
       throws IOException {
     try (PinotDataBuffer buffer = PinotDataBuffer.mapReadOnlyBigEndianFile(_file);
          BitmapInvertedIndexReader reader = new BitmapInvertedIndexReader(buffer, bitmaps.length)) {
+      // Verify the correct version was written
+      int firstInt = buffer.getInt(0);
+      if (version == InvertedIndexConfig.VERSION_1) {
+        assertEquals(firstInt, BitmapInvertedIndexWriter.MAGIC_NUMBER,
+            "VERSION_1 file should start with magic number");
+        assertEquals(buffer.getInt(Integer.BYTES), InvertedIndexConfig.VERSION_1,
+            "VERSION_1 file should have version 1 in header");
+      } else {
+        assertNotEquals(firstInt, BitmapInvertedIndexWriter.MAGIC_NUMBER,
+            "VERSION_0 file should not start with magic number");
+      }
+      // Verify bitmap data is readable and contents match
       int dictId = 0;
       for (RoaringBitmap bitmap : bitmaps) {
-        ImmutableRoaringBitmap persisted = reader.getDocIds(dictId++);
-        assertEquals(bitmap.getCardinality(), persisted.getCardinality());
+        ImmutableRoaringBitmap persisted = reader.getDocIds(dictId);
+        assertEquals(persisted.getCardinality(), bitmap.getCardinality(),
+            "Bitmap cardinality mismatch at dictId " + dictId);
+        // For bitmaps small enough to materialize, verify exact content.
+        // The huge() bitmap has ~1B entries so toArray() would OOM.
+        if (bitmap.getCardinality() < 1_000_000) {
+          assertEquals(persisted.toArray(), bitmap.toArray(),
+              "Bitmap content mismatch at dictId " + dictId);
+        }
+        dictId++;
       }
     }
   }

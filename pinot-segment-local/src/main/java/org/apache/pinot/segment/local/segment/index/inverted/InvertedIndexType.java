@@ -22,6 +22,7 @@ package org.apache.pinot.segment.local.segment.index.inverted;
 import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
@@ -40,6 +41,7 @@ import org.apache.pinot.segment.spi.index.IndexConfigDeserializer;
 import org.apache.pinot.segment.spi.index.IndexHandler;
 import org.apache.pinot.segment.spi.index.IndexReaderConstraintException;
 import org.apache.pinot.segment.spi.index.IndexReaderFactory;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.index.StandardIndexes;
 import org.apache.pinot.segment.spi.index.column.ColumnIndexContainer;
 import org.apache.pinot.segment.spi.index.creator.DictionaryBasedInvertedIndexCreator;
@@ -59,7 +61,7 @@ import org.apache.pinot.spi.data.Schema;
 
 
 public class InvertedIndexType
-    extends AbstractIndexType<IndexConfig, InvertedIndexReader, DictionaryBasedInvertedIndexCreator> {
+    extends AbstractIndexType<InvertedIndexConfig, InvertedIndexReader, DictionaryBasedInvertedIndexCreator> {
   public static final String INDEX_DISPLAY_NAME = "inverted";
   private static final List<String> EXTENSIONS =
       Collections.singletonList(V1Constants.Indexes.BITMAP_INVERTED_INDEX_FILE_EXTENSION);
@@ -69,13 +71,13 @@ public class InvertedIndexType
   }
 
   @Override
-  public Class<IndexConfig> getIndexConfigClass() {
-    return IndexConfig.class;
+  public Class<InvertedIndexConfig> getIndexConfigClass() {
+    return InvertedIndexConfig.class;
   }
 
   @Override
-  public IndexConfig getDefaultConfig() {
-    return IndexConfig.DISABLED;
+  public InvertedIndexConfig getDefaultConfig() {
+    return InvertedIndexConfig.DISABLED;
   }
 
   @Override
@@ -96,31 +98,56 @@ public class InvertedIndexType
   }
 
   @Override
-  protected ColumnConfigDeserializer<IndexConfig> createDeserializerForLegacyConfigs() {
-    ColumnConfigDeserializer<IndexConfig> fromInvertedIndexColumns =
-        IndexConfigDeserializer.fromCollection(tableConfig -> tableConfig.getIndexingConfig().getInvertedIndexColumns(),
-            (acum, column) -> acum.put(column, IndexConfig.ENABLED));
-    ColumnConfigDeserializer<IndexConfig> fromFieldConfigs =
+  protected ColumnConfigDeserializer<InvertedIndexConfig> createDeserializerForLegacyConfigs() {
+    ColumnConfigDeserializer<InvertedIndexConfig> fromInvertedIndexColumns = (tableConfig, schema) -> {
+      List<String> columns = tableConfig.getIndexingConfig().getInvertedIndexColumns();
+      if (columns == null) {
+        return Collections.emptyMap();
+      }
+      int version = getInvertedIndexVersion(tableConfig);
+      Map<String, InvertedIndexConfig> result = new HashMap<>();
+      for (String column : columns) {
+        result.put(column, new InvertedIndexConfig(version));
+      }
+      return result;
+    };
+    ColumnConfigDeserializer<InvertedIndexConfig> fromFieldConfigs =
         IndexConfigDeserializer.fromIndexTypes(FieldConfig.IndexType.INVERTED,
-            (tableConfig, fieldConfig) -> IndexConfig.ENABLED);
+            (tableConfig, fieldConfig) -> new InvertedIndexConfig(getInvertedIndexVersion(tableConfig)));
     return fromInvertedIndexColumns.withFallbackAlternative(fromFieldConfigs);
+  }
+
+  private static int getInvertedIndexVersion(@Nullable TableConfig tableConfig) {
+    if (tableConfig == null) {
+      return InvertedIndexConfig.DEFAULT_VERSION;
+    }
+    int version = tableConfig.getIndexingConfig().getInvertedIndexVersion();
+    // Validate: the InvertedIndexConfig constructor checks this too, but fail early here
+    // with a clear message referencing the config field name.
+    Preconditions.checkArgument(version == InvertedIndexConfig.VERSION_0
+            || version == InvertedIndexConfig.VERSION_1,
+        "Unsupported invertedIndexVersion: %s. Valid values are %s and %s",
+        version, InvertedIndexConfig.VERSION_0, InvertedIndexConfig.VERSION_1);
+    return version;
   }
 
   public DictionaryBasedInvertedIndexCreator createIndexCreator(IndexCreationContext context)
       throws IOException {
-    if (context.isOnHeap()) {
-      return new OnHeapBitmapInvertedIndexCreator(context.getIndexDir(), context.getFieldSpec().getName(),
-          context.getCardinality());
-    } else {
-      return new OffHeapBitmapInvertedIndexCreator(context.getIndexDir(), context.getFieldSpec(),
-          context.getCardinality(), context.getTotalDocs(), context.getTotalNumberOfEntries());
-    }
+    return createIndexCreator(context, InvertedIndexConfig.ENABLED);
   }
 
   @Override
-  public DictionaryBasedInvertedIndexCreator createIndexCreator(IndexCreationContext context, IndexConfig indexConfig)
+  public DictionaryBasedInvertedIndexCreator createIndexCreator(IndexCreationContext context,
+      InvertedIndexConfig indexConfig)
       throws IOException {
-    return createIndexCreator(context);
+    int version = indexConfig.getVersion();
+    if (context.isOnHeap()) {
+      return new OnHeapBitmapInvertedIndexCreator(context.getIndexDir(), context.getFieldSpec().getName(),
+          context.getCardinality(), version);
+    } else {
+      return new OffHeapBitmapInvertedIndexCreator(context.getIndexDir(), context.getFieldSpec(),
+          context.getCardinality(), context.getTotalDocs(), context.getTotalNumberOfEntries(), version);
+    }
   }
 
   @Override
@@ -208,7 +235,7 @@ public class InvertedIndexType
 
   @Nullable
   @Override
-  public MutableIndex createMutableIndex(MutableIndexContext context, IndexConfig config) {
+  public MutableIndex createMutableIndex(MutableIndexContext context, InvertedIndexConfig config) {
     if (config.isDisabled()) {
       return null;
     }

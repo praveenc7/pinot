@@ -20,7 +20,10 @@ package org.apache.pinot.segment.local.segment.creator.impl.inv;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.channels.FileChannel;
 import org.apache.pinot.segment.spi.V1Constants;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.index.creator.DictionaryBasedInvertedIndexCreator;
 import org.roaringbitmap.Container;
 import org.roaringbitmap.RoaringBitmap;
@@ -35,9 +38,15 @@ public final class OnHeapBitmapInvertedIndexCreator implements DictionaryBasedIn
   private final File _invertedIndexFile;
   private final RoaringBitmapWriter<RoaringBitmap>[] _bitmapWriters;
   private int _nextDocId;
+  private final int _version;
 
   public OnHeapBitmapInvertedIndexCreator(File indexDir, String columnName, int cardinality) {
+    this(indexDir, columnName, cardinality, InvertedIndexConfig.DEFAULT_VERSION);
+  }
+
+  public OnHeapBitmapInvertedIndexCreator(File indexDir, String columnName, int cardinality, int version) {
     _invertedIndexFile = new File(indexDir, columnName + V1Constants.Indexes.BITMAP_INVERTED_INDEX_FILE_EXTENSION);
+    _version = version;
     RoaringBitmapWriter.Wizard<Container, RoaringBitmap> writerWizard = RoaringBitmapWriter.writer();
     _bitmapWriters = new RoaringBitmapWriter[cardinality];
     for (int i = 0; i < cardinality; i++) {
@@ -61,7 +70,10 @@ public final class OnHeapBitmapInvertedIndexCreator implements DictionaryBasedIn
   @Override
   public void seal()
       throws IOException {
-    try (BitmapInvertedIndexWriter writer = new BitmapInvertedIndexWriter(_invertedIndexFile, _bitmapWriters.length)) {
+    try (RandomAccessFile raf = new RandomAccessFile(_invertedIndexFile, "rw");
+        FileChannel channel = raf.getChannel();
+        BitmapInvertedIndexWriter writer =
+            new BitmapInvertedIndexWriter(channel, _bitmapWriters.length, true, _version)) {
       for (RoaringBitmapWriter<RoaringBitmap> bitmapWriter : _bitmapWriters) {
         writer.add(bitmapWriter.get());
       }

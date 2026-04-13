@@ -26,6 +26,7 @@ import org.apache.pinot.segment.local.segment.index.AbstractSerdeIndexContract;
 import org.apache.pinot.segment.spi.index.DictionaryIndexConfig;
 import org.apache.pinot.segment.spi.index.FieldIndexConfigs;
 import org.apache.pinot.segment.spi.index.IndexType;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.index.StandardIndexes;
 import org.apache.pinot.spi.config.table.FieldConfig;
 import org.apache.pinot.spi.config.table.IndexConfig;
@@ -394,8 +395,8 @@ public class DictionaryIndexTypeTest {
     assertFalse(result);
 
     // Ignore for inverted index
-    IndexConfig indexConfig = new IndexConfig(false);
-    fieldIndexConfigs = new FieldIndexConfigs.Builder().add(StandardIndexes.inverted(), indexConfig).build();
+    fieldIndexConfigs = new FieldIndexConfigs.Builder().add(StandardIndexes.inverted(),
+        InvertedIndexConfig.ENABLED).build();
     assertTrue(DictionaryIndexType.ignoreDictionaryOverride(true, true, 5, null, metric, fieldIndexConfigs, 5, 20));
   }
 }

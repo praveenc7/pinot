@@ -33,12 +33,12 @@ import org.apache.pinot.segment.spi.creator.IndexCreationContext;
 import org.apache.pinot.segment.spi.creator.SegmentVersion;
 import org.apache.pinot.segment.spi.index.FieldIndexConfigs;
 import org.apache.pinot.segment.spi.index.FieldIndexConfigsUtil;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.index.StandardIndexes;
 import org.apache.pinot.segment.spi.index.creator.DictionaryBasedInvertedIndexCreator;
 import org.apache.pinot.segment.spi.index.reader.ForwardIndexReader;
 import org.apache.pinot.segment.spi.index.reader.ForwardIndexReaderContext;
 import org.apache.pinot.segment.spi.store.SegmentDirectory;
-import org.apache.pinot.spi.config.table.IndexConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,6 +77,11 @@ public class InvertedIndexHandler extends BaseIndexHandler {
         return true;
       }
     }
+    // TODO: Add support for converting existing inverted indexes from VERSION_0 to VERSION_1 on segment reload.
+    //  This would require detecting the on-disk format version (by reading the first 4 bytes for the magic number)
+    //  and comparing it against the configured version in InvertedIndexConfig. If they differ, the index should be
+    //  deleted and recreated using the configured version. The existing createInvertedIndexForColumn() method
+    //  already handles recreation from the forward index.
     return false;
   }
 
@@ -141,8 +146,11 @@ public class InvertedIndexHandler extends BaseIndexHandler {
         .withColumnMetadata(columnMetadata)
         .build();
 
+    FieldIndexConfigs fieldIndexConfigs = _fieldIndexConfigs.get(columnName);
+    InvertedIndexConfig invertedIndexConfig = fieldIndexConfigs != null
+        ? fieldIndexConfigs.getConfig(StandardIndexes.inverted()) : InvertedIndexConfig.ENABLED;
     try (DictionaryBasedInvertedIndexCreator creator = StandardIndexes.inverted()
-        .createIndexCreator(context, IndexConfig.ENABLED)) {
+        .createIndexCreator(context, invertedIndexConfig)) {
       try (ForwardIndexReader forwardIndexReader = ForwardIndexType.read(segmentWriter, columnMetadata);
           ForwardIndexReaderContext readerContext = forwardIndexReader.createContext()) {
         if (columnMetadata.isSingleValue()) {

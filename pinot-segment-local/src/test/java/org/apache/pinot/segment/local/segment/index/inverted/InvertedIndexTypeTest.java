@@ -21,9 +21,9 @@ package org.apache.pinot.segment.local.segment.index.inverted;
 import java.io.IOException;
 import java.util.stream.Collectors;
 import org.apache.pinot.segment.local.segment.index.AbstractSerdeIndexContract;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.index.StandardIndexes;
 import org.apache.pinot.spi.config.table.FieldConfig;
-import org.apache.pinot.spi.config.table.IndexConfig;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
@@ -39,7 +39,7 @@ public class InvertedIndexTypeTest {
 
   public static class ConfTest extends AbstractSerdeIndexContract {
 
-    protected void assertEquals(IndexConfig expected) {
+    protected void assertEquals(InvertedIndexConfig expected) {
       Assert.assertEquals(getActualConfig("dimInt", StandardIndexes.inverted()), expected);
     }
 
@@ -50,7 +50,7 @@ public class InvertedIndexTypeTest {
           .setInvertedIndexColumns(parseStringList("[]")
       );
 
-      assertEquals(IndexConfig.DISABLED);
+      assertEquals(InvertedIndexConfig.DISABLED);
     }
 
     @Test
@@ -59,7 +59,7 @@ public class InvertedIndexTypeTest {
       _tableConfig.getIndexingConfig()
           .setInvertedIndexColumns(parseStringList("[\"dimInt\"]"));
 
-      assertEquals(IndexConfig.ENABLED);
+      assertEquals(InvertedIndexConfig.ENABLED);
     }
 
     @Test
@@ -72,7 +72,7 @@ public class InvertedIndexTypeTest {
           + "    }\n"
           + "}");
 
-      assertEquals(IndexConfig.DISABLED);
+      assertEquals(InvertedIndexConfig.DISABLED);
     }
 
     @Test
@@ -89,7 +89,7 @@ public class InvertedIndexTypeTest {
           + "}"
       );
 
-      assertEquals(IndexConfig.DISABLED);
+      assertEquals(InvertedIndexConfig.DISABLED);
     }
 
     @Test
@@ -105,7 +105,62 @@ public class InvertedIndexTypeTest {
           + "    }\n"
           + "}"
       );
-      assertEquals(IndexConfig.ENABLED);
+      assertEquals(InvertedIndexConfig.ENABLED);
+    }
+
+    @Test
+    public void newConfWithVersion1()
+        throws IOException {
+      addFieldIndexConfig(
+          "{\n"
+          + "    \"name\": \"dimInt\",\n"
+          + "    \"indexes\" : {\n"
+          + "      \"inverted\": {\n"
+          + "         \"version\": 1\n"
+          + "      }\n"
+          + "    }\n"
+          + "}"
+      );
+      InvertedIndexConfig actual = (InvertedIndexConfig) getActualConfig("dimInt", StandardIndexes.inverted());
+      assertFalse(actual.isDisabled());
+      Assert.assertEquals(actual.getVersion(), InvertedIndexConfig.VERSION_1);
+    }
+
+    @Test
+    public void newConfWithVersion0()
+        throws IOException {
+      addFieldIndexConfig(
+          "{\n"
+          + "    \"name\": \"dimInt\",\n"
+          + "    \"indexes\" : {\n"
+          + "      \"inverted\": {\n"
+          + "         \"version\": 0\n"
+          + "      }\n"
+          + "    }\n"
+          + "}"
+      );
+      InvertedIndexConfig actual = (InvertedIndexConfig) getActualConfig("dimInt", StandardIndexes.inverted());
+      assertFalse(actual.isDisabled());
+      Assert.assertEquals(actual.getVersion(), InvertedIndexConfig.VERSION_0);
+    }
+
+    @Test
+    public void newConfWithVersionAndDisabled()
+        throws IOException {
+      addFieldIndexConfig(
+          "{\n"
+          + "    \"name\": \"dimInt\",\n"
+          + "    \"indexes\" : {\n"
+          + "      \"inverted\": {\n"
+          + "         \"disabled\": false,\n"
+          + "         \"version\": 1\n"
+          + "      }\n"
+          + "    }\n"
+          + "}"
+      );
+      InvertedIndexConfig actual = (InvertedIndexConfig) getActualConfig("dimInt", StandardIndexes.inverted());
+      assertFalse(actual.isDisabled());
+      Assert.assertEquals(actual.getVersion(), InvertedIndexConfig.VERSION_1);
     }
 
     @Test

@@ -20,6 +20,7 @@ package org.apache.pinot.segment.local.segment.index.readers;
 
 import java.nio.ByteOrder;
 import org.apache.pinot.segment.local.segment.creator.impl.inv.BitmapInvertedIndexWriter;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.index.reader.InvertedIndexReader;
 import org.apache.pinot.segment.spi.memory.PinotDataBuffer;
 import org.roaringbitmap.buffer.ImmutableRoaringBitmap;
@@ -30,22 +31,42 @@ import org.slf4j.LoggerFactory;
 /**
  * Reader for bitmap based inverted index. Please reference
  * {@link BitmapInvertedIndexWriter} for the index file layout.
+ *
+ * <p>Supports two formats:
+ * <ul>
+ *   <li>VERSION_0 (legacy): no header, 32-bit offsets. Detected by the absence of the magic number.</li>
+ *   <li>VERSION_1: magic + version header, 64-bit offsets. Detected by magic number at byte 0.</li>
+ * </ul>
  */
 public class BitmapInvertedIndexReader implements InvertedIndexReader<ImmutableRoaringBitmap> {
   public static final Logger LOGGER = LoggerFactory.getLogger(BitmapInvertedIndexReader.class);
 
+  private final int _version;
   private final PinotDataBuffer _offsetBuffer;
   private final PinotDataBuffer _bitmapBuffer;
 
-  // Use the offset of the first bitmap to support 2 different format of the inverted index:
-  //   1. Offset buffer stores the offsets within the whole data buffer (including offset buffer)
-  //   2. Offset buffer stores the offsets within the bitmap buffer
+  // Offset of the first bitmap (absolute position in the file). Used to compute positions within _bitmapBuffer.
   private final long _firstOffset;
 
   public BitmapInvertedIndexReader(PinotDataBuffer dataBuffer, int numBitmaps) {
-    long offsetBufferEndOffset = (long) (numBitmaps + 1) * Integer.BYTES;
-    _offsetBuffer = dataBuffer.view(0, offsetBufferEndOffset, ByteOrder.BIG_ENDIAN);
-    _bitmapBuffer = dataBuffer.view(offsetBufferEndOffset, dataBuffer.size());
+    int firstInt = dataBuffer.getInt(0);
+    if (firstInt == BitmapInvertedIndexWriter.MAGIC_NUMBER) {
+      _version = dataBuffer.getInt(Integer.BYTES);
+      if (_version == InvertedIndexConfig.VERSION_1) {
+        long offsetsStart = BitmapInvertedIndexWriter.HEADER_SIZE_V1;
+        long offsetsEnd = offsetsStart + (long) (numBitmaps + 1) * Long.BYTES;
+        _offsetBuffer = dataBuffer.view(offsetsStart, offsetsEnd, ByteOrder.BIG_ENDIAN);
+        _bitmapBuffer = dataBuffer.view(offsetsEnd, dataBuffer.size());
+      } else {
+        throw new IllegalStateException("Unknown inverted index version: " + _version);
+      }
+    } else {
+      // Legacy VERSION_0: no header, 32-bit offsets
+      _version = InvertedIndexConfig.VERSION_0;
+      long offsetBufferEndOffset = (long) (numBitmaps + 1) * Integer.BYTES;
+      _offsetBuffer = dataBuffer.view(0, offsetBufferEndOffset, ByteOrder.BIG_ENDIAN);
+      _bitmapBuffer = dataBuffer.view(offsetBufferEndOffset, dataBuffer.size());
+    }
     _firstOffset = getOffset(0);
   }
 
@@ -58,7 +79,10 @@ public class BitmapInvertedIndexReader implements InvertedIndexReader<ImmutableR
   }
 
   private long getOffset(int dictId) {
-    return _offsetBuffer.getInt(dictId * Integer.BYTES) & 0xFFFFFFFFL;
+    if (_version == InvertedIndexConfig.VERSION_1) {
+      return _offsetBuffer.getLong((long) dictId * Long.BYTES);
+    }
+    return _offsetBuffer.getInt((long) dictId * Integer.BYTES) & 0xFFFFFFFFL;
   }
 
   @Override

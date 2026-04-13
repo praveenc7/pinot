@@ -38,7 +38,14 @@ public class IndexingConfig extends BaseJsonConfig {
    */
   private static final int DEFAULT_RANGE_INDEX_VERSION = 2;
 
+  /**
+   * This should be equal to the DEFAULT_VERSION in InvertedIndexConfig.
+   */
+  // Must match InvertedIndexConfig.DEFAULT_VERSION
+  private static final int DEFAULT_INVERTED_INDEX_VERSION = 0;
+
   private List<String> _invertedIndexColumns;
+  private int _invertedIndexVersion = DEFAULT_INVERTED_INDEX_VERSION;
   private List<String> _rangeIndexColumns;
   private int _rangeIndexVersion = DEFAULT_RANGE_INDEX_VERSION;
   @Deprecated
@@ -111,6 +118,14 @@ public class IndexingConfig extends BaseJsonConfig {
 
   public void setInvertedIndexColumns(List<String> invertedIndexColumns) {
     _invertedIndexColumns = invertedIndexColumns;
+  }
+
+  public int getInvertedIndexVersion() {
+    return _invertedIndexVersion;
+  }
+
+  public void setInvertedIndexVersion(int invertedIndexVersion) {
+    _invertedIndexVersion = invertedIndexVersion;
   }
 
   public List<String> getRangeIndexColumns() {

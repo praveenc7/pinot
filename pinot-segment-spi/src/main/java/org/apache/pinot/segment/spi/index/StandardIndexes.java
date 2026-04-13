@@ -107,8 +107,8 @@ public class StandardIndexes {
         IndexService.getInstance().get(FST_ID);
   }
 
-  public static IndexType<IndexConfig, InvertedIndexReader, DictionaryBasedInvertedIndexCreator> inverted() {
-    return (IndexType<IndexConfig, InvertedIndexReader, DictionaryBasedInvertedIndexCreator>)
+  public static IndexType<InvertedIndexConfig, InvertedIndexReader, DictionaryBasedInvertedIndexCreator> inverted() {
+    return (IndexType<InvertedIndexConfig, InvertedIndexReader, DictionaryBasedInvertedIndexCreator>)
         IndexService.getInstance().get(INVERTED_ID);
   }
 

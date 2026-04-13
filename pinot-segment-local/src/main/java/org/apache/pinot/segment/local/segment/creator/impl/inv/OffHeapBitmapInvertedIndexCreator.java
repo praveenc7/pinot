@@ -27,6 +27,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.attribute.FileAttribute;
 import org.apache.commons.io.FileUtils;
 import org.apache.pinot.segment.spi.V1Constants;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.index.creator.DictionaryBasedInvertedIndexCreator;
 import org.apache.pinot.segment.spi.memory.PinotDataBuffer;
 import org.apache.pinot.spi.data.FieldSpec;
@@ -72,6 +73,7 @@ public final class OffHeapBitmapInvertedIndexCreator implements DictionaryBasedI
   private final int _numDocs;
   private final int _numValues;
   private final boolean _useMMapBuffer;
+  private final int _version;
 
   // Forward index buffers (from docId to dictId)
   private int _nextDocId;
@@ -98,6 +100,17 @@ public final class OffHeapBitmapInvertedIndexCreator implements DictionaryBasedI
   }
 
   /**
+   * Like calling {@link #OffHeapBitmapInvertedIndexCreator(File, String, boolean, int, int, int, String, int)} with
+   * the default bitmap inverted index file extension.
+   */
+  public OffHeapBitmapInvertedIndexCreator(File indexDir, FieldSpec fieldSpec, int cardinality, int numDocs,
+      int numValues, int version)
+      throws IOException {
+    this(indexDir, fieldSpec.getName(), fieldSpec.isSingleValueField(), cardinality, numDocs, numValues,
+        V1Constants.Indexes.BITMAP_INVERTED_INDEX_FILE_EXTENSION, version);
+  }
+
+  /**
    * Like calling {@link #OffHeapBitmapInvertedIndexCreator(File, String, boolean, int, int, int, String)} with
    * the column name and single value specified by the given {@link FieldSpec}.
    *
@@ -106,7 +119,8 @@ public final class OffHeapBitmapInvertedIndexCreator implements DictionaryBasedI
   public OffHeapBitmapInvertedIndexCreator(File indexDir, FieldSpec fieldSpec, int cardinality, int numDocs,
       int numValues, String extension)
       throws IOException {
-    this(indexDir, fieldSpec.getName(), fieldSpec.isSingleValueField(), cardinality, numDocs, numValues, extension);
+    this(indexDir, fieldSpec.getName(), fieldSpec.isSingleValueField(), cardinality, numDocs, numValues, extension,
+        InvertedIndexConfig.DEFAULT_VERSION);
   }
 
   /**
@@ -123,6 +137,25 @@ public final class OffHeapBitmapInvertedIndexCreator implements DictionaryBasedI
   public OffHeapBitmapInvertedIndexCreator(File indexDir, String columnName, boolean singleValue, int cardinality,
       int numDocs, int numValues, String extension)
       throws IOException {
+    this(indexDir, columnName, singleValue, cardinality, numDocs, numValues, extension,
+        InvertedIndexConfig.DEFAULT_VERSION);
+  }
+
+  /**
+   * @param indexDir The directory where the index will be created.
+   * @param columnName The name of the column being indexed.
+   * @param singleValue True iff the column is single value.
+   * @param cardinality How many different values the column has.
+   * @param numDocs How many documents are expected.
+   * @param numValues How many values the index will have. This should be equal to numDocs in single value columns, but
+   *                  may be higher in multivalued columns.
+   * @param extension The suffix added to the file. Although is called extension, it behaves like
+   * {@link java.nio.file.Files#createTempFile(String, String, FileAttribute[])} suffix parameter.
+   * @param version The inverted index file format version to write.
+   */
+  public OffHeapBitmapInvertedIndexCreator(File indexDir, String columnName, boolean singleValue, int cardinality,
+      int numDocs, int numValues, String extension, int version)
+      throws IOException {
     String ext = extension.equals(V1Constants.Indexes.BITMAP_INVERTED_INDEX_FILE_EXTENSION) ? "" : "." + extension;
     _invertedIndexFile = getDefaultFile(indexDir, columnName, extension);
     _forwardIndexValueBufferFile = getDefaultFile(indexDir, columnName, ext + FORWARD_INDEX_VALUE_BUFFER_SUFFIX);
@@ -134,6 +167,7 @@ public final class OffHeapBitmapInvertedIndexCreator implements DictionaryBasedI
     _numDocs = numDocs;
     _numValues = _singleValue ? numDocs : numValues;
     _useMMapBuffer = _numValues > NUM_VALUES_THRESHOLD_FOR_MMAP_BUFFER;
+    _version = version;
 
     try {
       _forwardIndexValueBuffer = createTempBuffer((long) _numValues * Integer.BYTES, _forwardIndexValueBufferFile);
@@ -235,7 +269,7 @@ public final class OffHeapBitmapInvertedIndexCreator implements DictionaryBasedI
   private void write(FileChannel channel)
       throws IOException {
     // Create bitmaps from inverted index buffers and serialize them to file
-    try (BitmapInvertedIndexWriter writer = new BitmapInvertedIndexWriter(channel, _cardinality, false)) {
+    try (BitmapInvertedIndexWriter writer = new BitmapInvertedIndexWriter(channel, _cardinality, false, _version)) {
       RoaringBitmapWriter<RoaringBitmap> bitmapWriter = RoaringBitmapWriter.writer().get();
       int startIndex = 0;
       for (int dictId = 0; dictId < _cardinality; dictId++) {

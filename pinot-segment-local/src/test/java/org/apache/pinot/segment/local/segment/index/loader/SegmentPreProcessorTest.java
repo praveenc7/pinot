@@ -38,9 +38,11 @@ import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.pinot.segment.local.PinotBuffersAfterClassCheckRule;
 import org.apache.pinot.segment.local.segment.creator.SegmentTestUtils;
 import org.apache.pinot.segment.local.segment.creator.impl.SegmentIndexCreationDriverImpl;
+import org.apache.pinot.segment.local.segment.creator.impl.inv.BitmapInvertedIndexWriter;
 import org.apache.pinot.segment.local.segment.index.converter.SegmentV1V2ToV3FormatConverter;
 import org.apache.pinot.segment.local.segment.index.forward.ForwardIndexType;
 import org.apache.pinot.segment.local.segment.index.loader.columnminmaxvalue.ColumnMinMaxValueGeneratorMode;
+import org.apache.pinot.segment.local.segment.index.readers.BitmapInvertedIndexReader;
 import org.apache.pinot.segment.local.segment.readers.GenericRowRecordReader;
 import org.apache.pinot.segment.local.segment.store.SegmentLocalFSDirectory;
 import org.apache.pinot.segment.local.utils.SegmentAllIndexPreprocessThrottler;
@@ -56,6 +58,7 @@ import org.apache.pinot.segment.spi.index.IndexType;
 import org.apache.pinot.segment.spi.index.StandardIndexes;
 import org.apache.pinot.segment.spi.index.metadata.SegmentMetadataImpl;
 import org.apache.pinot.segment.spi.index.reader.ForwardIndexReader;
+import org.apache.pinot.segment.spi.memory.PinotDataBuffer;
 import org.apache.pinot.segment.spi.store.SegmentDirectory;
 import org.apache.pinot.segment.spi.store.SegmentDirectoryPaths;
 import org.apache.pinot.segment.spi.utils.SegmentMetadataUtils;
@@ -1792,5 +1795,73 @@ public class SegmentPreProcessorTest implements PinotBuffersAfterClassCheckRule 
         _newColumnsSchemaWithForwardIndexDisabled, true, true, false, 4, false, 1, null, true, DataType.STRING, 100000);
     validateIndexDoesNotExist(NEWLY_ADDED_FORWARD_INDEX_DISABLED_COL_MV, StandardIndexes.inverted());
     validateIndexExists(NEWLY_ADDED_FORWARD_INDEX_DISABLED_COL_MV, StandardIndexes.dictionary());
+  }
+
+  /**
+   * Tests that reloading a segment with invertedIndexVersion=1 when the existing indexes are VERSION_0
+   * does not trigger index recreation. The V0 inverted index should remain intact and readable.
+   */
+  @Test
+  public void testReloadWithVersionMismatchDoesNotRecreateInvertedIndex()
+      throws Exception {
+    // Build segment with default config (VERSION_0 inverted indexes)
+    buildV1Segment();
+
+    // column7 has an inverted index (set up in resetIndexConfigs)
+    File col7InvFile = new File(INDEX_DIR,
+        COLUMN7_NAME + V1Constants.Indexes.BITMAP_INVERTED_INDEX_FILE_EXTENSION);
+    assertTrue(col7InvFile.exists(), "column7 inverted index should exist after build");
+
+    // Verify the file is VERSION_0: first 4 bytes must NOT be the V1 magic number
+    int firstIntBefore = readFirstInt(col7InvFile);
+    assertNotEquals(firstIntBefore, BitmapInvertedIndexWriter.MAGIC_NUMBER,
+        "Index file should be VERSION_0 (no magic number) before reload");
+
+    // Read bitmap contents before reload for comparison
+    int cardinality =
+        new SegmentMetadataImpl(INDEX_DIR).getColumnMetadataFor(COLUMN7_NAME).getCardinality();
+    int[][] bitmapsBefore = readBitmapContents(col7InvFile, cardinality);
+
+    // Now change config to VERSION_1 and run preprocessor (simulating reload after config change)
+    TableConfig tableConfig = createTableConfig();
+    tableConfig.getIndexingConfig().setInvertedIndexVersion(1);
+    IndexLoadingConfig loadingConfig = new IndexLoadingConfig(tableConfig, _schema);
+
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentPreProcessor processor = new SegmentPreProcessor(segmentDirectory, loadingConfig, _schema)) {
+      processor.process(SEGMENT_OPERATIONS_THROTTLER);
+    }
+
+    // Verify the file still exists and is still VERSION_0 (not converted to V1)
+    assertTrue(col7InvFile.exists(), "column7 inverted index should still exist after reload");
+    int firstIntAfter = readFirstInt(col7InvFile);
+    assertNotEquals(firstIntAfter, BitmapInvertedIndexWriter.MAGIC_NUMBER,
+        "Index file should remain VERSION_0 (no magic number) after reload with version mismatch");
+
+    // Verify bitmap contents are identical after reload
+    int[][] bitmapsAfter = readBitmapContents(col7InvFile, cardinality);
+    for (int dictId = 0; dictId < cardinality; dictId++) {
+      assertEquals(bitmapsAfter[dictId], bitmapsBefore[dictId],
+          "Bitmap content for dictId " + dictId + " should be unchanged after reload");
+    }
+  }
+
+  private static int readFirstInt(File file)
+      throws IOException {
+    try (java.io.DataInputStream dis = new java.io.DataInputStream(new java.io.FileInputStream(file))) {
+      return dis.readInt();
+    }
+  }
+
+  private static int[][] readBitmapContents(File indexFile, int cardinality)
+      throws IOException {
+    int[][] result = new int[cardinality][];
+    try (PinotDataBuffer dataBuffer = PinotDataBuffer.mapReadOnlyBigEndianFile(indexFile);
+        BitmapInvertedIndexReader reader = new BitmapInvertedIndexReader(dataBuffer, cardinality)) {
+      for (int dictId = 0; dictId < cardinality; dictId++) {
+        result[dictId] = reader.getDocIds(dictId).toArray();
+      }
+    }
+    return result;
   }
 }
