@@ -2517,6 +2517,67 @@ public class ExplainPlanQueriesTest extends BaseQueriesTest {
     check(query, new ResultTable(DATA_SCHEMA, result));
   }
 
+  @Test
+  public void testSelectCountIfAggregate() {
+    // COUNTIF should produce the same explain plan as COUNT(*) FILTER(WHERE ...).
+    // The plan uses AGGREGATE_FILTERED with a FILTER_INVERTED_INDEX since invertedIndexCol2 has an inverted index.
+    // All 4 segments contain invertedIndexCol2 = 1, so all segments match.
+    String query1 = "EXPLAIN PLAN FOR SELECT COUNTIF(invertedIndexCol2 = 1) FROM testTable";
+    List<Object[]> result1 = new ArrayList<>();
+    result1.add(new Object[]{
+        "BROKER_REDUCE(limit:10,postAggregations:filter(count(*),equals(invertedIndexCol2,'1')))", 1, 0
+    });
+    result1.add(new Object[]{"COMBINE_AGGREGATE", 2, 1});
+    result1.add(new Object[]{
+        "PLAN_START(numSegmentsForThisPlan:4)", ExplainPlanRows.PLAN_START_IDS, ExplainPlanRows.PLAN_START_IDS
+    });
+    result1.add(new Object[]{"AGGREGATE_FILTERED", 3, 2});
+    result1.add(new Object[]{"PROJECT()", 4, 3});
+    result1.add(new Object[]{"DOC_ID_SET", 5, 4});
+    result1.add(new Object[]{
+        "FILTER_INVERTED_INDEX(indexLookUp:inverted_index,operator:EQ,predicate:invertedIndexCol2 = '1')", 6, 5
+    });
+    check(query1, new ResultTable(DATA_SCHEMA, result1));
+  }
+
+  @Test
+  public void testSelectCountIfMatchesFilterGroupBy() {
+    // COUNTIF with GROUP BY should produce the same explain plan as COUNT(*) FILTER
+    ResultTable countIfPlan = getBrokerResponse(
+        "EXPLAIN PLAN FOR SELECT noIndexCol3, COUNTIF(invertedIndexCol2 = 1) "
+            + "FROM testTable GROUP BY noIndexCol3").getResultTable();
+    ResultTable filterPlan = getBrokerResponse(
+        "EXPLAIN PLAN FOR SELECT noIndexCol3, COUNT(*) FILTER(WHERE invertedIndexCol2 = 1) "
+            + "FROM testTable GROUP BY noIndexCol3").getResultTable();
+
+    List<Object[]> countIfRows = countIfPlan.getRows();
+    List<Object[]> filterRows = filterPlan.getRows();
+    Assert.assertEquals(countIfRows.size(), filterRows.size(),
+        "COUNTIF and FILTER GROUP BY explain plan row count should match");
+    for (int i = 0; i < countIfRows.size(); i++) {
+      Assert.assertEquals(countIfRows.get(i), filterRows.get(i),
+          "COUNTIF and FILTER GROUP BY explain plan row " + i + " should match");
+    }
+  }
+
+  @Test
+  public void testSelectCountIfMatchesFilterExplainPlan() {
+    // Verify that COUNTIF and COUNT(*) FILTER produce the exact same explain plan
+    ResultTable countIfPlan = getBrokerResponse(
+        "EXPLAIN PLAN FOR SELECT COUNTIF(invertedIndexCol2 = 1) FROM testTable").getResultTable();
+    ResultTable filterPlan = getBrokerResponse(
+        "EXPLAIN PLAN FOR SELECT COUNT(*) FILTER(WHERE invertedIndexCol2 = 1) FROM testTable").getResultTable();
+
+    List<Object[]> countIfRows = countIfPlan.getRows();
+    List<Object[]> filterRows = filterPlan.getRows();
+    Assert.assertEquals(countIfRows.size(), filterRows.size(),
+        "COUNTIF and FILTER explain plan row count should match");
+    for (int i = 0; i < countIfRows.size(); i++) {
+      Assert.assertEquals(countIfRows.get(i), filterRows.get(i),
+          "COUNTIF and FILTER explain plan row " + i + " should match");
+    }
+  }
+
   @AfterClass
   public void tearDown() {
     _brokerReduceService.shutDown();

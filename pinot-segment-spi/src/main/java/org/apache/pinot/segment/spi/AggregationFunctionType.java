@@ -157,6 +157,9 @@ public enum AggregationFunctionType {
   BOOLAND("boolAnd", ReturnTypes.BOOLEAN, OperandTypes.BOOLEAN, SqlTypeName.INTEGER),
   BOOLOR("boolOr", ReturnTypes.BOOLEAN, OperandTypes.BOOLEAN, SqlTypeName.INTEGER),
 
+  // Conditional aggregate functions
+  COUNTIF("countIf", ReturnTypes.BIGINT, OperandTypes.BOOLEAN, SqlTypeName.BIGINT),
+
   // ExprMin and ExprMax
   // TODO: revisit support for ExprMin/Max count in V2, particularly plug query rewriter in the right place
   EXPRMIN("exprMin", ReturnTypes.ARG0, OperandTypes.VARIADIC, SqlTypeName.OTHER),

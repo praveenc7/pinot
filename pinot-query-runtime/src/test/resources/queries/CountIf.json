@@ -1,0 +1,266 @@
+{
+  "countif_with_join": {
+    "tables": {
+      "orders": {
+        "schema": [
+          {"name": "order_id", "type": "INT"},
+          {"name": "product_id", "type": "INT"},
+          {"name": "amount", "type": "DOUBLE"},
+          {"name": "is_returned", "type": "BOOLEAN"}
+        ],
+        "inputs": [
+          [1, 1, 100.0, false],
+          [2, 1, 200.0, false],
+          [3, 2, 50.0, true],
+          [4, 2, 75.0, false],
+          [5, 3, 300.0, true],
+          [6, 3, 150.0, false]
+        ]
+      },
+      "products": {
+        "schema": [
+          {"name": "product_id", "type": "INT"},
+          {"name": "product_name", "type": "STRING"},
+          {"name": "price", "type": "DOUBLE"}
+        ],
+        "inputs": [
+          [1, "Widget", 99.99],
+          [2, "Gadget", 49.99],
+          [3, "Doohickey", 199.99]
+        ]
+      }
+    },
+    "queries": [
+      {
+        "description": "COUNTIF with JOIN - count returned orders per product",
+        "sql": "SELECT {products}.product_name, COUNTIF({orders}.is_returned) FROM {orders} JOIN {products} ON {orders}.product_id = {products}.product_id GROUP BY {products}.product_name ORDER BY {products}.product_name",
+        "outputs": [["Doohickey", 1], ["Gadget", 1], ["Widget", 0]]
+      },
+      {
+        "description": "COUNTIF with JOIN - filter on join column value",
+        "sql": "SELECT COUNTIF({orders}.amount > 100) FROM {orders} JOIN {products} ON {orders}.product_id = {products}.product_id",
+        "outputs": [[3]]
+      },
+      {
+        "description": "COUNTIF with JOIN mixed with other aggs",
+        "sql": "SELECT {products}.product_name, COUNT(*), COUNTIF({orders}.amount > 100), SUM({orders}.amount) FROM {orders} JOIN {products} ON {orders}.product_id = {products}.product_id GROUP BY {products}.product_name ORDER BY {products}.product_name",
+        "outputs": [["Doohickey", 2, 2, 450.0], ["Gadget", 2, 0, 125.0], ["Widget", 2, 1, 300.0]]
+      },
+      {
+        "description": "COUNTIF with JOIN matches COUNT FILTER equivalent - returned orders per product",
+        "sql": "SELECT {products}.product_name, COUNT(*) FILTER (WHERE {orders}.is_returned) FROM {orders} JOIN {products} ON {orders}.product_id = {products}.product_id GROUP BY {products}.product_name ORDER BY {products}.product_name",
+        "outputs": [["Doohickey", 1], ["Gadget", 1], ["Widget", 0]]
+      },
+      {
+        "description": "COUNTIF with JOIN matches COUNT FILTER equivalent - amount filter",
+        "sql": "SELECT COUNTIF({orders}.amount > 100), COUNT(*) FILTER (WHERE {orders}.amount > 100) FROM {orders} JOIN {products} ON {orders}.product_id = {products}.product_id",
+        "outputs": [[3, 3]]
+      }
+    ]
+  },
+  "countif_basic": {
+    "tables": {
+      "tbl": {
+        "schema": [
+          {"name": "int_col", "type": "INT"},
+          {"name": "double_col", "type": "DOUBLE"},
+          {"name": "string_col", "type": "STRING"},
+          {"name": "bool_col", "type": "BOOLEAN"}
+        ],
+        "inputs": [
+          [2, 300, "a", true],
+          [2, 400, "a", true],
+          [3, 100, "b", false],
+          [100, 1, "b", false],
+          [101, 1.01, "c", false],
+          [150, 1.5, "c", false],
+          [175, 1.75, "c", true]
+        ]
+      }
+    },
+    "queries": [
+      {
+        "description": "simple countif with comparison predicate (4 rows have int_col > 10: 100, 101, 150, 175)",
+        "sql": "SELECT COUNTIF(int_col > 10) FROM {tbl}",
+        "outputs": [[4]]
+      },
+      {
+        "description": "countif with equality predicate (2 rows have string_col = 'a')",
+        "sql": "SELECT COUNTIF(string_col = 'a') FROM {tbl}",
+        "outputs": [[2]]
+      },
+      {
+        "description": "countif with boolean column (3 rows have bool_col = true)",
+        "sql": "SELECT COUNTIF(bool_col) FROM {tbl}",
+        "outputs": [[3]]
+      },
+      {
+        "description": "countif with AND predicate (3 rows: 101, 150, 175 have int_col > 10 AND string_col = 'c')",
+        "sql": "SELECT COUNTIF(int_col > 10 AND string_col = 'c') FROM {tbl}",
+        "outputs": [[3]]
+      },
+      {
+        "description": "countif with OR predicate (string_col = 'a': 2 rows, int_col > 100: 3 rows, union: 5)",
+        "sql": "SELECT COUNTIF(string_col = 'a' OR int_col > 100) FROM {tbl}",
+        "outputs": [[5]]
+      },
+      {
+        "description": "countif that matches no rows returns 0",
+        "sql": "SELECT COUNTIF(int_col > 9999) FROM {tbl}",
+        "outputs": [[0]]
+      },
+      {
+        "description": "countif that matches all rows",
+        "sql": "SELECT COUNTIF(int_col > 0) FROM {tbl}",
+        "outputs": [[7]]
+      },
+      {
+        "description": "multiple countifs in same query",
+        "sql": "SELECT COUNTIF(int_col > 10), COUNTIF(string_col = 'a') FROM {tbl}",
+        "outputs": [[4, 2]]
+      },
+      {
+        "description": "countif mixed with other aggregations",
+        "sql": "SELECT COUNT(*), COUNTIF(int_col > 10), SUM(int_col) FROM {tbl}",
+        "outputs": [[7, 4, 533]]
+      },
+      {
+        "description": "countif with WHERE clause (only b,c rows: 3,100,101,150,175; of those int_col > 10: 100,101,150,175)",
+        "sql": "SELECT COUNTIF(int_col > 10) FROM {tbl} WHERE string_col IN ('b', 'c')",
+        "outputs": [[4]]
+      },
+      {
+        "description": "countif with GROUP BY (a: 0 rows > 10, b: 1 row > 10, c: 3 rows > 10)",
+        "sql": "SELECT string_col, COUNTIF(int_col > 10) FROM {tbl} GROUP BY string_col ORDER BY string_col",
+        "outputs": [["a", 0], ["b", 1], ["c", 3]]
+      },
+      {
+        "description": "countif with GROUP BY and ORDER BY result",
+        "sql": "SELECT string_col, COUNTIF(int_col > 10) AS cnt FROM {tbl} GROUP BY string_col ORDER BY cnt DESC",
+        "outputs": [["c", 3], ["b", 1], ["a", 0]]
+      },
+      {
+        "description": "countif mixed with other aggs and GROUP BY",
+        "sql": "SELECT string_col, COUNT(*), COUNTIF(int_col > 10), SUM(double_col) FROM {tbl} GROUP BY string_col ORDER BY string_col",
+        "outputs": [["a", 2, 0, 700.0], ["b", 2, 1, 101.0], ["c", 3, 3, 4.26]]
+      },
+      {
+        "description": "multiple countifs with GROUP BY",
+        "sql": "SELECT string_col, COUNTIF(int_col > 10), COUNTIF(bool_col) FROM {tbl} GROUP BY string_col ORDER BY string_col",
+        "outputs": [["a", 0, 2], ["b", 1, 0], ["c", 3, 1]]
+      },
+      {
+        "description": "count_if underscore variant",
+        "sql": "SELECT COUNT_IF(int_col > 10) FROM {tbl}",
+        "outputs": [[4]]
+      },
+      {
+        "description": "countif with function in predicate (MOD) - 2,2,100,150 are even",
+        "sql": "SELECT COUNTIF(MOD(int_col, 2) = 0) FROM {tbl}",
+        "outputs": [[4]]
+      },
+      {
+        "description": "countif vs count filter equivalence",
+        "sql": "SELECT COUNTIF(int_col > 10), COUNT(*) FILTER (WHERE int_col > 10) FROM {tbl}",
+        "outputs": [[4, 4]]
+      },
+      {
+        "description": "countif vs count filter equivalence in same query",
+        "sql": "SELECT COUNTIF(int_col > 10), COUNT(*) FILTER (WHERE int_col > 10) FROM {tbl}",
+        "outputs": [[4, 4]]
+      },
+      {
+        "description": "countif with alias",
+        "sql": "SELECT COUNTIF(int_col > 10) AS high_count FROM {tbl}",
+        "outputs": [[4]]
+      },
+      {
+        "description": "countif in arithmetic expression (4 rows > 10, 0 rows < 0, sum = 4)",
+        "sql": "SELECT COUNTIF(int_col > 10) + COUNTIF(int_col < 0) FROM {tbl}",
+        "outputs": [[4]]
+      },
+      {
+        "description": "countif arithmetic matches FILTER equivalent",
+        "sql": "SELECT COUNTIF(int_col > 10) + COUNTIF(int_col < 0), COUNT(*) FILTER (WHERE int_col > 10) + COUNT(*) FILTER (WHERE int_col < 0) FROM {tbl}",
+        "outputs": [[4, 4]]
+      },
+      {
+        "description": "countif in ORDER BY expression directly",
+        "sql": "SELECT string_col, COUNTIF(int_col > 10) FROM {tbl} GROUP BY string_col ORDER BY COUNTIF(int_col > 10) DESC",
+        "outputs": [["c", 3], ["b", 1], ["a", 0]]
+      },
+      {
+        "description": "countif in CASE WHEN expression",
+        "sql": "SELECT CASE WHEN COUNTIF(int_col > 10) > 0 THEN 'yes' ELSE 'no' END FROM {tbl}",
+        "outputs": [["yes"]]
+      },
+      {
+        "description": "countif in COALESCE",
+        "sql": "SELECT COALESCE(COUNTIF(int_col > 10), 0) FROM {tbl}",
+        "outputs": [[4]]
+      },
+      {
+        "description": "countif in CAST",
+        "sql": "SELECT CAST(COUNTIF(int_col > 10) AS DOUBLE) FROM {tbl}",
+        "outputs": [[4.0]]
+      },
+      {
+        "description": "countif in ABS with subtraction",
+        "sql": "SELECT ABS(COUNTIF(int_col > 10) - 7) FROM {tbl}",
+        "outputs": [[3]]
+      },
+      {
+        "description": "countif with HAVING - filter groups by count result (a:0, b:1, c:3; only b and c have > 0)",
+        "sql": "SELECT string_col, COUNTIF(int_col > 10) AS cnt FROM {tbl} GROUP BY string_col HAVING cnt > 0 ORDER BY string_col",
+        "outputs": [["b", 1], ["c", 3]]
+      },
+      {
+        "description": "COUNT FILTER with HAVING - equivalent to COUNTIF HAVING",
+        "sql": "SELECT string_col, COUNT(*) FILTER (WHERE int_col > 10) AS cnt FROM {tbl} GROUP BY string_col HAVING cnt > 0 ORDER BY string_col",
+        "outputs": [["b", 1], ["c", 3]]
+      },
+      {
+        "description": "countif in HAVING clause directly",
+        "sql": "SELECT string_col FROM {tbl} GROUP BY string_col HAVING COUNTIF(int_col > 10) > 0 ORDER BY string_col",
+        "outputs": [["b"], ["c"]]
+      },
+      {
+        "description": "countif with WHERE and HAVING combined",
+        "sql": "SELECT string_col, COUNTIF(int_col > 10) AS cnt FROM {tbl} WHERE double_col < 200 GROUP BY string_col HAVING cnt > 0 ORDER BY string_col",
+        "outputs": [["b", 1], ["c", 3]]
+      }
+    ]
+  },
+  "countif_errors": {
+    "tables": {
+      "tbl": {
+        "schema": [
+          {"name": "int_col", "type": "INT"},
+          {"name": "bool_col", "type": "BOOLEAN"}
+        ],
+        "inputs": [
+          [1, true],
+          [2, false],
+          [3, true]
+        ]
+      }
+    },
+    "queries": [
+      {
+        "description": "nested COUNTIF should fail - inner COUNTIF returns BIGINT not BOOLEAN",
+        "sql": "SELECT COUNTIF(COUNTIF(int_col > 5)) FROM {tbl}",
+        "expectedException": ".*Cannot apply 'COUNTIF' to arguments of type 'COUNTIF\\(<BIGINT>\\)'.*"
+      },
+      {
+        "description": "SUM of COUNTIF should fail - aggregate expressions cannot be nested",
+        "sql": "SELECT SUM(COUNTIF(int_col > 5)) FROM {tbl}",
+        "expectedException": ".*Aggregate expressions cannot be nested.*"
+      },
+      {
+        "description": "COUNTIF with non-boolean argument should fail",
+        "sql": "SELECT COUNTIF(int_col + 25) FROM {tbl}",
+        "expectedException": ".*Cannot apply 'COUNTIF' to arguments of type 'COUNTIF\\(<INTEGER>\\)'.*"
+      }
+    ]
+  }
+}

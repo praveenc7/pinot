@@ -157,6 +157,201 @@
           "\n                  PinotLogicalTableScan(table=[[default, a]])",
           "\n"
         ]
+      },
+      {
+        "description": "COUNTIF is rewritten to COUNT with FILTER",
+        "sql": "EXPLAIN PLAN FOR SELECT COUNTIF(a.col1 = 'a') FROM a",
+        "output": [
+          "Execution Plan",
+          "\nPinotLogicalAggregate(group=[{}], agg#0=[COUNT($0)], aggType=[FINAL])",
+          "\n  PinotLogicalExchange(distribution=[hash])",
+          "\n    PinotLogicalAggregate(group=[{}], agg#0=[COUNT() FILTER $0], aggType=[LEAF])",
+          "\n      LogicalProject($f0=[=($0, _UTF-8'a')])",
+          "\n        PinotLogicalTableScan(table=[[default, a]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF with GROUP BY is rewritten to COUNT with FILTER",
+        "sql": "EXPLAIN PLAN FOR SELECT a.col1, COUNTIF(a.col3 > 10) FROM a GROUP BY a.col1",
+        "output": [
+          "Execution Plan",
+          "\nPinotLogicalAggregate(group=[{0}], agg#0=[COUNT($1)], aggType=[FINAL])",
+          "\n  PinotLogicalExchange(distribution=[hash[0]])",
+          "\n    PinotLogicalAggregate(group=[{0}], agg#0=[COUNT() FILTER $1], aggType=[LEAF])",
+          "\n      LogicalProject(col1=[$0], $f1=[>($2, 10)])",
+          "\n        PinotLogicalTableScan(table=[[default, a]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF with JOIN - filter on right table column",
+        "sql": "EXPLAIN PLAN FOR SELECT a.col1, COUNTIF(b.col3 > 10) FROM a JOIN b ON a.col1 = b.col1 GROUP BY a.col1",
+        "output": [
+          "Execution Plan",
+          "\nPinotLogicalAggregate(group=[{0}], agg#0=[COUNT($1)], aggType=[FINAL])",
+          "\n  PinotLogicalExchange(distribution=[hash[0]])",
+          "\n    PinotLogicalAggregate(group=[{0}], agg#0=[COUNT() FILTER $2], aggType=[LEAF])",
+          "\n      LogicalJoin(condition=[=($0, $1)], joinType=[inner])",
+          "\n        PinotLogicalExchange(distribution=[hash[0]])",
+          "\n          LogicalProject(col1=[$0])",
+          "\n            PinotLogicalTableScan(table=[[default, a]])",
+          "\n        PinotLogicalExchange(distribution=[hash[0]])",
+          "\n          LogicalProject(col1=[$0], $f1=[>($2, 10)])",
+          "\n            PinotLogicalTableScan(table=[[default, b]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF with JOIN - filter on left table, mixed with COUNT(*)",
+        "sql": "EXPLAIN PLAN FOR SELECT a.col1, COUNTIF(a.col3 > 10), COUNT(*) FROM a JOIN b ON a.col1 = b.col1 GROUP BY a.col1",
+        "output": [
+          "Execution Plan",
+          "\nPinotLogicalAggregate(group=[{0}], agg#0=[COUNT($1)], agg#1=[COUNT($2)], aggType=[FINAL])",
+          "\n  PinotLogicalExchange(distribution=[hash[0]])",
+          "\n    PinotLogicalAggregate(group=[{0}], agg#0=[COUNT() FILTER $1], agg#1=[COUNT()], aggType=[LEAF])",
+          "\n      LogicalJoin(condition=[=($0, $2)], joinType=[inner])",
+          "\n        PinotLogicalExchange(distribution=[hash[0]])",
+          "\n          LogicalProject(col1=[$0], $f1=[>($2, 10)])",
+          "\n            PinotLogicalTableScan(table=[[default, a]])",
+          "\n        PinotLogicalExchange(distribution=[hash[0]])",
+          "\n          LogicalProject(col1=[$0])",
+          "\n            PinotLogicalTableScan(table=[[default, b]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF with HAVING - alias reference",
+        "sql": "EXPLAIN PLAN FOR SELECT a.col1, COUNTIF(a.col3 > 10) AS cnt FROM a GROUP BY a.col1 HAVING cnt > 0",
+        "output": [
+          "Execution Plan",
+          "\nLogicalFilter(condition=[>($1, 0)])",
+          "\n  PinotLogicalAggregate(group=[{0}], agg#0=[COUNT($1)], aggType=[FINAL])",
+          "\n    PinotLogicalExchange(distribution=[hash[0]])",
+          "\n      PinotLogicalAggregate(group=[{0}], agg#0=[COUNT() FILTER $1], aggType=[LEAF])",
+          "\n        LogicalProject(col1=[$0], $f1=[>($2, 10)])",
+          "\n          PinotLogicalTableScan(table=[[default, a]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF in HAVING matches COUNT FILTER equivalent",
+        "sql": "EXPLAIN PLAN FOR SELECT a.col1 FROM a GROUP BY a.col1 HAVING COUNTIF(a.col3 > 10) > 0",
+        "output": [
+          "Execution Plan",
+          "\nLogicalProject(col1=[$0])",
+          "\n  LogicalFilter(condition=[>($1, 0)])",
+          "\n    PinotLogicalAggregate(group=[{0}], agg#0=[COUNT($1)], aggType=[FINAL])",
+          "\n      PinotLogicalExchange(distribution=[hash[0]])",
+          "\n        PinotLogicalAggregate(group=[{0}], agg#0=[COUNT() FILTER $1], aggType=[LEAF])",
+          "\n          LogicalProject(col1=[$0], $f1=[>($2, 10)])",
+          "\n            PinotLogicalTableScan(table=[[default, a]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF in arithmetic expression",
+        "sql": "EXPLAIN PLAN FOR SELECT COUNTIF(a.col3 > 5) + COUNTIF(a.col3 < 0) FROM a",
+        "output": [
+          "Execution Plan",
+          "\nLogicalProject(EXPR$0=[+($0, $1)])",
+          "\n  PinotLogicalAggregate(group=[{}], agg#0=[COUNT($0)], agg#1=[COUNT($1)], aggType=[FINAL])",
+          "\n    PinotLogicalExchange(distribution=[hash])",
+          "\n      PinotLogicalAggregate(group=[{}], agg#0=[COUNT() FILTER $0], agg#1=[COUNT() FILTER $1], aggType=[LEAF])",
+          "\n        LogicalProject($f0=[>($2, 5)], $f1=[<($2, 0)])",
+          "\n          PinotLogicalTableScan(table=[[default, a]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF in ORDER BY expression directly",
+        "sql": "EXPLAIN PLAN FOR SELECT a.col1, COUNTIF(a.col3 > 5) FROM a GROUP BY a.col1 ORDER BY COUNTIF(a.col3 > 5) DESC",
+        "output": [
+          "Execution Plan",
+          "\nLogicalSort(sort0=[$1], dir0=[DESC])",
+          "\n  PinotLogicalSortExchange(distribution=[hash], collation=[[1 DESC]], isSortOnSender=[false], isSortOnReceiver=[true])",
+          "\n    PinotLogicalAggregate(group=[{0}], agg#0=[COUNT($1)], aggType=[FINAL])",
+          "\n      PinotLogicalExchange(distribution=[hash[0]])",
+          "\n        PinotLogicalAggregate(group=[{0}], agg#0=[COUNT() FILTER $1], aggType=[LEAF])",
+          "\n          LogicalProject(col1=[$0], $f1=[>($2, 5)])",
+          "\n            PinotLogicalTableScan(table=[[default, a]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF in COALESCE - COALESCE optimized away since COUNT never returns null",
+        "sql": "EXPLAIN PLAN FOR SELECT COALESCE(COUNTIF(a.col3 > 5), 0) FROM a",
+        "output": [
+          "Execution Plan",
+          "\nPinotLogicalAggregate(group=[{}], agg#0=[COUNT($0)], aggType=[FINAL])",
+          "\n  PinotLogicalExchange(distribution=[hash])",
+          "\n    PinotLogicalAggregate(group=[{}], agg#0=[COUNT() FILTER $0], aggType=[LEAF])",
+          "\n      LogicalProject($f0=[>($2, 5)])",
+          "\n        PinotLogicalTableScan(table=[[default, a]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF in CAST",
+        "sql": "EXPLAIN PLAN FOR SELECT CAST(COUNTIF(a.col3 > 5) AS DOUBLE) FROM a",
+        "output": [
+          "Execution Plan",
+          "\nLogicalProject(EXPR$0=[CAST($0):DOUBLE NOT NULL])",
+          "\n  PinotLogicalAggregate(group=[{}], agg#0=[COUNT($0)], aggType=[FINAL])",
+          "\n    PinotLogicalExchange(distribution=[hash])",
+          "\n      PinotLogicalAggregate(group=[{}], agg#0=[COUNT() FILTER $0], aggType=[LEAF])",
+          "\n        LogicalProject($f0=[>($2, 5)])",
+          "\n          PinotLogicalTableScan(table=[[default, a]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF in ABS with subtraction",
+        "sql": "EXPLAIN PLAN FOR SELECT ABS(COUNTIF(a.col3 > 5) - 7) FROM a",
+        "output": [
+          "Execution Plan",
+          "\nLogicalProject(EXPR$0=[ABS(-($0, 7))])",
+          "\n  PinotLogicalAggregate(group=[{}], agg#0=[COUNT($0)], aggType=[FINAL])",
+          "\n    PinotLogicalExchange(distribution=[hash])",
+          "\n      PinotLogicalAggregate(group=[{}], agg#0=[COUNT() FILTER $0], aggType=[LEAF])",
+          "\n        LogicalProject($f0=[>($2, 5)])",
+          "\n          PinotLogicalTableScan(table=[[default, a]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF with WHERE clause",
+        "sql": "EXPLAIN PLAN FOR SELECT COUNTIF(a.col3 > 10) FROM a WHERE a.col1 = 'x'",
+        "output": [
+          "Execution Plan",
+          "\nPinotLogicalAggregate(group=[{}], agg#0=[COUNT($0)], aggType=[FINAL])",
+          "\n  PinotLogicalExchange(distribution=[hash])",
+          "\n    PinotLogicalAggregate(group=[{}], agg#0=[COUNT() FILTER $0], aggType=[LEAF])",
+          "\n      LogicalProject($f0=[>($2, 10)])",
+          "\n        LogicalFilter(condition=[=($0, _UTF-8'x')])",
+          "\n          PinotLogicalTableScan(table=[[default, a]])",
+          "\n"
+        ]
+      },
+      {
+        "description": "COUNTIF with non-boolean argument should fail",
+        "sql": "EXPLAIN PLAN FOR SELECT COUNTIF(a.col3 + 25) FROM a",
+        "expectedException": ".*Cannot apply 'COUNTIF' to arguments of type 'COUNTIF\\(<INTEGER>\\)'.*"
+      },
+      {
+        "description": "Nested COUNTIF should fail - inner COUNTIF returns BIGINT, not BOOLEAN",
+        "sql": "EXPLAIN PLAN FOR SELECT COUNTIF(COUNTIF(a.col3 > 5)) FROM a",
+        "expectedException": ".*Cannot apply 'COUNTIF' to arguments of type 'COUNTIF\\(<BIGINT>\\)'.*"
+      },
+      {
+        "description": "COUNTIF inside SUM should fail - aggregate expressions cannot be nested",
+        "sql": "EXPLAIN PLAN FOR SELECT SUM(COUNTIF(a.col3 > 5)) FROM a",
+        "expectedException": ".*Aggregate expressions cannot be nested.*"
+      },
+      {
+        "description": "COUNTIF with DISTINCT should fail",
+        "sql": "EXPLAIN PLAN FOR SELECT COUNTIF(DISTINCT a.col3 > 5) FROM a",
+        "expectedException": ".*Function 'COUNTIF' on DISTINCT is not supported.*"
       }
     ]
   }

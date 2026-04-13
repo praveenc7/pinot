@@ -121,6 +121,61 @@ public class QueryCompilationTest extends QueryEnvironmentTestBase {
   }
 
   @Test
+  public void testCountIfToFilter() {
+    // Tests that COUNTIF(predicate) is rewritten to COUNT(*) FILTER(WHERE predicate)
+    // and produces the same plan as the explicit COUNT(*) FILTER form
+    String countIfQuery = "EXPLAIN PLAN FOR SELECT COUNTIF(col1 = 'a') FROM a";
+    String filterQuery = "EXPLAIN PLAN FOR SELECT COUNT(*) FILTER(WHERE col1 = 'a') FROM a";
+    long requestId = RANDOM_REQUEST_ID_GEN.nextLong();
+    String countIfPlan = _queryEnvironment.explainQuery(countIfQuery, requestId);
+    String filterPlan = _queryEnvironment.explainQuery(filterQuery, requestId + 1);
+    assertEquals(countIfPlan, filterPlan);
+
+    //@formatter:off
+    assertEquals(countIfPlan,
+        "Execution Plan\n"
+        + "PinotLogicalAggregate(group=[{}], agg#0=[COUNT($0)], aggType=[FINAL])\n"
+        + "  PinotLogicalExchange(distribution=[hash])\n"
+        + "    PinotLogicalAggregate(group=[{}], agg#0=[COUNT() FILTER $0], aggType=[LEAF])\n"
+        + "      LogicalProject($f0=[=($0, _UTF-8'a')])\n"
+        + "        PinotLogicalTableScan(table=[[default, a]])\n");
+    //@formatter:on
+  }
+
+  @Test
+  public void testCountIfToFilterWithGroupBy() {
+    // Tests COUNTIF with GROUP BY produces the same plan as COUNT(*) FILTER with GROUP BY
+    String countIfQuery = "EXPLAIN PLAN FOR SELECT col1, COUNTIF(col3 > 10) FROM a GROUP BY col1";
+    String filterQuery =
+        "EXPLAIN PLAN FOR SELECT col1, COUNT(*) FILTER(WHERE col3 > 10) FROM a GROUP BY col1";
+    long requestId = RANDOM_REQUEST_ID_GEN.nextLong();
+    String countIfPlan = _queryEnvironment.explainQuery(countIfQuery, requestId);
+    String filterPlan = _queryEnvironment.explainQuery(filterQuery, requestId + 1);
+    assertEquals(countIfPlan, filterPlan);
+
+    //@formatter:off
+    assertEquals(countIfPlan,
+        "Execution Plan\n"
+        + "PinotLogicalAggregate(group=[{0}], agg#0=[COUNT($1)], aggType=[FINAL])\n"
+        + "  PinotLogicalExchange(distribution=[hash[0]])\n"
+        + "    PinotLogicalAggregate(group=[{0}], agg#0=[COUNT() FILTER $1], aggType=[LEAF])\n"
+        + "      LogicalProject(col1=[$0], $f1=[>($2, 10)])\n"
+        + "        PinotLogicalTableScan(table=[[default, a]])\n");
+    //@formatter:on
+  }
+
+  @Test
+  public void testCountIfWithBooleanColumn() {
+    // Tests COUNTIF on a boolean column produces the same plan as COUNT(*) FILTER
+    String countIfQuery = "EXPLAIN PLAN FOR SELECT COUNTIF(col5) FROM a";
+    String filterQuery = "EXPLAIN PLAN FOR SELECT COUNT(*) FILTER(WHERE col5) FROM a";
+    long requestId = RANDOM_REQUEST_ID_GEN.nextLong();
+    String countIfPlan = _queryEnvironment.explainQuery(countIfQuery, requestId);
+    String filterPlan = _queryEnvironment.explainQuery(filterQuery, requestId + 1);
+    assertEquals(countIfPlan, filterPlan);
+  }
+
+  @Test
   public void testPruneEmptyCorrelateJoin() {
     // queries involving correlated join with dummy
     // should be optimized to dummy by PruneEmptyRules.CORRELATE_LEFT_INSTANCE
@@ -709,6 +764,18 @@ public class QueryCompilationTest extends QueryEnvironmentTestBase {
         new Object[]{"SELECT a.col1 FROM a WHERE a.col1 IN ()", "Encountered \"\" at line"},
         // AT TIME ZONE should fail
         new Object[]{"SELECT a.col1 AT TIME ZONE 'PST' FROM a", "No match found for function signature AT_TIME_ZONE"},
+        // COUNTIF with non-boolean argument should fail Calcite type checking
+        new Object[]{"SELECT COUNTIF(a.col3 + 25) FROM a",
+            "Cannot apply 'COUNTIF' to arguments of type 'COUNTIF(<INTEGER>)'"},
+        // Nested aggregation: COUNTIF inside SUM
+        new Object[]{"SELECT SUM(COUNTIF(a.col3 > 5)) FROM a", "Aggregate expressions cannot be nested"},
+        // Nested aggregation: COUNTIF inside COUNTIF — Calcite rejects as type error since inner COUNTIF
+        // returns BIGINT, not BOOLEAN
+        new Object[]{"SELECT COUNTIF(COUNTIF(a.col3 > 5)) FROM a",
+            "Cannot apply 'COUNTIF' to arguments of type 'COUNTIF(<BIGINT>)'"},
+        // DISTINCT inside COUNTIF is not supported
+        new Object[]{"SELECT COUNTIF(DISTINCT a.col3 > 5) FROM a",
+            "Function 'COUNTIF' on DISTINCT is not supported."},
     };
   }
 

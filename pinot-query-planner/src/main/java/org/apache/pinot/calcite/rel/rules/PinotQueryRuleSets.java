@@ -95,7 +95,10 @@ public class PinotQueryRuleSets {
 
       // convert CASE-style filtered aggregates into true filtered aggregates
       // put it after AGGREGATE_REDUCE_FUNCTIONS where SUM is converted to SUM0
-      CoreRules.AGGREGATE_CASE_TO_FILTER
+      CoreRules.AGGREGATE_CASE_TO_FILTER,
+
+      // rewrite COUNTIF(boolean_expr) to COUNT(*) FILTER(WHERE boolean_expr)
+      PinotCountIfToFilterRule.INSTANCE
   );
 
   // Filter pushdown rules run using a RuleCollection since we want to push down a filter as much as possible in a
