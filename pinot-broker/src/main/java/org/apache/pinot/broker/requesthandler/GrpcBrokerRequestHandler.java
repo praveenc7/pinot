@@ -18,11 +18,14 @@
  */
 package org.apache.pinot.broker.requesthandler;
 
+import com.google.common.annotations.VisibleForTesting;
 import io.grpc.ConnectivityState;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.concurrent.ThreadSafe;
@@ -85,6 +88,11 @@ public class GrpcBrokerRequestHandler extends BaseSingleStageBrokerRequestHandle
     super.shutDown();
     _streamingQueryClient.shutdown();
     _streamingReduceService.shutDown();
+  }
+
+  @VisibleForTesting
+  PinotServerStreamingQueryClient getStreamingQueryClient() {
+    return _streamingQueryClient;
   }
 
   @Override
@@ -170,17 +178,51 @@ public class GrpcBrokerRequestHandler extends BaseSingleStageBrokerRequestHandle
           k -> new ServerGrpcQueryClient(serverInstance.getHostname(), serverInstance.getGrpcPort(), _config));
     }
 
+    /**
+     * Closes and removes gRPC clients for servers that are no longer in the enabled server instance map.
+     * This prevents resource leaks when servers are decommissioned from the cluster.
+     */
+    public void cleanupStaleClients(Map<String, ServerInstance> enabledServerInstances) {
+      Set<String> activeHostnamePorts = new HashSet<>();
+      for (ServerInstance serverInstance : enabledServerInstances.values()) {
+        activeHostnamePorts.add(
+            String.format("%s_%d", serverInstance.getHostname(), serverInstance.getGrpcPort()));
+      }
+      Iterator<Map.Entry<String, ServerGrpcQueryClient>> iterator = _grpcQueryClientMap.entrySet().iterator();
+      while (iterator.hasNext()) {
+        Map.Entry<String, ServerGrpcQueryClient> entry = iterator.next();
+        if (!activeHostnamePorts.contains(entry.getKey())) {
+          LOGGER.info("Closing stale gRPC client for decommissioned server: {}", entry.getKey());
+          try {
+            entry.getValue().close();
+          } catch (Exception e) {
+            LOGGER.warn("Failed to close gRPC client for server: {}", entry.getKey(), e);
+          }
+          iterator.remove();
+        }
+      }
+    }
+
     public void shutdown() {
       for (ServerGrpcQueryClient client : _grpcQueryClientMap.values()) {
         client.close();
       }
     }
+
+    @VisibleForTesting
+    Map<String, ServerGrpcQueryClient> getGrpcQueryClientMap() {
+      return _grpcQueryClientMap;
+    }
   }
 
   /**
    * Check if a server that was previously detected as unhealthy is now healthy.
+   * Also opportunistically cleans up stale gRPC clients for servers that have been decommissioned.
    */
   private FailureDetector.ServerState retryUnhealthyServer(String instanceId) {
+    // Opportunistically clean up gRPC clients for servers no longer in the cluster
+    _streamingQueryClient.cleanupStaleClients(_routingManager.getEnabledServerInstanceMap());
+
     LOGGER.info("Checking gRPC connection to unhealthy server: {}", instanceId);
     ServerInstance serverInstance = _routingManager.getEnabledServerInstanceMap().get(instanceId);
     if (serverInstance == null) {
