@@ -256,6 +256,39 @@ public class InvertedIndexVersionConfigTest implements PinotBuffersAfterMethodCh
     Assert.assertEquals(indexingConfig.getInvertedIndexVersion(), InvertedIndexConfig.VERSION_1);
   }
 
+  /**
+   * Verifies that a table config JSON without invertedIndexVersion deserializes correctly,
+   * defaults to VERSION_0, and the inverted index config carries the default version.
+   * This ensures backward compatibility with old table configs that predate the version field.
+   */
+  @Test
+  public void testTableConfigWithoutInvertedIndexVersionDefaultsToV0()
+      throws Exception {
+    // Simulate an old table config JSON that has invertedIndexColumns but no invertedIndexVersion
+    String tableConfigJson = "{"
+        + "\"tableName\": \"testTable_OFFLINE\","
+        + "\"tableType\": \"OFFLINE\","
+        + "\"segmentsConfig\": {\"replication\": \"1\"},"
+        + "\"tableIndexConfig\": {"
+        + "  \"invertedIndexColumns\": [\"" + COLUMN + "\"]"
+        + "},"
+        + "\"tenants\": {},"
+        + "\"metadata\": {}"
+        + "}";
+    TableConfig tableConfig = JsonUtils.stringToObject(tableConfigJson, TableConfig.class);
+
+    // Verify the indexing config defaults to VERSION_0
+    Assert.assertEquals(tableConfig.getIndexingConfig().getInvertedIndexVersion(), InvertedIndexConfig.VERSION_0,
+        "Old table config without invertedIndexVersion should default to VERSION_0");
+
+    // Verify the InvertedIndexConfig resolved through the type system also defaults to VERSION_0
+    InvertedIndexType invertedIndexType = (InvertedIndexType) StandardIndexes.inverted();
+    Map<String, InvertedIndexConfig> configMap = invertedIndexType.getConfig(tableConfig, null);
+    Assert.assertTrue(configMap.containsKey(COLUMN));
+    Assert.assertEquals(configMap.get(COLUMN).getVersion(), InvertedIndexConfig.VERSION_0,
+        "InvertedIndexConfig should carry VERSION_0 for old table configs");
+  }
+
   // -------------------------------------------------------------------------
   // End-to-end: files written with each version are readable
   // -------------------------------------------------------------------------

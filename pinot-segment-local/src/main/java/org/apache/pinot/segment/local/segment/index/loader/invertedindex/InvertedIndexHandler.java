@@ -19,11 +19,13 @@
 package org.apache.pinot.segment.local.segment.index.loader.invertedindex;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import javax.annotation.Nullable;
 import org.apache.commons.io.FileUtils;
+import org.apache.pinot.segment.local.segment.creator.impl.inv.BitmapInvertedIndexWriter;
 import org.apache.pinot.segment.local.segment.index.forward.ForwardIndexType;
 import org.apache.pinot.segment.local.segment.index.loader.BaseIndexHandler;
 import org.apache.pinot.segment.local.segment.index.loader.LoaderUtils;
@@ -38,6 +40,7 @@ import org.apache.pinot.segment.spi.index.StandardIndexes;
 import org.apache.pinot.segment.spi.index.creator.DictionaryBasedInvertedIndexCreator;
 import org.apache.pinot.segment.spi.index.reader.ForwardIndexReader;
 import org.apache.pinot.segment.spi.index.reader.ForwardIndexReaderContext;
+import org.apache.pinot.segment.spi.memory.PinotDataBuffer;
 import org.apache.pinot.segment.spi.store.SegmentDirectory;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.slf4j.Logger;
@@ -77,11 +80,25 @@ public class InvertedIndexHandler extends BaseIndexHandler {
         return true;
       }
     }
-    // TODO: Add support for converting existing inverted indexes from VERSION_0 to VERSION_1 on segment reload.
-    //  This would require detecting the on-disk format version (by reading the first 4 bytes for the magic number)
-    //  and comparing it against the configured version in InvertedIndexConfig. If they differ, the index should be
-    //  deleted and recreated using the configured version. The existing createInvertedIndexForColumn() method
-    //  already handles recreation from the forward index.
+    // Check if any existing index needs version conversion (V0→V1).
+    Set<String> existingConfiguredColumns = new HashSet<>(existingColumns);
+    existingConfiguredColumns.retainAll(_columnsToAddIdx);
+    for (String column : existingConfiguredColumns) {
+      int onDiskVersion;
+      try {
+        onDiskVersion = detectOnDiskVersion(segmentReader, column);
+      } catch (IOException e) {
+        LOGGER.warn("Unable to detect inverted index version for segment: {}, column: {}", segmentName, column, e);
+        continue;
+      }
+      int configuredVersion = getConfiguredVersion(column);
+      if (onDiskVersion == InvertedIndexConfig.VERSION_0 && configuredVersion == InvertedIndexConfig.VERSION_1
+          && segmentReader.hasIndexFor(column, StandardIndexes.forward())) {
+        LOGGER.info("Need to convert inverted index from VERSION_0 to VERSION_1 for segment: {}, column: {}",
+            segmentName, column);
+        return true;
+      }
+    }
     return false;
   }
 
@@ -106,11 +123,80 @@ public class InvertedIndexHandler extends BaseIndexHandler {
         createInvertedIndexForColumn(segmentWriter, columnMetadata);
       }
     }
+    // Convert existing inverted indexes from VERSION_0 to VERSION_1 where configured.
+    for (String column : getColumnsToConvertV0ToV1(segmentWriter, existingColumns)) {
+      ColumnMetadata columnMetadata = _segmentDirectory.getSegmentMetadata().getColumnMetadataFor(column);
+      LOGGER.info("Converting inverted index from VERSION_0 to VERSION_1 for segment: {}, column: {}",
+          segmentName, column);
+      segmentWriter.removeIndex(column, StandardIndexes.inverted());
+      createInvertedIndexForColumn(segmentWriter, columnMetadata);
+    }
   }
 
   @Override
   public void postUpdateIndicesCleanup(SegmentDirectory.Writer segmentWriter)
       throws Exception {
+  }
+
+  /**
+   * Returns the set of columns that have an existing VERSION_0 inverted index and need conversion to VERSION_1
+   * based on the configured version. Skips columns without a forward index (needed for recreation) and logs
+   * warnings for unsupported V1→V0 downgrade requests.
+   */
+  private Set<String> getColumnsToConvertV0ToV1(SegmentDirectory.Reader segmentReader,
+      Set<String> existingColumns) {
+    String segmentName = _segmentDirectory.getSegmentMetadata().getName();
+    Set<String> existingConfiguredColumns = new HashSet<>(existingColumns);
+    existingConfiguredColumns.retainAll(_columnsToAddIdx);
+    Set<String> columnsToConvert = new HashSet<>();
+    for (String column : existingConfiguredColumns) {
+      int onDiskVersion;
+      try {
+        onDiskVersion = detectOnDiskVersion(segmentReader, column);
+      } catch (IOException e) {
+        LOGGER.warn("Unable to detect inverted index version for segment: {}, column: {}, skipping conversion",
+            segmentName, column, e);
+        continue;
+      }
+      int configuredVersion = getConfiguredVersion(column);
+      if (onDiskVersion == configuredVersion) {
+        continue;
+      }
+      if (onDiskVersion == InvertedIndexConfig.VERSION_0 && configuredVersion == InvertedIndexConfig.VERSION_1) {
+        if (!segmentReader.hasIndexFor(column, StandardIndexes.forward())) {
+          LOGGER.warn("Cannot convert inverted index from VERSION_0 to VERSION_1 for segment: {}, column: {} "
+              + "because forward index is not available", segmentName, column);
+          continue;
+        }
+        columnsToConvert.add(column);
+      } else if (onDiskVersion == InvertedIndexConfig.VERSION_1
+          && configuredVersion == InvertedIndexConfig.VERSION_0) {
+        LOGGER.warn("Downgrade from inverted index VERSION_1 to VERSION_0 is not supported for segment: {}, "
+            + "column: {}. Index will remain VERSION_1.", segmentName, column);
+      }
+    }
+    return columnsToConvert;
+  }
+
+  /**
+   * Detects the on-disk inverted index format version by reading the first 4 bytes. If the first int
+   * matches {@link BitmapInvertedIndexWriter#MAGIC_NUMBER}, the index is VERSION_1; otherwise VERSION_0.
+   * Works for both V1 (file-per-index) and V3 (single-file) segment formats.
+   */
+  private int detectOnDiskVersion(SegmentDirectory.Reader reader, String column)
+      throws IOException {
+    PinotDataBuffer indexBuffer = reader.getIndexFor(column, StandardIndexes.inverted());
+    int firstInt = indexBuffer.getInt(0);
+    return firstInt == BitmapInvertedIndexWriter.MAGIC_NUMBER
+        ? InvertedIndexConfig.VERSION_1 : InvertedIndexConfig.VERSION_0;
+  }
+
+  private int getConfiguredVersion(String column) {
+    FieldIndexConfigs fieldIndexConfigs = _fieldIndexConfigs.get(column);
+    if (fieldIndexConfigs == null) {
+      return InvertedIndexConfig.DEFAULT_VERSION;
+    }
+    return fieldIndexConfigs.getConfig(StandardIndexes.inverted()).getVersion();
   }
 
   private boolean shouldCreateInvertedIndex(ColumnMetadata columnMetadata) {

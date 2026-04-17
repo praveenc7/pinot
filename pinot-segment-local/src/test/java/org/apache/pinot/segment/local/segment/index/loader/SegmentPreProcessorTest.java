@@ -55,6 +55,7 @@ import org.apache.pinot.segment.spi.compression.ChunkCompressionType;
 import org.apache.pinot.segment.spi.creator.SegmentGeneratorConfig;
 import org.apache.pinot.segment.spi.creator.SegmentVersion;
 import org.apache.pinot.segment.spi.index.IndexType;
+import org.apache.pinot.segment.spi.index.InvertedIndexConfig;
 import org.apache.pinot.segment.spi.index.StandardIndexes;
 import org.apache.pinot.segment.spi.index.metadata.SegmentMetadataImpl;
 import org.apache.pinot.segment.spi.index.reader.ForwardIndexReader;
@@ -78,6 +79,7 @@ import org.apache.pinot.spi.data.FieldSpec.DataType;
 import org.apache.pinot.spi.data.Schema;
 import org.apache.pinot.spi.data.readers.GenericRow;
 import org.apache.pinot.spi.utils.ByteArray;
+import org.apache.pinot.spi.utils.JsonUtils;
 import org.apache.pinot.spi.utils.ReadMode;
 import org.apache.pinot.spi.utils.builder.TableConfigBuilder;
 import org.testng.annotations.AfterMethod;
@@ -327,9 +329,22 @@ public class SegmentPreProcessorTest implements PinotBuffersAfterClassCheckRule 
     }
   }
 
+  private static final boolean USE_TABLE_LEVEL_CONFIG = true;
+  private static final boolean USE_PER_COLUMN_CONFIG = false;
+
   @DataProvider(name = "bothV1AndV3")
   public SegmentVersion[][] bothV1AndV3() {
     return new SegmentVersion[][]{{SegmentVersion.v1}, {SegmentVersion.v3}};
+  }
+
+  @DataProvider(name = "segmentVersionAndInvertedIndexConfigType")
+  public Object[][] segmentVersionAndInvertedIndexConfigType() {
+    return new Object[][]{
+        {SegmentVersion.v1, USE_TABLE_LEVEL_CONFIG},
+        {SegmentVersion.v3, USE_TABLE_LEVEL_CONFIG},
+        {SegmentVersion.v1, USE_PER_COLUMN_CONFIG},
+        {SegmentVersion.v3, USE_PER_COLUMN_CONFIG}
+    };
   }
 
   /**
@@ -1797,67 +1812,335 @@ public class SegmentPreProcessorTest implements PinotBuffersAfterClassCheckRule 
     validateIndexExists(NEWLY_ADDED_FORWARD_INDEX_DISABLED_COL_MV, StandardIndexes.dictionary());
   }
 
+  // -------------------------------------------------------------------------
+  // Inverted index version conversion tests
+  // -------------------------------------------------------------------------
+
   /**
-   * Tests that reloading a segment with invertedIndexVersion=1 when the existing indexes are VERSION_0
-   * does not trigger index recreation. The V0 inverted index should remain intact and readable.
+   * Tests that reloading a segment converts V0 inverted indexes to V1 when the config specifies VERSION_1.
+   * Verifies the index is rewritten with the V1 magic number and bitmap contents are preserved.
+   * Tested with both table-level and per-column config paths.
    */
-  @Test
-  public void testReloadWithVersionMismatchDoesNotRecreateInvertedIndex()
+  @Test(dataProvider = "segmentVersionAndInvertedIndexConfigType")
+  public void testReloadConvertsInvertedIndexV0ToV1(SegmentVersion segmentVersion, boolean useTableLevelConfig)
       throws Exception {
     // Build segment with default config (VERSION_0 inverted indexes)
-    buildV1Segment();
+    buildSegment(segmentVersion);
 
-    // column7 has an inverted index (set up in resetIndexConfigs)
-    File col7InvFile = new File(INDEX_DIR,
-        COLUMN7_NAME + V1Constants.Indexes.BITMAP_INVERTED_INDEX_FILE_EXTENSION);
-    assertTrue(col7InvFile.exists(), "column7 inverted index should exist after build");
+    // column7 (MV) has an inverted index (set up in resetIndexConfigs)
+    int cardinality = new SegmentMetadataImpl(INDEX_DIR).getColumnMetadataFor(COLUMN7_NAME).getCardinality();
 
-    // Verify the file is VERSION_0: first 4 bytes must NOT be the V1 magic number
-    int firstIntBefore = readFirstInt(col7InvFile);
-    assertNotEquals(firstIntBefore, BitmapInvertedIndexWriter.MAGIC_NUMBER,
-        "Index file should be VERSION_0 (no magic number) before reload");
+    // Verify the index is VERSION_0 and capture bitmap contents before conversion
+    int[][] bitmapsBefore;
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      assertTrue(reader.hasIndexFor(COLUMN7_NAME, StandardIndexes.inverted()));
+      PinotDataBuffer indexBuffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      assertNotEquals(indexBuffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Index should be VERSION_0 (no magic number) before reload");
+      bitmapsBefore = readBitmapContents(indexBuffer, cardinality);
+    }
 
-    // Read bitmap contents before reload for comparison
-    int cardinality =
-        new SegmentMetadataImpl(INDEX_DIR).getColumnMetadataFor(COLUMN7_NAME).getCardinality();
-    int[][] bitmapsBefore = readBitmapContents(col7InvFile, cardinality);
-
-    // Now change config to VERSION_1 and run preprocessor (simulating reload after config change)
-    TableConfig tableConfig = createTableConfig();
-    tableConfig.getIndexingConfig().setInvertedIndexVersion(1);
-    IndexLoadingConfig loadingConfig = new IndexLoadingConfig(tableConfig, _schema);
+    // Change config to VERSION_1 (via table-level or per-column) and run preprocessor
+    IndexLoadingConfig loadingConfig = createV1IndexLoadingConfig(useTableLevelConfig);
 
     try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
         SegmentPreProcessor processor = new SegmentPreProcessor(segmentDirectory, loadingConfig, _schema)) {
       processor.process(SEGMENT_OPERATIONS_THROTTLER);
     }
 
-    // Verify the file still exists and is still VERSION_0 (not converted to V1)
-    assertTrue(col7InvFile.exists(), "column7 inverted index should still exist after reload");
-    int firstIntAfter = readFirstInt(col7InvFile);
-    assertNotEquals(firstIntAfter, BitmapInvertedIndexWriter.MAGIC_NUMBER,
-        "Index file should remain VERSION_0 (no magic number) after reload with version mismatch");
+    // Verify the index is now VERSION_1 and content is preserved
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      assertTrue(reader.hasIndexFor(COLUMN7_NAME, StandardIndexes.inverted()));
+      PinotDataBuffer indexBuffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      assertEquals(indexBuffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Index should be VERSION_1 (has magic number) after conversion");
+      assertEquals(indexBuffer.getInt(Integer.BYTES), InvertedIndexConfig.VERSION_1,
+          "Index should have VERSION_1 in header after conversion");
 
-    // Verify bitmap contents are identical after reload
-    int[][] bitmapsAfter = readBitmapContents(col7InvFile, cardinality);
-    for (int dictId = 0; dictId < cardinality; dictId++) {
-      assertEquals(bitmapsAfter[dictId], bitmapsBefore[dictId],
-          "Bitmap content for dictId " + dictId + " should be unchanged after reload");
+      int[][] bitmapsAfter = readBitmapContents(indexBuffer, cardinality);
+      for (int dictId = 0; dictId < cardinality; dictId++) {
+        assertEquals(bitmapsAfter[dictId], bitmapsBefore[dictId],
+            "Bitmap content for dictId " + dictId + " should be preserved after conversion");
+      }
     }
   }
 
-  private static int readFirstInt(File file)
-      throws IOException {
-    try (java.io.DataInputStream dis = new java.io.DataInputStream(new java.io.FileInputStream(file))) {
-      return dis.readInt();
+  /**
+   * Tests that V1→V0 downgrade is not supported. The index should remain V1 even if the config
+   * specifies VERSION_0.
+   */
+  @Test(dataProvider = "bothV1AndV3")
+  public void testReloadSkipsV1ToV0Downgrade(SegmentVersion segmentVersion)
+      throws Exception {
+    // Build segment with VERSION_1 inverted indexes
+    TableConfig v1BuildConfig = createTableConfig();
+    v1BuildConfig.getIndexingConfig().setInvertedIndexVersion(InvertedIndexConfig.VERSION_1);
+    SegmentGeneratorConfig config =
+        SegmentTestUtils.getSegmentGeneratorConfigWithSchema(_avroFile, TEMP_DIR, RAW_TABLE_NAME, v1BuildConfig,
+            _schema);
+    config.setOutDir(TEMP_DIR.getPath());
+    config.setSegmentName(SEGMENT_NAME);
+    SegmentIndexCreationDriverImpl driver = new SegmentIndexCreationDriverImpl();
+    driver.init(config);
+    driver.build();
+    if (segmentVersion == SegmentVersion.v3) {
+      convertV1SegmentToV3();
+    }
+
+    // Verify the index is VERSION_1
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      PinotDataBuffer indexBuffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      assertEquals(indexBuffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Index should be VERSION_1 after build");
+    }
+
+    // Change config to VERSION_0 (downgrade) and run preprocessor
+    // Note: createTableConfig() defaults to VERSION_0 (invertedIndexVersion not set)
+    IndexLoadingConfig loadingConfig = new IndexLoadingConfig(createTableConfig(), _schema);
+
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentPreProcessor processor = new SegmentPreProcessor(segmentDirectory, loadingConfig, _schema)) {
+      processor.process(SEGMENT_OPERATIONS_THROTTLER);
+    }
+
+    // Verify the index is still VERSION_1 (downgrade was skipped)
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      PinotDataBuffer indexBuffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      assertEquals(indexBuffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Index should remain VERSION_1 after attempted downgrade");
     }
   }
 
-  private static int[][] readBitmapContents(File indexFile, int cardinality)
-      throws IOException {
+  /**
+   * Tests that version conversion is skipped when the forward index is disabled for a column.
+   * The V0 index should remain unchanged.
+   */
+  @Test(dataProvider = "bothV1AndV3")
+  public void testReloadSkipsVersionConversionWhenForwardIndexDisabled(SegmentVersion segmentVersion)
+      throws Exception {
+    // Build segment with default config (VERSION_0 inverted indexes)
+    buildSegment(segmentVersion);
+
+    // Verify column7 has a VERSION_0 inverted index
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      PinotDataBuffer indexBuffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      assertNotEquals(indexBuffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Index should be VERSION_0 before reload");
+    }
+
+    // Change config to VERSION_1 AND disable forward index for column7
+    TableConfig tableConfig = createTableConfig();
+    tableConfig.getIndexingConfig().setInvertedIndexVersion(InvertedIndexConfig.VERSION_1);
+    _fieldConfigMap.put(COLUMN7_NAME,
+        new FieldConfig(COLUMN7_NAME, FieldConfig.EncodingType.DICTIONARY, List.of(), null,
+            Map.of(FieldConfig.FORWARD_INDEX_DISABLED, "true")));
+    IndexLoadingConfig loadingConfig = new IndexLoadingConfig(
+        new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).setTimeColumnName("daysSinceEpoch")
+            .setNoDictionaryColumns(new ArrayList<>(_noDictionaryColumns))
+            .setInvertedIndexColumns(new ArrayList<>(_invertedIndexColumns))
+            .setCreateInvertedIndexDuringSegmentGeneration(true)
+            .setRangeIndexColumns(new ArrayList<>(_rangeIndexColumns))
+            .setFieldConfigList(new ArrayList<>(_fieldConfigMap.values())).setNullHandlingEnabled(true)
+            .setIngestionConfig(_ingestionConfig).build(), _schema);
+
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentPreProcessor processor = new SegmentPreProcessor(segmentDirectory, loadingConfig, _schema)) {
+      processor.process(SEGMENT_OPERATIONS_THROTTLER);
+    }
+
+    // Verify the index is still VERSION_0 (conversion was skipped due to no forward index)
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      assertTrue(reader.hasIndexFor(COLUMN7_NAME, StandardIndexes.inverted()),
+          "Inverted index should still exist");
+      PinotDataBuffer indexBuffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      assertNotEquals(indexBuffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Index should remain VERSION_0 when forward index is disabled");
+    }
+  }
+
+  /**
+   * Tests that no conversion happens when the on-disk version already matches the configured version.
+   */
+  @Test(dataProvider = "bothV1AndV3")
+  public void testReloadNoOpWhenInvertedIndexVersionMatches(SegmentVersion segmentVersion)
+      throws Exception {
+    // Build segment with default config (VERSION_0 inverted indexes)
+    buildSegment(segmentVersion);
+
+    int cardinality = new SegmentMetadataImpl(INDEX_DIR).getColumnMetadataFor(COLUMN7_NAME).getCardinality();
+
+    // Capture bitmap contents
+    int[][] bitmapsBefore;
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      PinotDataBuffer indexBuffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      bitmapsBefore = readBitmapContents(indexBuffer, cardinality);
+    }
+
+    // Reload with same config (VERSION_0, the default)
+    runPreProcessor();
+
+    // Verify index is unchanged
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      PinotDataBuffer indexBuffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      assertNotEquals(indexBuffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Index should remain VERSION_0 when config matches");
+      int[][] bitmapsAfter = readBitmapContents(indexBuffer, cardinality);
+      for (int dictId = 0; dictId < cardinality; dictId++) {
+        assertEquals(bitmapsAfter[dictId], bitmapsBefore[dictId],
+            "Bitmap content should be unchanged when no conversion is needed");
+      }
+    }
+  }
+
+  /**
+   * Tests V0→V1 conversion with both SV and MV columns. Column1 (SV) and column7 (MV) both have
+   * inverted indexes. Verifies both are converted correctly.
+   * Tested with both table-level and per-column config paths.
+   */
+  @Test(dataProvider = "segmentVersionAndInvertedIndexConfigType")
+  public void testReloadConvertsV0ToV1ForBothSVAndMVColumns(SegmentVersion segmentVersion, boolean useTableLevelConfig)
+      throws Exception {
+    // Add column1 (SV INT) to inverted index columns
+    _invertedIndexColumns.add(COLUMN1_NAME);
+    buildSegment(segmentVersion);
+
+    int cardinalityCol1 = new SegmentMetadataImpl(INDEX_DIR).getColumnMetadataFor(COLUMN1_NAME).getCardinality();
+    int cardinalityCol7 = new SegmentMetadataImpl(INDEX_DIR).getColumnMetadataFor(COLUMN7_NAME).getCardinality();
+
+    // Capture bitmap contents before conversion
+    int[][] bitmapsBeforeCol1;
+    int[][] bitmapsBeforeCol7;
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      PinotDataBuffer col1Buffer = reader.getIndexFor(COLUMN1_NAME, StandardIndexes.inverted());
+      PinotDataBuffer col7Buffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      assertNotEquals(col1Buffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER);
+      assertNotEquals(col7Buffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER);
+      bitmapsBeforeCol1 = readBitmapContents(col1Buffer, cardinalityCol1);
+      bitmapsBeforeCol7 = readBitmapContents(col7Buffer, cardinalityCol7);
+    }
+
+    // Change config to VERSION_1 and reload
+    IndexLoadingConfig loadingConfig = createV1IndexLoadingConfig(useTableLevelConfig);
+
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentPreProcessor processor = new SegmentPreProcessor(segmentDirectory, loadingConfig, _schema)) {
+      processor.process(SEGMENT_OPERATIONS_THROTTLER);
+    }
+
+    // Verify both columns are now VERSION_1 with correct content
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      // Column1 (SV)
+      PinotDataBuffer col1Buffer = reader.getIndexFor(COLUMN1_NAME, StandardIndexes.inverted());
+      assertEquals(col1Buffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Column1 (SV) should be VERSION_1 after conversion");
+      int[][] bitmapsAfterCol1 = readBitmapContents(col1Buffer, cardinalityCol1);
+      for (int dictId = 0; dictId < cardinalityCol1; dictId++) {
+        assertEquals(bitmapsAfterCol1[dictId], bitmapsBeforeCol1[dictId],
+            "Column1 bitmap content should be preserved for dictId " + dictId);
+      }
+
+      // Column7 (MV)
+      PinotDataBuffer col7Buffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      assertEquals(col7Buffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Column7 (MV) should be VERSION_1 after conversion");
+      int[][] bitmapsAfterCol7 = readBitmapContents(col7Buffer, cardinalityCol7);
+      for (int dictId = 0; dictId < cardinalityCol7; dictId++) {
+        assertEquals(bitmapsAfterCol7[dictId], bitmapsBeforeCol7[dictId],
+            "Column7 bitmap content should be preserved for dictId " + dictId);
+      }
+    }
+  }
+
+  /**
+   * Tests that V0→V1 conversion works alongside adding a new inverted index in the same reload.
+   * Column7 has existing V0 index (should convert to V1), column13 has no index (should be created as V1).
+   * Tested with both table-level and per-column config paths.
+   */
+  @Test(dataProvider = "segmentVersionAndInvertedIndexConfigType")
+  public void testReloadConvertsV0ToV1AndAddsNewIndex(SegmentVersion segmentVersion, boolean useTableLevelConfig)
+      throws Exception {
+    // Build segment with only column7 having inverted index
+    buildSegment(segmentVersion);
+
+    // Verify column7 has V0 index and column13 has no index
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      assertTrue(reader.hasIndexFor(COLUMN7_NAME, StandardIndexes.inverted()));
+      assertFalse(reader.hasIndexFor(COLUMN13_NAME, StandardIndexes.inverted()));
+    }
+
+    // Change config to VERSION_1 and add column13 to inverted index columns
+    _invertedIndexColumns.add(COLUMN13_NAME);
+    IndexLoadingConfig loadingConfig = createV1IndexLoadingConfig(useTableLevelConfig);
+
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentPreProcessor processor = new SegmentPreProcessor(segmentDirectory, loadingConfig, _schema)) {
+      processor.process(SEGMENT_OPERATIONS_THROTTLER);
+    }
+
+    // Verify column7 is converted to V1 and column13 is created as V1
+    try (SegmentDirectory segmentDirectory = new SegmentLocalFSDirectory(INDEX_DIR, ReadMode.mmap);
+        SegmentDirectory.Reader reader = segmentDirectory.createReader()) {
+      // Column7 — converted from V0
+      assertTrue(reader.hasIndexFor(COLUMN7_NAME, StandardIndexes.inverted()));
+      PinotDataBuffer col7Buffer = reader.getIndexFor(COLUMN7_NAME, StandardIndexes.inverted());
+      assertEquals(col7Buffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Column7 should be VERSION_1 after conversion");
+
+      // Column13 — newly created
+      assertTrue(reader.hasIndexFor(COLUMN13_NAME, StandardIndexes.inverted()));
+      PinotDataBuffer col13Buffer = reader.getIndexFor(COLUMN13_NAME, StandardIndexes.inverted());
+      assertEquals(col13Buffer.getInt(0), BitmapInvertedIndexWriter.MAGIC_NUMBER,
+          "Column13 should be VERSION_1 (newly created with V1 config)");
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Helpers for inverted index version tests
+  // -------------------------------------------------------------------------
+
+  /**
+   * Creates an IndexLoadingConfig with the inverted index version set via either the table-level
+   * invertedIndexVersion field or the per-column fieldConfigList.indexes block.
+   */
+  private IndexLoadingConfig createV1IndexLoadingConfig(boolean useTableLevelConfig)
+      throws Exception {
+    TableConfig tableConfig = createTableConfig();
+    if (useTableLevelConfig) {
+      tableConfig.getIndexingConfig().setInvertedIndexVersion(InvertedIndexConfig.VERSION_1);
+    } else {
+      // Per-column config via fieldConfigList.indexes block
+      List<FieldConfig> fieldConfigs = new ArrayList<>();
+      for (String column : _invertedIndexColumns) {
+        fieldConfigs.add(new FieldConfig.Builder(column).withEncodingType(FieldConfig.EncodingType.DICTIONARY)
+            .withIndexes(JsonUtils.stringToJsonNode("{\"inverted\": {\"version\": 1}}")).build());
+      }
+      tableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME)
+          .setTimeColumnName("daysSinceEpoch")
+          .setNoDictionaryColumns(new ArrayList<>(_noDictionaryColumns))
+          .setRangeIndexColumns(new ArrayList<>(_rangeIndexColumns))
+          .setFieldConfigList(fieldConfigs).setNullHandlingEnabled(true)
+          .setIngestionConfig(_ingestionConfig).build();
+    }
+    return new IndexLoadingConfig(tableConfig, _schema);
+  }
+
+  /**
+   * Reads bitmap contents from a PinotDataBuffer (works for both V1 and V3 segment formats).
+   */
+  private static int[][] readBitmapContents(PinotDataBuffer indexBuffer, int cardinality) {
     int[][] result = new int[cardinality][];
-    try (PinotDataBuffer dataBuffer = PinotDataBuffer.mapReadOnlyBigEndianFile(indexFile);
-        BitmapInvertedIndexReader reader = new BitmapInvertedIndexReader(dataBuffer, cardinality)) {
+    try (BitmapInvertedIndexReader reader = new BitmapInvertedIndexReader(indexBuffer, cardinality)) {
       for (int dictId = 0; dictId < cardinality; dictId++) {
         result[dictId] = reader.getDocIds(dictId).toArray();
       }
