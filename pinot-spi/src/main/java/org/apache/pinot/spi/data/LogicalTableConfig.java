@@ -22,7 +22,6 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.util.Map;
 import javax.annotation.Nullable;
@@ -53,8 +52,6 @@ import org.apache.pinot.spi.utils.JsonUtils;
  * </p>
  */
 public class LogicalTableConfig extends BaseJsonConfig {
-
-  private static final ObjectMapper DEFAULT_MAPPER = new ObjectMapper();
 
   public static final String LOGICAL_TABLE_NAME_KEY = "tableName";
   public static final String PHYSICAL_TABLE_CONFIG_KEY = "physicalTableConfigMap";
@@ -154,7 +151,7 @@ public class LogicalTableConfig extends BaseJsonConfig {
   }
 
   private JsonNode toJsonObject() {
-    return DEFAULT_MAPPER.valueToTree(this);
+    return JsonUtils.objectToJsonNode(this);
   }
 
   /**

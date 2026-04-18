@@ -35,7 +35,7 @@ public class MapUtils {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(MapUtils.class);
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER = JsonUtils.newObjectMapperIgnoringUnknownProperties();
 
   private MapUtils() {
   }

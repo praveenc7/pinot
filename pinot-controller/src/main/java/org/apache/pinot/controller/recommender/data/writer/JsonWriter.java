@@ -19,18 +19,17 @@
 package org.apache.pinot.controller.recommender.data.writer;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Map;
 import org.apache.pinot.controller.recommender.data.generator.DataGenerator;
+import org.apache.pinot.spi.utils.JsonUtils;
 
 
 public class JsonWriter extends FileWriter {
   @Override
   protected String generateRow(DataGenerator generator) {
     Map<String, Object> row = generator.nextRow();
-    final ObjectMapper mapper = new ObjectMapper();
     try {
-      return mapper.writeValueAsString(row);
+      return JsonUtils.objectToString(row);
     } catch (JsonProcessingException e) {
       throw new RuntimeException("Issue while processing the json entry.", e);
     }

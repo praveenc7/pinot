@@ -39,27 +39,33 @@ import org.apache.pinot.core.util.NumericException;
 import org.apache.pinot.spi.data.FieldSpec.DataType;
 import org.apache.pinot.spi.utils.JsonUtils;
 
-
 /**
- * The <code>JsonExtractScalarTransformFunction</code> class implements the json path transformation based on
- * <a href="https://goessner.net/articles/JsonPath/">Stefan Goessner JsonPath implementation.</a>.
+ * The <code>JsonExtractScalarTransformFunction</code> class implements the json
+ * path transformation based on
+ * <a href="https://goessner.net/articles/JsonPath/">Stefan Goessner JsonPath
+ * implementation.</a>.
  *
- * Please note, currently this method only works with String field. The values in this field should be Json String.
+ * Please note, currently this method only works with String field. The values
+ * in this field should be Json String.
  *
  * Usage:
  * jsonExtractScalar(jsonFieldName, 'jsonPath', 'resultsType')
  * <code>jsonFieldName</code> is the Json String field/expression.
- * <code>jsonPath</code> is a JsonPath expression which used to read from JSON document
- * <code>results_type</code> refers to the results data type, could be INT, LONG, FLOAT, DOUBLE, BIG_DECIMAL, STRING,
+ * <code>jsonPath</code> is a JsonPath expression which used to read from JSON
+ * document
+ * <code>results_type</code> refers to the results data type, could be INT,
+ * LONG, FLOAT, DOUBLE, BIG_DECIMAL, STRING,
  * INT_ARRAY, LONG_ARRAY, FLOAT_ARRAY, DOUBLE_ARRAY, STRING_ARRAY.
  *
  */
 public class JsonExtractScalarTransformFunction extends BaseTransformFunction {
   public static final String FUNCTION_NAME = "jsonExtractScalar";
 
-  // This ObjectMapper requires special configurations, hence we can't use pinot JsonUtils here.
-  private static final ObjectMapper OBJECT_MAPPER_WITH_BIG_DECIMAL =
-      new ObjectMapper().configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
+  // This ObjectMapper requires special configurations, hence we can't use pinot
+  // JsonUtils here.
+  private static final ObjectMapper OBJECT_MAPPER_WITH_BIG_DECIMAL = JsonUtils
+      .newObjectMapperIgnoringUnknownProperties()
+      .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
 
   private static final ParseContext JSON_PARSER_CONTEXT_WITH_BIG_DECIMAL = JsonPath.using(
       new Configuration.ConfigurationBuilder().jsonProvider(new JacksonJsonProvider(OBJECT_MAPPER_WITH_BIG_DECIMAL))
@@ -107,7 +113,8 @@ public class JsonExtractScalarTransformFunction extends BaseTransformFunction {
       throw new IllegalArgumentException(String.format(
           "Unsupported results type: %s for jsonExtractScalar function. Supported types are: "
               + "INT/LONG/FLOAT/DOUBLE/BOOLEAN/BIG_DECIMAL/TIMESTAMP/STRING/INT_ARRAY/LONG_ARRAY/FLOAT_ARRAY"
-              + "/DOUBLE_ARRAY/STRING_ARRAY", resultsType));
+              + "/DOUBLE_ARRAY/STRING_ARRAY",
+          resultsType));
     }
     if (arguments.size() == 4) {
       _defaultValue = dataType.convert(((LiteralTransformFunction) arguments.get(3)).getStringLiteral());

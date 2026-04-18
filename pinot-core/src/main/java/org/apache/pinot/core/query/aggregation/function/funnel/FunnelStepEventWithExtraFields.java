@@ -25,10 +25,11 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
-
+import org.apache.pinot.spi.utils.JsonUtils;
 
 public class FunnelStepEventWithExtraFields implements Comparable<FunnelStepEventWithExtraFields> {
-  protected static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  protected static final ObjectMapper OBJECT_MAPPER = JsonUtils.newObjectMapperIgnoringUnknownProperties();
+
   private final FunnelStepEvent _funnelStepEvent;
   private final List<Object> _extraFields;
 

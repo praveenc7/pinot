@@ -88,7 +88,8 @@ public class JsonUtils {
 
 
   // NOTE: Do not expose the ObjectMapper to prevent configuration change
-  private static final ObjectMapper DEFAULT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper DEFAULT_MAPPER =
+      new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
   public static final ObjectReader DEFAULT_READER = DEFAULT_MAPPER.reader();
   public static final ObjectWriter DEFAULT_WRITER = DEFAULT_MAPPER.writer();
   public static final ObjectWriter DEFAULT_PRETTY_WRITER = DEFAULT_MAPPER.writerWithDefaultPrettyPrinter();
@@ -122,6 +123,10 @@ public class JsonUtils {
 
     MapDifference<String, Object> difference = Maps.difference(inputJsonMap, instanceJsonMap);
     return Pair.of(instance, difference.entriesOnlyOnLeft());
+  }
+
+  public static ObjectMapper newObjectMapperIgnoringUnknownProperties() {
+    return new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
   }
 
   private static Map<String, Object> flatten(Map<String, Object> map) {

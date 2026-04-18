@@ -31,13 +31,15 @@ import org.apache.pinot.controller.recommender.io.ConfigManager;
 import org.apache.pinot.controller.recommender.io.InputManager;
 import org.apache.pinot.controller.recommender.rules.AbstractRule;
 import org.apache.pinot.controller.recommender.rules.RulesToExecute;
+import org.apache.pinot.spi.utils.JsonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
 /**
- * This is the runner class for the rule engine, it parses the input json and maps it to a input manager,
- * Then according to the _recommend* flags set in the RulesToExecute, the engine will call the corresponding rules
+ * This is the runner class for the rule engine, it parses the input json and
+ * maps it to a input manager,
+ * Then according to the _recommend* flags set in the RulesToExecute, the engine
+ * will call the corresponding rules
  * constructed by RuleFactory
  */
 public class RecommenderDriver {
@@ -53,15 +55,17 @@ public class RecommenderDriver {
 
     InputManager inputManager;
     ConfigManager outputManager;
-    // This ObjectMapper requires special configurations, hence we can't use pinot JsonUtils here.
-    ObjectMapper objectMapper = new ObjectMapper();
+    // This ObjectMapper requires special configurations, hence we can't use pinot
+    // JsonUtils here.
+    ObjectMapper objectMapper = JsonUtils.newObjectMapperIgnoringUnknownProperties();
     objectMapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 
     inputManager = objectMapper.readValue(inputJson, InputManager.class);
     inputManager.init();
     outputManager = inputManager.getOverWrittenConfigs();
 
-    // silent rules will run, but their output will only be used in other rules and it will not be present to user
+    // silent rules will run, but their output will only be used in other rules and
+    // it will not be present to user
     List<AbstractRule> silentRules = new ArrayList<>();
 
     for (RulesToExecute.Rule rule : RulesToExecute.Rule.values()) {

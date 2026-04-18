@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.apache.pinot.spi.annotations.InterfaceStability;
+import org.apache.pinot.spi.utils.JsonUtils;
 import org.apache.pinot.tsdb.spi.series.TimeSeries;
 import org.apache.pinot.tsdb.spi.series.TimeSeriesBlock;
 
@@ -49,7 +50,7 @@ public class PinotBrokerTimeSeriesResponse {
    * returned by the Pinot Broker. By default, we use {@link TimeSeries#getTagsSerialized()} as the name of a series.
    */
   public static final String METRIC_NAME_KEY = "__name__";
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER = JsonUtils.newObjectMapperIgnoringUnknownProperties();
   private String _status;
   private Data _data;
   private String _errorType;
