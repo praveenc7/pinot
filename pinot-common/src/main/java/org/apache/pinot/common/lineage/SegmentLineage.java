@@ -149,11 +149,15 @@ public class SegmentLineage {
     for (Map.Entry<String, List<String>> listField : listFields.entrySet()) {
       String lineageId = listField.getKey();
       List<String> value = listField.getValue();
+      Preconditions.checkState(value.size() == 4 || value.size() == 5);
       List<String> segmentsFrom = Arrays.asList(StringUtils.split(value.get(0), COMMA_SEPARATOR));
       List<String> segmentsTo = Arrays.asList(StringUtils.split(value.get(1), COMMA_SEPARATOR));
       LineageEntryState state = LineageEntryState.valueOf(value.get(2));
       long timestamp = Long.parseLong(value.get(3));
-      lineageEntries.put(lineageId, new LineageEntry(segmentsFrom, segmentsTo, state, timestamp));
+      int priority = value.size() == 5
+          ? Integer.parseInt(value.get(4))
+          : LineageEntryPriority.DEFAULT_LINEAGE_PRIORITY;
+      lineageEntries.put(lineageId, new LineageEntry(segmentsFrom, segmentsTo, state, timestamp, priority));
     }
     return new SegmentLineage(tableNameWithType, lineageEntries, customMap);
   }
@@ -170,7 +174,13 @@ public class SegmentLineage {
       String segmentsTo = String.join(COMMA_SEPARATOR, lineageEntry.getSegmentsTo());
       String state = lineageEntry.getState().toString();
       String timestamp = Long.toString(lineageEntry.getTimestamp());
-      List<String> listEntry = Arrays.asList(segmentsFrom, segmentsTo, state, timestamp);
+      String priority = String.valueOf(lineageEntry.getPriority());
+      // If lineage entry has default priority, we don't need to persist the priority in zookeeper. This can make sure
+      // we can roll forward and roll back before the priority is used by pinot push job.
+      List<String> listEntry =
+          lineageEntry.getPriority() == LineageEntryPriority.DEFAULT_LINEAGE_PRIORITY
+              ? Arrays.asList(segmentsFrom, segmentsTo, state, timestamp)
+              : Arrays.asList(segmentsFrom, segmentsTo, state, timestamp, priority);
       znRecord.setListField(entry.getKey(), listEntry);
     }
     if (_customMap != null) {

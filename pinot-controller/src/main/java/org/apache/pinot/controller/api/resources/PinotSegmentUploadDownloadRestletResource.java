@@ -1007,9 +1007,10 @@ public class PinotSegmentUploadDownloadRestletResource {
     String tableNameWithType =
         ResourceUtils.getExistingTableNamesWithType(_pinotHelixResourceManager, tableName, tableType, LOGGER).get(0);
     try {
+      int priority = startReplaceSegmentsRequest.getPriority();
       String segmentLineageEntryId = _pinotHelixResourceManager.startReplaceSegments(tableNameWithType,
           startReplaceSegmentsRequest.getSegmentsFrom(), startReplaceSegmentsRequest.getSegmentsTo(), forceCleanup,
-          startReplaceSegmentsRequest.getCustomMap());
+          startReplaceSegmentsRequest.getCustomMap(), priority);
       return Response.ok(JsonUtils.newObjectNode().put("segmentLineageEntryId", segmentLineageEntryId)).build();
     } catch (Exception e) {
       _controllerMetrics.addMeteredTableValue(tableNameWithType, ControllerMeter.NUMBER_START_REPLACE_FAILURE, 1);

@@ -31,12 +31,19 @@ public class LineageEntry {
   private final List<String> _segmentsTo;
   private final LineageEntryState _state;
   private final long _timestamp;
+  private final int _priority;
 
   public LineageEntry(List<String> segmentsFrom, List<String> segmentsTo, LineageEntryState state, long timestamp) {
+    this(segmentsFrom, segmentsTo, state, timestamp, LineageEntryPriority.DEFAULT_LINEAGE_PRIORITY);
+  }
+
+  public LineageEntry(List<String> segmentsFrom, List<String> segmentsTo, LineageEntryState state, long timestamp,
+      int priority) {
     _segmentsFrom = segmentsFrom;
     _segmentsTo = segmentsTo;
     _state = state;
     _timestamp = timestamp;
+    _priority = priority;
   }
 
   public List<String> getSegmentsFrom() {
@@ -55,6 +62,10 @@ public class LineageEntry {
     return _timestamp;
   }
 
+  public int getPriority() {
+    return _priority;
+  }
+
   @Override
   public boolean equals(Object o) {
     if (this == o) {
@@ -65,11 +76,11 @@ public class LineageEntry {
     }
     LineageEntry that = (LineageEntry) o;
     return _timestamp == that._timestamp && _segmentsFrom.equals(that._segmentsFrom) && _segmentsTo
-        .equals(that._segmentsTo) && _state == that._state;
+        .equals(that._segmentsTo) && _state == that._state && _priority == that._priority;
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(_segmentsFrom, _segmentsTo, _state, _timestamp);
+    return Objects.hash(_segmentsFrom, _segmentsTo, _state, _timestamp, _priority);
   }
 }

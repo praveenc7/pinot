@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
+import org.apache.pinot.common.lineage.LineageEntryPriority;
 
 
 /**
@@ -41,21 +42,24 @@ public class StartReplaceSegmentsRequest {
   private final List<String> _segmentsFrom;
   private final List<String> _segmentsTo;
   private final Map<String, String> _customMap;
+  private final int _priority;
 
   public StartReplaceSegmentsRequest(@JsonProperty("segmentsFrom") @Nullable List<String> segmentsFrom,
       @JsonProperty("segmentsTo") @Nullable List<String> segmentsTo) {
-    this(segmentsFrom, segmentsTo, null);
+    this(segmentsFrom, segmentsTo, null, LineageEntryPriority.DEFAULT_LINEAGE_PRIORITY);
   }
 
   @JsonCreator
   public StartReplaceSegmentsRequest(@JsonProperty("segmentsFrom") @Nullable List<String> segmentsFrom,
       @JsonProperty("segmentsTo") @Nullable List<String> segmentsTo,
-      @JsonProperty("customMap") @Nullable Map<String, String> customMap) {
+      @JsonProperty("customMap") @Nullable Map<String, String> customMap,
+      @JsonProperty("priority") @Nullable Integer priority) {
     _segmentsFrom = (segmentsFrom == null) ? Collections.emptyList() : segmentsFrom;
     _segmentsTo = (segmentsTo == null) ? Collections.emptyList() : segmentsTo;
     Preconditions.checkArgument(!_segmentsFrom.isEmpty() || !_segmentsTo.isEmpty(),
         "'segmentsFrom' and 'segmentsTo' cannot both be empty");
     _customMap = customMap;
+    _priority = (priority == null) ? LineageEntryPriority.DEFAULT_LINEAGE_PRIORITY : priority;
   }
 
   public List<String> getSegmentsFrom() {
@@ -68,5 +72,9 @@ public class StartReplaceSegmentsRequest {
 
   public Map<String, String> getCustomMap() {
     return _customMap;
+  }
+
+  public int getPriority() {
+    return _priority;
   }
 }

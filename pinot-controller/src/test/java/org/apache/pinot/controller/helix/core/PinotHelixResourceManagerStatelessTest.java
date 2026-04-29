@@ -20,6 +20,7 @@ package org.apache.pinot.controller.helix.core;
 
 import com.google.common.collect.BiMap;
 import com.google.common.collect.ImmutableMap;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -42,6 +43,7 @@ import org.apache.helix.model.MasterSlaveSMD;
 import org.apache.helix.zookeeper.datamodel.ZNRecord;
 import org.apache.pinot.common.exception.InvalidConfigException;
 import org.apache.pinot.common.exception.TableNotFoundException;
+import org.apache.pinot.common.lineage.LineageEntryPriority;
 import org.apache.pinot.common.lineage.LineageEntryState;
 import org.apache.pinot.common.lineage.SegmentLineage;
 import org.apache.pinot.common.lineage.SegmentLineageAccessHelper;
@@ -1293,6 +1295,74 @@ public class PinotHelixResourceManagerStatelessTest extends ControllerTest {
     assertEquals(segmentLineage.getLineageEntry(lineageEntryId10).getSegmentsFrom(), segmentsFrom10);
     assertEquals(segmentLineage.getLineageEntry(lineageEntryId10).getSegmentsTo(), segmentsTo10);
     assertEquals(segmentLineage.getLineageEntry(lineageEntryId10).getState(), LineageEntryState.COMPLETED);
+
+    // Delete the table
+    _helixResourceManager.deleteOfflineTable(RAW_TABLE_NAME);
+    segmentLineage = SegmentLineageAccessHelper.getSegmentLineage(_propertyStore, OFFLINE_TABLE_NAME);
+    assertNull(segmentLineage);
+  }
+
+  @Test
+  public void testSegmentReplacementWithPriority() throws IOException {
+    addDummySchema(RAW_TABLE_NAME);
+    IngestionConfig ingestionConfig = new IngestionConfig();
+    ingestionConfig.setBatchIngestionConfig(new BatchIngestionConfig(null, "REFRESH", "DAILY"));
+    TableConfig tableConfig =
+        new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).setBrokerTenant(BROKER_TENANT_NAME)
+            .setServerTenant(SERVER_TENANT_NAME).setIngestionConfig(ingestionConfig).build();
+    waitForEVToDisappear(tableConfig.getTableName());
+    _helixResourceManager.addTable(tableConfig);
+
+    // Add 3 segments
+    for (int i = 0; i < 3; i++) {
+      _helixResourceManager.addNewSegment(OFFLINE_TABLE_NAME,
+          SegmentMetadataMockUtils.mockSegmentMetadata(OFFLINE_TABLE_NAME, "s" + i),
+          getDownloadURL(_controllerDataDir, RAW_TABLE_NAME, "s" + i));
+    }
+    List<String> segmentsForTable = _helixResourceManager.getSegmentsFor(OFFLINE_TABLE_NAME, false);
+    assertEquals(segmentsForTable.size(), 3);
+
+    // Replace 2 segments with P0 priority
+    List<String> segmentsFrom1 = Arrays.asList("s1", "s2");
+    List<String> segmentsTo1 = Arrays.asList("merged_t1_0", "merged_t1_1");
+    String lineageEntryId1 =
+        _helixResourceManager.startReplaceSegments(OFFLINE_TABLE_NAME, segmentsFrom1, segmentsTo1, true,
+            null, LineageEntryPriority.P0);
+    SegmentLineage segmentLineage = SegmentLineageAccessHelper.getSegmentLineage(_propertyStore, OFFLINE_TABLE_NAME);
+    assertEquals(segmentLineage.getLineageEntryIds(), Collections.singleton(lineageEntryId1));
+    assertEquals(segmentLineage.getLineageEntry(lineageEntryId1).getState(), LineageEntryState.IN_PROGRESS);
+    assertEquals(segmentLineage.getLineageEntry(lineageEntryId1).getPriority(), LineageEntryPriority.P0);
+
+    // Start a P2 replacement, which should be blocked by the previous P0 replacement
+    List<String> segmentsFrom2 = Arrays.asList("s1", "s2");
+    List<String> segmentsTo2 = Arrays.asList("merged_t1_2", "merged_t1_3");
+    assertThrows(RuntimeException.class,
+        () -> _helixResourceManager.startReplaceSegments(OFFLINE_TABLE_NAME, segmentsFrom2, segmentsTo2, true,
+            null, LineageEntryPriority.P2));
+    segmentLineage = SegmentLineageAccessHelper.getSegmentLineage(_propertyStore, OFFLINE_TABLE_NAME);
+    assertEquals(segmentLineage.getLineageEntryIds(), Collections.singleton(lineageEntryId1));
+    assertEquals(segmentLineage.getLineageEntry(lineageEntryId1).getState(), LineageEntryState.IN_PROGRESS);
+
+    // Start another P0 replacement, which should go through
+    List<String> segmentsFrom3 = Arrays.asList("s1", "s2");
+    List<String> segmentsTo3 = Arrays.asList("merged_t1_4", "merged_t1_5");
+    String lineageEntryId3 = _helixResourceManager.startReplaceSegments(OFFLINE_TABLE_NAME, segmentsFrom3, segmentsTo3,
+        true, null, LineageEntryPriority.P0);
+    segmentLineage = SegmentLineageAccessHelper.getSegmentLineage(_propertyStore, OFFLINE_TABLE_NAME);
+    assertEquals(segmentLineage.getLineageEntryIds().size(), 2);
+    assertEquals(segmentLineage.getLineageEntry(lineageEntryId1).getState(), LineageEntryState.REVERTED);
+    assertEquals(segmentLineage.getLineageEntry(lineageEntryId3).getState(), LineageEntryState.IN_PROGRESS);
+
+    // Finish the replacement
+    _helixResourceManager.addNewSegment(OFFLINE_TABLE_NAME,
+        SegmentMetadataMockUtils.mockSegmentMetadata(OFFLINE_TABLE_NAME, "merged_t1_4"),
+        getDownloadURL(_controllerDataDir, RAW_TABLE_NAME, "merged_t1_4"));
+    _helixResourceManager.addNewSegment(OFFLINE_TABLE_NAME,
+        SegmentMetadataMockUtils.mockSegmentMetadata(OFFLINE_TABLE_NAME, "merged_t1_5"),
+        getDownloadURL(_controllerDataDir, RAW_TABLE_NAME, "merged_t1_5"));
+    _helixResourceManager.endReplaceSegments(OFFLINE_TABLE_NAME, lineageEntryId3, null);
+    segmentLineage = SegmentLineageAccessHelper.getSegmentLineage(_propertyStore, OFFLINE_TABLE_NAME);
+    assertEquals(segmentLineage.getLineageEntry(lineageEntryId3).getState(), LineageEntryState.COMPLETED);
 
     // Delete the table
     _helixResourceManager.deleteOfflineTable(RAW_TABLE_NAME);

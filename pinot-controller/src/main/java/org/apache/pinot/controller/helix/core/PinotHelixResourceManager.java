@@ -96,6 +96,7 @@ import org.apache.pinot.common.exception.SchemaBackwardIncompatibleException;
 import org.apache.pinot.common.exception.SchemaNotFoundException;
 import org.apache.pinot.common.exception.TableNotFoundException;
 import org.apache.pinot.common.lineage.LineageEntry;
+import org.apache.pinot.common.lineage.LineageEntryPriority;
 import org.apache.pinot.common.lineage.LineageEntryState;
 import org.apache.pinot.common.lineage.SegmentLineage;
 import org.apache.pinot.common.lineage.SegmentLineageAccessHelper;
@@ -3903,6 +3904,13 @@ public class PinotHelixResourceManager {
     return tableNamesWithType;
   }
 
+
+  public String startReplaceSegments(String tableNameWithType, List<String> segmentsFrom, List<String> segmentsTo,
+      boolean forceCleanup, Map<String, String> customMap) {
+    return startReplaceSegments(tableNameWithType, segmentsFrom, segmentsTo, forceCleanup, customMap,
+        LineageEntryPriority.DEFAULT_LINEAGE_PRIORITY);
+  }
+
   /**
    * Computes the start segment replace phase
    *
@@ -3923,12 +3931,15 @@ public class PinotHelixResourceManager {
    * @param segmentsTo a list of merged segments
    * @param forceCleanup True for enabling the force segment cleanup
    * @param customMap
+   * @param priority The priority of the lineage entry, which will be used to determine if the lineage entry force clean
+   *                 up can be applied when there's existing lineage entries. Only when the priority is higher than or
+   *                 equal to the existing lineage entry, the forceCleanup can go through.
    * @return Segment lineage entry id
    *
    * @throws InvalidConfigException
    */
   public String startReplaceSegments(String tableNameWithType, List<String> segmentsFrom, List<String> segmentsTo,
-      boolean forceCleanup, Map<String, String> customMap) {
+      boolean forceCleanup, Map<String, String> customMap, int priority) {
     long startReplaceSegmentsTs = System.currentTimeMillis();
     // Create a segment lineage entry id
     String segmentLineageEntryId = SegmentLineageUtils.generateLineageEntryId();
@@ -3983,6 +3994,9 @@ public class PinotHelixResourceManager {
             // the entry as not existing.
             if (lineageEntry.getState() == LineageEntryState.REVERTED) {
               // When 'forceCleanup' is enabled, proactively clean up 'segmentsTo' since it's safe to do so.
+              // No priority check needed here: the priority guard protects active (IN_PROGRESS/COMPLETED) entries
+              // from being disrupted by lower-priority requests. REVERTED entries have no active work to protect,
+              // so any request can clean up their orphaned segments.
               if (forceCleanup) {
                 segmentsToCleanUp.addAll(lineageEntry.getSegmentsTo());
               }
@@ -4007,6 +4021,8 @@ public class PinotHelixResourceManager {
                         + "entryId={}, segmentsFrom={}, segmentsTo={}", tableNameWithType, entryId,
                     lineageEntry.getSegmentsFrom(), lineageEntry.getSegmentsTo());
 
+                failIfCanNotApplyForceCleanup(tableNameWithType, entryId, lineageEntry.getPriority(), priority);
+
                 // Delete the 'IN_PROGRESS' entry or update it to 'REVERTED'
                 // Delete or update segmentsTo of the entry to revert to handle the case of rerunning the protocol:
                 // Initial state:
@@ -4025,7 +4041,7 @@ public class PinotHelixResourceManager {
                 } else {
                   // Update the lineage entry to 'REVERTED'
                   entry.setValue(new LineageEntry(lineageEntry.getSegmentsFrom(), segmentsToForEntryToRevert,
-                      LineageEntryState.REVERTED, System.currentTimeMillis()));
+                      LineageEntryState.REVERTED, System.currentTimeMillis(), lineageEntry.getPriority()));
                 }
 
                 // Add segments for proactive clean-up.
@@ -4078,7 +4094,9 @@ public class PinotHelixResourceManager {
 
           // Update lineage entry
           segmentLineage.addLineageEntry(segmentLineageEntryId,
-              new LineageEntry(segmentsFrom, segmentsTo, LineageEntryState.IN_PROGRESS, System.currentTimeMillis()));
+              new LineageEntry(segmentsFrom, segmentsTo, LineageEntryState.IN_PROGRESS, System.currentTimeMillis(),
+                  priority)
+          );
 
           _lineageManager.updateLineageForStartReplaceSegments(tableConfig, segmentLineageEntryId, customMap,
               segmentLineage);
@@ -4184,7 +4202,7 @@ public class PinotHelixResourceManager {
         // Update lineage entry
         LineageEntry lineageEntryToUpdate =
             new LineageEntry(lineageEntry.getSegmentsFrom(), segmentsTo, LineageEntryState.COMPLETED,
-                System.currentTimeMillis());
+                System.currentTimeMillis(), lineageEntry.getPriority());
 
         TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, tableNameWithType);
         Map<String, String> customMap =
@@ -4325,7 +4343,7 @@ public class PinotHelixResourceManager {
         // Update segment lineage entry to 'REVERTED'
         LineageEntry lineageEntryToUpdate =
             new LineageEntry(lineageEntry.getSegmentsFrom(), lineageEntry.getSegmentsTo(), LineageEntryState.REVERTED,
-                System.currentTimeMillis());
+                System.currentTimeMillis(), lineageEntry.getPriority());
 
         TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, tableNameWithType);
         Map<String, String> customMap =
@@ -4731,6 +4749,23 @@ public class PinotHelixResourceManager {
 
   public void setQueryWorkloadManager(QueryWorkloadManager queryWorkloadManager) {
     _queryWorkloadManager = queryWorkloadManager;
+  }
+
+  private void failIfCanNotApplyForceCleanup(
+      String tableNameWithType, String entryId,
+      int prevPriority,
+      int currPriority
+  ) {
+    if (!canApplyForceCleanup(prevPriority, currPriority)) {
+      throw new IllegalStateException(
+          "Previous lineage entry has higher priority. Force cleanup cannot be applied. "
+              + "tableNameWithType=" + tableNameWithType + ", entryId=" + entryId + ", entryPriority="
+              + prevPriority + ", currentAttemptPriority=" + currPriority);
+    }
+  }
+
+  private boolean canApplyForceCleanup(int prevPriority, int currPriority) {
+    return currPriority <= prevPriority;
   }
 
   /*
