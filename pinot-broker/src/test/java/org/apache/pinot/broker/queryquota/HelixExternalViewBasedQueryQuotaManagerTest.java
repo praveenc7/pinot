@@ -36,12 +36,17 @@ import org.apache.helix.zookeeper.datamodel.ZNRecord;
 import org.apache.helix.zookeeper.datamodel.serializer.ZNRecordSerializer;
 import org.apache.helix.zookeeper.impl.client.ZkClient;
 import org.apache.pinot.common.metadata.ZKMetadataProvider;
+import org.apache.pinot.common.metrics.BrokerGauge;
 import org.apache.pinot.common.metrics.BrokerMetrics;
+import org.apache.pinot.common.metrics.MetricValueUtils;
 import org.apache.pinot.common.utils.ZkStarter;
+import org.apache.pinot.plugin.metrics.yammer.YammerMetricsRegistry;
 import org.apache.pinot.spi.config.DatabaseConfig;
 import org.apache.pinot.spi.config.table.QuotaConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
+import org.apache.pinot.spi.env.PinotConfiguration;
+import org.apache.pinot.spi.metrics.PinotMetricUtils;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.spi.utils.StringUtil;
 import org.apache.pinot.spi.utils.builder.TableConfigBuilder;
@@ -597,11 +602,86 @@ public class HelixExternalViewBasedQueryQuotaManagerTest {
     Assert.assertEquals(_queryQuotaManager.getRateLimiterMapSize(), 1);
   }
 
+  @Test
+  public void testTableQpsQuotaGauge() {
+    BrokerMetrics brokerMetrics = newBrokerMetricsWithRealRegistry();
+    HelixExternalViewBasedQueryQuotaManager quotaManager =
+        new HelixExternalViewBasedQueryQuotaManager(brokerMetrics, BROKER_INSTANCE_ID);
+    quotaManager.init(_helixManager);
+
+    ExternalView brokerResource = generateBrokerResource(OFFLINE_TABLE_NAME);
+    TableConfig tableConfig = generateDefaultTableConfig(OFFLINE_TABLE_NAME);
+    ZKMetadataProvider.setTableConfig(_testPropertyStore, tableConfig);
+    setQps(tableConfig);
+    quotaManager.initOrUpdateTableQueryQuota(tableConfig, brokerResource);
+
+    Assert.assertTrue(MetricValueUtils.tableGaugeExists(brokerMetrics, OFFLINE_TABLE_NAME, BrokerGauge.TABLE_QPS_QUOTA),
+        "TABLE_QPS_QUOTA gauge should be registered when qps quota is set");
+    Assert.assertEquals(
+        MetricValueUtils.getTableGaugeValue(brokerMetrics, OFFLINE_TABLE_NAME, BrokerGauge.TABLE_QPS_QUOTA),
+        TABLE_MAX_QPS, "TABLE_QPS_QUOTA gauge should reflect the configured qps quota");
+
+    quotaManager.dropTableQueryQuota(OFFLINE_TABLE_NAME);
+  }
+
+  @Test
+  public void testTableQpsQuotaGaugeUpdatedWhenQuotaChanges() {
+    BrokerMetrics brokerMetrics = newBrokerMetricsWithRealRegistry();
+    HelixExternalViewBasedQueryQuotaManager quotaManager =
+        new HelixExternalViewBasedQueryQuotaManager(brokerMetrics, BROKER_INSTANCE_ID);
+    quotaManager.init(_helixManager);
+
+    ExternalView brokerResource = generateBrokerResource(OFFLINE_TABLE_NAME);
+    TableConfig tableConfig = generateDefaultTableConfig(OFFLINE_TABLE_NAME);
+    ZKMetadataProvider.setTableConfig(_testPropertyStore, tableConfig);
+    setQps(tableConfig);
+    quotaManager.initOrUpdateTableQueryQuota(tableConfig, brokerResource);
+    Assert.assertEquals(
+        MetricValueUtils.getTableGaugeValue(brokerMetrics, OFFLINE_TABLE_NAME, BrokerGauge.TABLE_QPS_QUOTA),
+        TABLE_MAX_QPS);
+
+    long updatedQps = TABLE_MAX_QPS * 2;
+    setQps(tableConfig, String.valueOf(updatedQps));
+    ZKMetadataProvider.setTableConfig(_testPropertyStore, tableConfig);
+    quotaManager.initOrUpdateTableQueryQuota(tableConfig, brokerResource);
+    Assert.assertEquals(
+        MetricValueUtils.getTableGaugeValue(brokerMetrics, OFFLINE_TABLE_NAME, BrokerGauge.TABLE_QPS_QUOTA),
+        updatedQps, "TABLE_QPS_QUOTA gauge should be refreshed when qps quota is updated");
+
+    quotaManager.dropTableQueryQuota(OFFLINE_TABLE_NAME);
+  }
+
+  @Test
+  public void testTableQpsQuotaGaugeNotSetWhenQuotaMissing() {
+    BrokerMetrics brokerMetrics = newBrokerMetricsWithRealRegistry();
+    HelixExternalViewBasedQueryQuotaManager quotaManager =
+        new HelixExternalViewBasedQueryQuotaManager(brokerMetrics, BROKER_INSTANCE_ID);
+    quotaManager.init(_helixManager);
+
+    ExternalView brokerResource = generateBrokerResource(OFFLINE_TABLE_NAME);
+    TableConfig tableConfig = generateDefaultTableConfig(OFFLINE_TABLE_NAME);
+    ZKMetadataProvider.setTableConfig(_testPropertyStore, tableConfig);
+    quotaManager.initOrUpdateTableQueryQuota(tableConfig, brokerResource);
+
+    Assert.assertFalse(
+        MetricValueUtils.tableGaugeExists(brokerMetrics, OFFLINE_TABLE_NAME, BrokerGauge.TABLE_QPS_QUOTA),
+        "TABLE_QPS_QUOTA gauge should not be registered when qps quota is missing");
+  }
+
   private TableConfig generateDefaultTableConfig(String tableName) {
     TableType tableType = TableNameBuilder.getTableTypeFromTableName(tableName);
     TableConfigBuilder builder = new TableConfigBuilder(tableType);
     builder.setTableName(tableName);
     return builder.build();
+  }
+
+  private static BrokerMetrics newBrokerMetricsWithRealRegistry() {
+    PinotConfiguration pinotConfiguration = new PinotConfiguration();
+    pinotConfiguration.setProperty(CommonConstants.CONFIG_OF_METRICS_FACTORY_CLASS_NAME,
+        "org.apache.pinot.plugin.metrics.yammer.YammerMetricsFactory");
+    PinotMetricUtils.init(pinotConfiguration);
+    return new BrokerMetrics(CommonConstants.Broker.DEFAULT_METRICS_NAME_PREFIX, new YammerMetricsRegistry(),
+        CommonConstants.Broker.DEFAULT_ENABLE_TABLE_LEVEL_METRICS, java.util.Collections.emptyList());
   }
 
   private DatabaseConfig generateDefaultDatabaseConfig() {

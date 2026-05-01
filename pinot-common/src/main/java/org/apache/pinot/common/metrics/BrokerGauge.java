@@ -30,6 +30,7 @@ public enum BrokerGauge implements AbstractMetrics.Gauge {
   VERSION("version", true),
   QUERY_QUOTA_CAPACITY_UTILIZATION_RATE("tables", false),
   MAX_BURST_QPS("tables", false),
+  TABLE_QPS_QUOTA("tables", false),
   QUERY_RATE_LIMIT_DISABLED("queryQuota", true),
   NETTY_CONNECTION_CONNECT_TIME_MS("nettyConnection", true),
   REQUEST_SIZE("requestSize", false),

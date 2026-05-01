@@ -319,6 +319,7 @@ public class HelixExternalViewBasedQueryQuotaManager implements ClusterChangeHan
     }
     addMaxBurstQPSCallbackTableGaugeIfNeeded(physicalOrLogicalTableName, queryQuotaEntity);
     addQueryQuotaCapacityUtilizationRateTableGaugeIfNeeded(physicalOrLogicalTableName, queryQuotaEntity);
+    addQPSQuotaCallbackTableGaugeIfNeeded(physicalOrLogicalTableName, quotaConfig);
     if (isQueryRateLimitDisabled()) {
       LOGGER.info("Query rate limiting is currently disabled for this broker. So it won't take effect immediately.");
     }
@@ -572,6 +573,16 @@ public class HelixExternalViewBasedQueryQuotaManager implements ClusterChangeHan
     final QueryQuotaEntity finalQueryQuotaEntity = queryQuotaEntity;
     _brokerMetrics.addCallbackTableGaugeIfNeeded(tableNameWithType, BrokerGauge.MAX_BURST_QPS,
         () -> (long) finalQueryQuotaEntity.getMaxQpsTracker().getMaxCountPerBucket());
+  }
+
+  /**
+   * Add the QPS Quota callback table gauge to the metric system if it doesn't exist.
+   */
+  private void addQPSQuotaCallbackTableGaugeIfNeeded(String tableNameWithType, QuotaConfig quotaConfig) {
+    if (quotaConfig != null && quotaConfig.getMaxQueriesPerSecond() != null) {
+      _brokerMetrics.setOrUpdateTableGauge(tableNameWithType, BrokerGauge.TABLE_QPS_QUOTA,
+          (long) quotaConfig.getMaxQPS());
+    }
   }
 
   /**
