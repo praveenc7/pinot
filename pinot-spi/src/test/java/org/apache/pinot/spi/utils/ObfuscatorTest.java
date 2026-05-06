@@ -69,6 +69,13 @@ public class ObfuscatorTest {
     _map.put("mySecretKey", "SECRET");
     _map.put("a.secretKey", "SECRET");
 
+    _map.put("crypter.foo.key", "SECRET");
+    _map.put("crypter.a.b.c.key", "SECRET");
+
+    _map.put("accessKey", "SECRET");
+    _map.put("a.accessKey", "SECRET");
+    _map.put("myAccessKey", "SECRET");
+
     _nestedMap = new HashMap<>();
     _nestedMap.put("value", "VALUE");
     _nestedMap.put("map", _map);
