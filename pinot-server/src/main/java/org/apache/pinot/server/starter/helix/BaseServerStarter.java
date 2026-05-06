@@ -950,10 +950,10 @@ public abstract class BaseServerStarter implements ServiceStartable {
       }
     }
     if (noIncomingQueries) {
-      // Ensure all the existing queries are finished
-      long latestQueryFinishTimeMs = _serverInstance.getLatestQueryTime() + maxQueryTimeMs;
-      if (latestQueryFinishTimeMs > currentTimeMs) {
-        long sleepTimeMs = latestQueryFinishTimeMs - currentTimeMs;
+      // Ensure all the existing queries are finished, but never sleep past the shutdown deadline
+      long sleepTimeMs =
+          computeRemainingDrainSleepMs(_serverInstance.getLatestQueryTime(), maxQueryTimeMs, currentTimeMs, endTimeMs);
+      if (sleepTimeMs > 0) {
         LOGGER.info("Sleep for {}ms to ensure all the existing queries are finished", sleepTimeMs);
         try {
           Thread.sleep(sleepTimeMs);
@@ -966,6 +966,18 @@ public abstract class BaseServerStarter implements ServiceStartable {
     } else {
       LOGGER.warn("Failed to drain queries within {}ms", System.currentTimeMillis() - startTimeMs);
     }
+  }
+
+  /**
+   * Returns how long to sleep waiting for in-flight queries to finish, capped by the shutdown deadline so this
+   * step cannot push total shutdown time past {@code endTimeMs}. A non-positive return means no sleep is needed.
+   */
+  @VisibleForTesting
+  static long computeRemainingDrainSleepMs(long latestQueryTimeMs, long maxQueryTimeMs, long currentTimeMs,
+      long endTimeMs) {
+    long latestQueryFinishTimeMs = latestQueryTimeMs + maxQueryTimeMs;
+    long boundedFinishTimeMs = Math.min(latestQueryFinishTimeMs, endTimeMs);
+    return boundedFinishTimeMs - currentTimeMs;
   }
 
   /**
