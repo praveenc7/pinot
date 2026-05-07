@@ -126,7 +126,6 @@ public class HelixInstanceDataManagerConfig implements InstanceDataManagerConfig
   private static final String DELETED_SEGMENTS_CACHE_SIZE = "table.deleted.segments.cache.size";
   private static final String DELETED_SEGMENTS_CACHE_TTL_MINUTES = "table.deleted.segments.cache.ttl.minutes";
   private static final String PEER_DOWNLOAD_SCHEME = "peer.download.scheme";
-  private static final String PEER_DOWNLOAD_FALLBACK_TO_DEEP_STORE = "peer.download.fallback.deepstore.enabled";
 
   public static final String UPLOAD_SEGMENT_TO_DEEP_STORE = "segment.upload.to.deep.store";
   public static final boolean DEFAULT_UPLOAD_SEGMENT_TO_DEEP_STORE = false;
@@ -310,11 +309,6 @@ public class HelixInstanceDataManagerConfig implements InstanceDataManagerConfig
   @Override
   public String getSegmentPeerDownloadScheme() {
     return _serverConfig.getProperty(PEER_DOWNLOAD_SCHEME);
-  }
-
-  @Override
-  public boolean isPeerDownloadFallbackToDeepStoreEnabled() {
-    return _serverConfig.getProperty(PEER_DOWNLOAD_FALLBACK_TO_DEEP_STORE, true);
   }
 
   @Override

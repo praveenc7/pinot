@@ -78,12 +78,12 @@ public class SegmentCommitterFactoryTest {
     String controllerVipUrl = "http://localhost:1234";
     SegmentCompletionProtocol.Request.Params requestParams = new SegmentCompletionProtocol.Request.Params();
 
-    // No peer segment download scheme, serverUploadToDeepStore = true
+    // serverUploadToDeepStore = true with segment.store.uri set
     Map<String, String> streamConfigMap = new HashMap<>(getMinimumStreamConfigMap());
     streamConfigMap.put(StreamConfigProperties.SERVER_UPLOAD_TO_DEEPSTORE, "true");
     TableConfig config = createRealtimeTableConfig("testDeepStoreConfig", streamConfigMap).build();
-    // Create and set up the mocked IndexLoadingConfig and InstanceDataManager
     IndexLoadingConfig indexLoadingConfig = mockIndexLoadConfig();
+    Mockito.when(indexLoadingConfig.getSegmentStoreURI()).thenReturn("file:///tmp/segments");
     SegmentCommitterFactory factory = new SegmentCommitterFactory(Mockito.mock(Logger.class), protocolHandler, config,
         indexLoadingConfig, Mockito.mock(ServerMetrics.class));
     SegmentCommitter committer = factory.createSegmentCommitter(requestParams, controllerVipUrl);
@@ -91,19 +91,60 @@ public class SegmentCommitterFactoryTest {
     Assert.assertTrue(committer instanceof SplitSegmentCommitter);
     Assert.assertTrue(((SplitSegmentCommitter) committer).getSegmentUploader() instanceof PinotFSSegmentUploader);
 
-    // Peer segment download scheme is set, serverUploadToDeepStore = false (for backwards compatibility)
+    // Peer segment download scheme is set with segment.store.uri, serverUploadToDeepStore = false
     Map<String, String> streamConfigMap1 = new HashMap<>(getMinimumStreamConfigMap());
     streamConfigMap1.put(StreamConfigProperties.SERVER_UPLOAD_TO_DEEPSTORE, "false");
     TableConfig config1 = createRealtimeTableConfig("testDeepStoreConfig", streamConfigMap1)
         .setPeerSegmentDownloadScheme("http")
         .build();
+    IndexLoadingConfig indexLoadingConfigWithUri = mockIndexLoadConfig();
+    Mockito.when(indexLoadingConfigWithUri.getSegmentStoreURI()).thenReturn("file:///tmp/segments");
 
     factory = new SegmentCommitterFactory(Mockito.mock(Logger.class), protocolHandler, config1,
-        indexLoadingConfig, Mockito.mock(ServerMetrics.class));
+        indexLoadingConfigWithUri, Mockito.mock(ServerMetrics.class));
     committer = factory.createSegmentCommitter(requestParams, controllerVipUrl);
     Assert.assertNotNull(committer);
     Assert.assertTrue(committer instanceof SplitSegmentCommitter);
     Assert.assertTrue(((SplitSegmentCommitter) committer).getSegmentUploader() instanceof PinotFSSegmentUploader);
+  }
+
+  @Test(description = "when segment.store.uri is missing, fall back to controller upload regardless of other configs")
+  public void testMissingSegmentStoreUriFallsBackToControllerUpload()
+      throws URISyntaxException {
+    ServerSegmentCompletionProtocolHandler protocolHandler =
+        new ServerSegmentCompletionProtocolHandler(Mockito.mock(ServerMetrics.class), "test_REALTIME");
+    String controllerVipUrl = "http://localhost:1234";
+    SegmentCompletionProtocol.Request.Params requestParams = new SegmentCompletionProtocol.Request.Params();
+
+    // peerSegmentDownloadScheme set but no segment.store.uri
+    Map<String, String> streamConfigMap = new HashMap<>(getMinimumStreamConfigMap());
+    streamConfigMap.put(StreamConfigProperties.SERVER_UPLOAD_TO_DEEPSTORE, "false");
+    TableConfig config = createRealtimeTableConfig("testFallback", streamConfigMap)
+        .setPeerSegmentDownloadScheme("http")
+        .build();
+    IndexLoadingConfig indexLoadingConfig = mockIndexLoadConfig();
+
+    SegmentCommitterFactory factory = new SegmentCommitterFactory(Mockito.mock(Logger.class), protocolHandler, config,
+        indexLoadingConfig, Mockito.mock(ServerMetrics.class));
+    SegmentCommitter committer = factory.createSegmentCommitter(requestParams, controllerVipUrl);
+    Assert.assertNotNull(committer);
+    Assert.assertTrue(committer instanceof SplitSegmentCommitter);
+    Assert.assertTrue(
+        ((SplitSegmentCommitter) committer).getSegmentUploader() instanceof Server2ControllerSegmentUploader);
+
+    // uploadToDeepStore = true but no segment.store.uri
+    Map<String, String> streamConfigMap2 = new HashMap<>(getMinimumStreamConfigMap());
+    streamConfigMap2.put(StreamConfigProperties.SERVER_UPLOAD_TO_DEEPSTORE, "true");
+    TableConfig config2 = createRealtimeTableConfig("testFallback2", streamConfigMap2).build();
+    IndexLoadingConfig indexLoadingConfig2 = mockIndexLoadConfig();
+
+    factory = new SegmentCommitterFactory(Mockito.mock(Logger.class), protocolHandler, config2,
+        indexLoadingConfig2, Mockito.mock(ServerMetrics.class));
+    committer = factory.createSegmentCommitter(requestParams, controllerVipUrl);
+    Assert.assertNotNull(committer);
+    Assert.assertTrue(committer instanceof SplitSegmentCommitter);
+    Assert.assertTrue(
+        ((SplitSegmentCommitter) committer).getSegmentUploader() instanceof Server2ControllerSegmentUploader);
   }
 
   private IndexLoadingConfig mockIndexLoadConfig() {

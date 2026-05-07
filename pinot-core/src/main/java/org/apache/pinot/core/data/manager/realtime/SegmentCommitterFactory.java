@@ -66,12 +66,20 @@ public class SegmentCommitterFactory {
     String peerSegmentDownloadScheme = _tableConfig.getValidationConfig().getPeerSegmentDownloadScheme();
     String segmentStoreUri = _indexLoadingConfig.getSegmentStoreURI();
 
+    boolean hasSegmentStoreUri = segmentStoreUri != null && !segmentStoreUri.isEmpty();
+
+    // Upload directly to deep store via PinotFS only when segment.store.uri is configured.
+    // Fall back to controller upload otherwise, even if uploadToFs or peerSegmentDownloadScheme is set.
     SegmentUploader segmentUploader;
-    if (uploadToFs || peerSegmentDownloadScheme != null) {
-      // TODO: peer scheme non-null check exists for backwards compatibility. remove check once users have migrated
+    if (hasSegmentStoreUri && (uploadToFs || peerSegmentDownloadScheme != null)) {
       segmentUploader = new PinotFSSegmentUploader(segmentStoreUri,
           ServerSegmentCompletionProtocolHandler.getSegmentUploadRequestTimeoutMs(), _serverMetrics);
     } else {
+      if (!hasSegmentStoreUri && (uploadToFs || peerSegmentDownloadScheme != null)) {
+        _logger.warn("segment.store.uri is not set but uploadToDeepStore={} and peerSegmentDownloadScheme={}. "
+            + "Falling back to controller upload. Configure segment.store.uri for direct deep store upload.",
+            uploadToFs, peerSegmentDownloadScheme);
+      }
       segmentUploader = new Server2ControllerSegmentUploader(_logger,
           _protocolHandler.getFileUploadDownloadClient(),
           _protocolHandler.getSegmentCommitUploadURL(params, controllerVipUrl), params.getSegmentName(),

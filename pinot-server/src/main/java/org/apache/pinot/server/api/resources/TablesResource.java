@@ -439,6 +439,42 @@ public class TablesResource {
     }
   }
 
+  @GET
+  @Encoded
+  @Path("/tables/{tableName}/segments/{segmentName}/crc")
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = "Provide segment crc information",
+      notes = "Provide crc information for a single segment on server")
+  @ApiResponses(value = {
+      @ApiResponse(code = 200, message = "Success"),
+      @ApiResponse(code = 500, message = "Internal server error", response = ErrorInfo.class),
+      @ApiResponse(code = 404, message = "Table or segment not found", response = ErrorInfo.class)
+  })
+  public String getCrcForSegment(
+      @ApiParam(value = "Table name including type", required = true, example = "myTable_OFFLINE")
+      @PathParam("tableName") String tableName,
+      @ApiParam(value = "Segment name", required = true) @PathParam("segmentName") String segmentName,
+      @Context HttpHeaders headers) {
+    tableName = DatabaseUtils.translateTableName(tableName, headers);
+    segmentName = URIUtils.decode(segmentName);
+    TableDataManager tableDataManager = ServerResourceUtils.checkGetTableDataManager(_serverInstance, tableName);
+    SegmentDataManager segmentDataManager = tableDataManager.acquireSegment(segmentName);
+    if (segmentDataManager == null) {
+      throw new WebApplicationException(
+          String.format("Table %s segment %s does not exist", tableName, segmentName),
+          Response.Status.NOT_FOUND);
+    }
+    try {
+      String crc = segmentDataManager.getSegment().getSegmentMetadata().getCrc();
+      return ResourceUtils.convertToJsonString(Map.of(segmentName, crc));
+    } catch (Exception e) {
+      throw new WebApplicationException("Failed to get CRC for segment",
+          Response.Status.INTERNAL_SERVER_ERROR);
+    } finally {
+      tableDataManager.releaseSegment(segmentDataManager);
+    }
+  }
+
   // TODO Add access control similar to PinotSegmentUploadDownloadRestletResource for segment download.
   @GET
   @Produces(MediaType.APPLICATION_OCTET_STREAM)
@@ -451,6 +487,9 @@ public class TablesResource {
       @Context HttpHeaders httpHeaders, @Context Request grizzlyRequest)
       throws Exception {
     tableNameWithType = DatabaseUtils.translateTableName(tableNameWithType, httpHeaders);
+    // @Encoded on segmentName prevents JAX-RS from auto-decoding, so we must decode manually.
+    // Without this, percent-encoded names (e.g. "seg_0%20%25") would be looked up literally and return 404.
+    segmentName = URIUtils.decode(segmentName);
     LOGGER.info("Received a request to download segment {} for table {}", segmentName, tableNameWithType);
     // Validate data access
     X509Certificate clientCert = extractClientCert(grizzlyRequest);

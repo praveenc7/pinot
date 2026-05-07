@@ -59,7 +59,6 @@ import org.testng.annotations.Test;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
@@ -177,7 +176,7 @@ public class ZKOperatorTest {
     Assert.assertFalse(finalSegmentLocation.exists());
     zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.METADATA,
         finalSegmentLocation.toURI(), segmentFile, sourceDownloadURIStr, "downloadUrl", "crypter", 10, true, true,
-        false, httpHeaders);
+        httpHeaders);
     Assert.assertTrue(finalSegmentLocation.exists());
     Assert.assertTrue(segmentTar.exists());
     checkSegmentZkMetadata(segmentName, 12345L, 123L);
@@ -192,7 +191,7 @@ public class ZKOperatorTest {
     FileUtils.deleteQuietly(DATA_DIR);
     // with finalSegmentLocation null
     zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.METADATA, null,
-        segmentFile, sourceDownloadURIStr, "downloadUrl", "crypter", 10, true, true, false, httpHeaders);
+        segmentFile, sourceDownloadURIStr, "downloadUrl", "crypter", 10, true, true, httpHeaders);
     Assert.assertFalse(finalSegmentLocation.exists());
     Assert.assertTrue(segmentTar.exists());
     checkSegmentZkMetadata(segmentName, 12345L, 123L);
@@ -217,7 +216,7 @@ public class ZKOperatorTest {
       File segmentFile = new File(new File("foo/bar"), "mockChild");
       zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT,
           finalSegmentLocationURI, segmentFile, "downloadUrl", "downloadUrl",
-          "crypter", 10, true, true, false, httpHeaders);
+          "crypter", 10, true, true, httpHeaders);
       fail();
     } catch (Exception e) {
       // Expected
@@ -230,7 +229,7 @@ public class ZKOperatorTest {
     }, 30_000L, "Failed to delete segmentZkMetadata.");
 
     zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", "crypter", 10, true, true, false, httpHeaders);
+        "downloadUrl", "downloadUrl", "crypter", 10, true, true, httpHeaders);
     SegmentZKMetadata segmentZKMetadata = _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, SEGMENT_NAME);
     assertNotNull(segmentZKMetadata);
     assertEquals(segmentZKMetadata.getCrc(), 12345L);
@@ -253,7 +252,7 @@ public class ZKOperatorTest {
         .setResourceIdealState(_resourceManager.getHelixClusterName(), OFFLINE_TABLE_NAME, idealState);
     // The segment should be uploaded as a new segment (push time should change, and refresh time shouldn't be set)
     zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", "crypter", 10, true, true, false, httpHeaders);
+        "downloadUrl", "downloadUrl", "crypter", 10, true, true, httpHeaders);
     segmentZKMetadata = _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, SEGMENT_NAME);
     assertNotNull(segmentZKMetadata);
     assertEquals(segmentZKMetadata.getCrc(), 12345L);
@@ -270,7 +269,7 @@ public class ZKOperatorTest {
     // Upload the same segment with allowRefresh = false. Validate that an exception is thrown.
     try {
       zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-          "otherDownloadUrl", "otherDownloadUrl", "otherCrypter", 10, true, false, false, httpHeaders);
+          "otherDownloadUrl", "otherDownloadUrl", "otherCrypter", 10, true, false, httpHeaders);
       fail();
     } catch (Exception e) {
       // Expected
@@ -280,7 +279,7 @@ public class ZKOperatorTest {
     when(httpHeaders.getHeaderString(HttpHeaders.IF_MATCH)).thenReturn("123");
     try {
       zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-          "otherDownloadUrl", "otherDownloadUrl", "otherCrypter", 10, true, true, false, httpHeaders);
+          "otherDownloadUrl", "otherDownloadUrl", "otherCrypter", 10, true, true, httpHeaders);
       fail();
     } catch (Exception e) {
       // Expected
@@ -291,7 +290,7 @@ public class ZKOperatorTest {
     when(httpHeaders.getHeaderString(HttpHeaders.IF_MATCH)).thenReturn("12345");
     when(segmentMetadata.getIndexCreationTime()).thenReturn(456L);
     zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "otherDownloadUrl", "otherDownloadUrl", "otherCrypter", 10, true, true, false, httpHeaders);
+        "otherDownloadUrl", "otherDownloadUrl", "otherCrypter", 10, true, true, httpHeaders);
 
     segmentZKMetadata = _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, SEGMENT_NAME);
     assertNotNull(segmentZKMetadata);
@@ -315,7 +314,7 @@ public class ZKOperatorTest {
     // Add a tiny sleep to guarantee that refresh time is different from the previous round
     Thread.sleep(10);
     zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "otherDownloadUrl", "otherDownloadUrl", "otherCrypter", 100, true, true, false, httpHeaders);
+        "otherDownloadUrl", "otherDownloadUrl", "otherCrypter", 100, true, true, httpHeaders);
 
     segmentZKMetadata = _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, SEGMENT_NAME);
     assertNotNull(segmentZKMetadata);
@@ -339,7 +338,7 @@ public class ZKOperatorTest {
     when(segmentMetadata.getName()).thenReturn(SEGMENT_NAME);
     when(segmentMetadata.getCrc()).thenReturn("12345");
     zkOperator.completeSegmentOperations(REALTIME_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", null, 10, true, true, false, mock(HttpHeaders.class));
+        "downloadUrl", "downloadUrl", null, 10, true, true, mock(HttpHeaders.class));
 
     SegmentZKMetadata segmentZKMetadata = _resourceManager.getSegmentZKMetadata(REALTIME_TABLE_NAME, SEGMENT_NAME);
     assertNotNull(segmentZKMetadata);
@@ -352,7 +351,7 @@ public class ZKOperatorTest {
     when(segmentMetadata.getCrc()).thenReturn("23456");
     try {
       zkOperator.completeSegmentOperations(REALTIME_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-          "downloadUrl", "downloadUrl", null, 10, true, true, false, mock(HttpHeaders.class));
+          "downloadUrl", "downloadUrl", null, 10, true, true, mock(HttpHeaders.class));
       fail();
     } catch (ControllerApplicationException e) {
       assertEquals(e.getResponse().getStatus(), Response.Status.BAD_REQUEST.getStatusCode());
@@ -363,7 +362,7 @@ public class ZKOperatorTest {
     when(segmentMetadata.getStartOffset()).thenReturn("0");
     when(segmentMetadata.getEndOffset()).thenReturn("1234");
     zkOperator.completeSegmentOperations(REALTIME_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", null, 10, true, true, false, mock(HttpHeaders.class));
+        "downloadUrl", "downloadUrl", null, 10, true, true, mock(HttpHeaders.class));
 
     segmentZKMetadata = _resourceManager.getSegmentZKMetadata(REALTIME_TABLE_NAME, LLC_SEGMENT_NAME);
     assertNotNull(segmentZKMetadata);
@@ -376,7 +375,7 @@ public class ZKOperatorTest {
     when(segmentMetadata.getStartOffset()).thenReturn(null);
     when(segmentMetadata.getEndOffset()).thenReturn(null);
     zkOperator.completeSegmentOperations(REALTIME_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", null, 10, true, true, false, mock(HttpHeaders.class));
+        "downloadUrl", "downloadUrl", null, 10, true, true, mock(HttpHeaders.class));
 
     segmentZKMetadata = _resourceManager.getSegmentZKMetadata(REALTIME_TABLE_NAME, LLC_SEGMENT_NAME);
     assertNotNull(segmentZKMetadata);
@@ -389,165 +388,13 @@ public class ZKOperatorTest {
     when(segmentMetadata.getStartOffset()).thenReturn("1234");
     when(segmentMetadata.getEndOffset()).thenReturn("2345");
     zkOperator.completeSegmentOperations(REALTIME_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", null, 10, true, true, false, mock(HttpHeaders.class));
+        "downloadUrl", "downloadUrl", null, 10, true, true, mock(HttpHeaders.class));
 
     segmentZKMetadata = _resourceManager.getSegmentZKMetadata(REALTIME_TABLE_NAME, LLC_SEGMENT_NAME);
     assertNotNull(segmentZKMetadata);
     assertEquals(segmentZKMetadata.getStatus(), Status.UPLOADED);
     assertEquals(segmentZKMetadata.getStartOffset(), "1234");
     assertEquals(segmentZKMetadata.getEndOffset(), "2345");
-  }
-
-  /**
-   * Tests that uploading a new segment with enablePeerDownload=true sets sourceServer to one of
-   * the actually assigned instances in IdealState.
-   */
-  @Test
-  public void testEnablePeerDownloadNewSegment()
-      throws Exception {
-    String segmentName = "peerDownloadNewSegment";
-    ZKOperator zkOperator = new ZKOperator(_resourceManager, mock(ControllerConf.class), mock(ControllerMetrics.class));
-
-    SegmentMetadata segmentMetadata = mock(SegmentMetadata.class);
-    when(segmentMetadata.getName()).thenReturn(segmentName);
-    when(segmentMetadata.getCrc()).thenReturn("99999");
-    when(segmentMetadata.getIndexCreationTime()).thenReturn(1000L);
-
-    // Upload new segment with enablePeerDownload=true
-    zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", null, 10, true, true, true, mock(HttpHeaders.class));
-
-    SegmentZKMetadata segmentZKMetadata = _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, segmentName);
-    assertNotNull(segmentZKMetadata);
-
-    // sourceServer must be set and non-empty
-    String sourceServer = segmentZKMetadata.getSourceServer();
-    assertNotNull(sourceServer, "sourceServer should be set when enablePeerDownload=true");
-    assertTrue(!sourceServer.isEmpty(), "sourceServer should not be empty");
-
-    // sourceServer must be one of the actually assigned instances in IdealState
-    IdealState idealState = _resourceManager.getTableIdealState(OFFLINE_TABLE_NAME);
-    assertNotNull(idealState);
-    Map<String, String> instanceStateMap = idealState.getRecord().getMapFields().get(segmentName);
-    assertNotNull(instanceStateMap, "Segment should be in IdealState");
-    assertTrue(instanceStateMap.containsKey(sourceServer),
-        "sourceServer " + sourceServer + " should be one of the assigned instances: " + instanceStateMap.keySet());
-
-    // Cleanup
-    _resourceManager.deleteSegment(OFFLINE_TABLE_NAME, segmentName);
-    TestUtils.waitForCondition(
-        aVoid -> _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, segmentName) == null,
-        30_000L, "Failed to delete segment ZK metadata");
-  }
-
-  /**
-   * Tests that uploading a new segment with enablePeerDownload=false does NOT set sourceServer.
-   */
-  @Test
-  public void testDisabledPeerDownloadNoSourceServer()
-      throws Exception {
-    String segmentName = "peerDownloadDisabled";
-    ZKOperator zkOperator = new ZKOperator(_resourceManager, mock(ControllerConf.class), mock(ControllerMetrics.class));
-
-    SegmentMetadata segmentMetadata = mock(SegmentMetadata.class);
-    when(segmentMetadata.getName()).thenReturn(segmentName);
-    when(segmentMetadata.getCrc()).thenReturn("44444");
-    when(segmentMetadata.getIndexCreationTime()).thenReturn(1000L);
-
-    // Upload new segment with enablePeerDownload=false
-    zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", null, 10, true, true, false, mock(HttpHeaders.class));
-
-    SegmentZKMetadata segmentZKMetadata = _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, segmentName);
-    assertNotNull(segmentZKMetadata);
-    assertNull(segmentZKMetadata.getSourceServer(), "sourceServer should not be set when enablePeerDownload=false");
-
-    // Cleanup
-    _resourceManager.deleteSegment(OFFLINE_TABLE_NAME, segmentName);
-    TestUtils.waitForCondition(
-        aVoid -> _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, segmentName) == null,
-        30_000L, "Failed to delete segment ZK metadata");
-  }
-
-  /**
-   * Tests that a same-CRC refresh preserves the sourceServer set on the initial upload and does
-   * not overwrite it. Setting sourceServer is only meaningful for new segments; for a same-CRC
-   * refresh all assigned servers already have the correct content, and BaseTableDataManager
-   * handles peer download fallback on its own.
-   */
-  @Test
-  public void testSameCrcRefreshPreservesSourceServer()
-      throws Exception {
-    String segmentName = "peerDownloadRefreshSameCrc";
-    ZKOperator zkOperator = new ZKOperator(_resourceManager, mock(ControllerConf.class), mock(ControllerMetrics.class));
-
-    SegmentMetadata segmentMetadata = mock(SegmentMetadata.class);
-    when(segmentMetadata.getName()).thenReturn(segmentName);
-    when(segmentMetadata.getCrc()).thenReturn("11111");
-    when(segmentMetadata.getIndexCreationTime()).thenReturn(1000L);
-
-    // Initial upload with enablePeerDownload=true — sourceServer should be set
-    zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", null, 10, true, true, true, mock(HttpHeaders.class));
-    String initialSourceServer =
-        _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, segmentName).getSourceServer();
-    assertNotNull(initialSourceServer,
-        "sourceServer should be set on initial upload with enablePeerDownload=true");
-
-    // Same-CRC refresh — sourceServer is not modified; it is retained from the initial upload
-    when(segmentMetadata.getIndexCreationTime()).thenReturn(2000L);
-    zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", null, 10, true, true, false, mock(HttpHeaders.class));
-
-    SegmentZKMetadata refreshedMetadata = _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, segmentName);
-    assertNotNull(refreshedMetadata);
-    assertEquals(refreshedMetadata.getSourceServer(), initialSourceServer,
-        "sourceServer should be unchanged after a same-CRC refresh");
-
-    // Cleanup
-    _resourceManager.deleteSegment(OFFLINE_TABLE_NAME, segmentName);
-    TestUtils.waitForCondition(
-        aVoid -> _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, segmentName) == null,
-        30_000L, "Failed to delete segment ZK metadata");
-  }
-
-
-  /**
-   * Tests that expectedVersion=0 in updateZkMetadata prevents a stale write after a concurrent modification.
-   * After the first upload with enablePeerDownload=true the ZK record is at version 1 (bumped by our update).
-   * A second call with expectedVersion=0 must fail, proving the version constraint guards against races.
-   */
-  @Test
-  public void testExpectedVersionPreventsStaleWrite()
-      throws Exception {
-    String segmentName = "expectedVersionTest";
-    ZKOperator zkOperator = new ZKOperator(_resourceManager, mock(ControllerConf.class), mock(ControllerMetrics.class));
-
-    SegmentMetadata segmentMetadata = mock(SegmentMetadata.class);
-    when(segmentMetadata.getName()).thenReturn(segmentName);
-    when(segmentMetadata.getCrc()).thenReturn("55555");
-    when(segmentMetadata.getIndexCreationTime()).thenReturn(1000L);
-
-    // Upload new segment with enablePeerDownload=true — updateZkMetadata(table, metadata, 0) is called internally,
-    // bumping the ZK record from version 0 to version 1.
-    zkOperator.completeSegmentOperations(OFFLINE_TABLE_CONFIG, segmentMetadata, FileUploadType.SEGMENT, null, null,
-        "downloadUrl", "downloadUrl", null, 10, true, true, true, mock(HttpHeaders.class));
-
-    SegmentZKMetadata segmentZKMetadata = _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, segmentName);
-    assertNotNull(segmentZKMetadata);
-    assertNotNull(segmentZKMetadata.getSourceServer(), "sourceServer should have been set");
-
-    // ZK record is now at version 1. A stale write with expectedVersion=0 must be rejected.
-    // This would happen if two uploads raced: the second one's updateZkMetadata(0) should fail.
-    boolean stalWriteSucceeded = _resourceManager.updateZkMetadata(OFFLINE_TABLE_NAME, segmentZKMetadata, 0);
-    assertFalse(stalWriteSucceeded,
-        "updateZkMetadata with expectedVersion=0 must fail when ZK record is already at version > 0");
-
-    // Cleanup
-    _resourceManager.deleteSegment(OFFLINE_TABLE_NAME, segmentName);
-    TestUtils.waitForCondition(
-        aVoid -> _resourceManager.getSegmentZKMetadata(OFFLINE_TABLE_NAME, segmentName) == null,
-        30_000L, "Failed to delete segment ZK metadata");
   }
 
   @AfterClass

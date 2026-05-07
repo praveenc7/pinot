@@ -22,6 +22,7 @@ import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -31,6 +32,7 @@ import java.util.concurrent.Executors;
 import org.apache.commons.io.FileUtils;
 import org.apache.helix.HelixManager;
 import org.apache.pinot.common.metadata.segment.SegmentZKMetadata;
+import org.apache.pinot.common.metrics.ServerMeter;
 import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.common.tier.TierFactory;
 import org.apache.pinot.common.utils.TarCompressionUtils;
@@ -642,18 +644,12 @@ public class BaseTableDataManagerTest {
 
   /**
    * Tests that SEGMENT_DOWNLOAD_FROM_PEERS_FAILURES metric is emitted inside downloadSegmentFromPeers
-   * when peer download fails. With peer.retry.count=0 the retry policy exhausts immediately without
-   * making any network calls, so no HTTP server or Helix setup is needed.
+   * when peer download fails, and that downloadSegment falls back to deep store.
+   * With peer.retry.count=0 the retry policy exhausts immediately without making any network calls.
    */
   @Test
-  public void testDownloadFromPeersEmitsFailureMetricOnRetryExhaustion()
+  public void testDownloadFromPeersFallsBackToDeepStore()
       throws Exception {
-    // Configure segment fetcher with 0 peer retries so it fails immediately
-    Map<String, Object> properties = new HashMap<>();
-    properties.put(BaseSegmentFetcher.PEER_RETRY_COUNT_CONFIG_KEY, 0);
-    properties.put(BaseSegmentFetcher.PEER_RETRY_WAIT_MS_CONFIG_KEY, 0);
-    SegmentFetcherFactory.init(new PinotConfiguration(properties));
-
     // Create a table config with peer download scheme enabled
     org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig validationConfig =
         new org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig();
@@ -663,35 +659,289 @@ public class BaseTableDataManagerTest {
 
     OfflineTableDataManager tableDataManager = createTableManagerWithConfig(peerTableConfig);
 
-    // Use a real download URL so downloadSegment doesn't fail before reaching peer logic,
-    // but set sourceServer so shouldAttemptPeerToPeerDownload() returns true and peer path is taken.
-    SegmentZKMetadata zkMetadata = new SegmentZKMetadata(SEGMENT_NAME);
-    zkMetadata.setDownloadUrl("http://unreachable-placeholder/segment");
-    zkMetadata.setSourceServer("Server_otherHost_9000");
+    // Prepare a real segment tar so deep store fallback can succeed
+    File tempDir = new File(TEMP_DIR, "testPeerFallback");
+    FileUtils.write(new File(tempDir, "tmp.txt"), "deep store content");
+    File tempTarFile = new File(TEMP_DIR, SEGMENT_NAME + TarCompressionUtils.TAR_COMPRESSED_FILE_EXTENSION);
+    TarCompressionUtils.createCompressedTarFile(tempDir, tempTarFile);
 
-    // Capture the ServerMetrics mock before calling download
+    // No ONLINE peers found (mock HelixManager returns no peers), so peer download is skipped
+    // and falls back to deep store URL which points to a real file
+    SegmentZKMetadata zkMetadata = new SegmentZKMetadata(SEGMENT_NAME);
+    zkMetadata.setDownloadUrl("file://" + tempTarFile.getAbsolutePath());
+
+    ServerMetrics serverMetrics = ServerMetrics.get();
+    org.mockito.Mockito.reset(serverMetrics);
+
+    // downloadSegment should succeed via deep store (peer download skipped, no ONLINE peers)
+    File indexDir = tableDataManager.downloadSegment(zkMetadata);
+    assertTrue(indexDir.exists());
+
+    // Verify no peer failure metric — peer download was skipped entirely (no ONLINE peers)
+    org.mockito.Mockito.verify(serverMetrics, org.mockito.Mockito.never()).addMeteredTableValue(
+        org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
+        org.mockito.Mockito.eq(org.apache.pinot.common.metrics.ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_FAILURES),
+        org.mockito.Mockito.anyLong());
+    // Verify deep store download metric was emitted
+    org.mockito.Mockito.verify(serverMetrics).addMeteredTableValue(
+        org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
+        org.mockito.Mockito.eq(org.apache.pinot.common.metrics.ServerMeter.SEGMENT_DOWNLOAD_FROM_REMOTE),
+        org.mockito.Mockito.eq(1L));
+  }
+
+  @Test
+  public void testDownloadFailsWhenBothPeerAndDeepStoreFail()
+      throws Exception {
+    // Configure segment fetcher with 0 peer retries so peer download fails immediately
+    Map<String, Object> properties = new HashMap<>();
+    properties.put(BaseSegmentFetcher.PEER_RETRY_COUNT_CONFIG_KEY, 0);
+    properties.put(BaseSegmentFetcher.PEER_RETRY_WAIT_MS_CONFIG_KEY, 0);
+    SegmentFetcherFactory.init(new PinotConfiguration(properties));
+
+    org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig validationConfig =
+        new org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig();
+    validationConfig.setPeerSegmentDownloadScheme(org.apache.pinot.spi.utils.CommonConstants.HTTP_PROTOCOL);
+    TableConfig peerTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).build();
+    peerTableConfig.setValidationConfig(validationConfig);
+
+    OfflineTableDataManager tableDataManager = createTableManagerWithConfig(peerTableConfig);
+
+    // Set an invalid deep store URL so both peer and deep store fail
+    SegmentZKMetadata zkMetadata = new SegmentZKMetadata(SEGMENT_NAME);
+    zkMetadata.setDownloadUrl("file:///nonexistent/path/segment.tar.gz");
+
     ServerMetrics serverMetrics = ServerMetrics.get();
     org.mockito.Mockito.reset(serverMetrics);
 
     try {
       tableDataManager.downloadSegment(zkMetadata);
-      fail("Expected peer download to fail");
+      fail("Expected exception when both peer and deep store fail");
     } catch (Exception e) {
-      // expected — peer retries exhausted
+      // Expected
     }
 
-    // Verify SEGMENT_DOWNLOAD_FROM_PEERS_FAILURES was emitted inside downloadSegmentFromPeers
+    // Verify failure metric was emitted
     org.mockito.Mockito.verify(serverMetrics).addMeteredTableValue(
         org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
-        org.mockito.Mockito.eq(org.apache.pinot.common.metrics.ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_FAILURES),
+        org.mockito.Mockito.eq(org.apache.pinot.common.metrics.ServerMeter.SEGMENT_DOWNLOAD_FAILURES),
         org.mockito.Mockito.eq(1L));
-    // And SEGMENT_DOWNLOAD_FROM_PEERS_SUCCESS must NOT have been emitted
-    org.mockito.Mockito.verify(serverMetrics, org.mockito.Mockito.never()).addMeteredTableValue(
-        org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
-        org.mockito.Mockito.eq(org.apache.pinot.common.metrics.ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_SUCCESS),
-        org.mockito.Mockito.anyLong());
 
-    // Restore default segment fetcher config so other tests are not affected
+    initSegmentFetcher();
+  }
+
+  @Test
+  public void testPeerDownloadCrcVerificationSuccess()
+      throws Exception {
+    // Create a real segment, tar it, and compute its CRC
+    File indexDir = createSegment(SegmentVersion.v3, 5);
+    long expectedCrc = getCRC(indexDir);
+    File tarFile = new File(TEMP_DIR, SEGMENT_NAME + TarCompressionUtils.TAR_COMPRESSED_FILE_EXTENSION);
+    TarCompressionUtils.createCompressedTarFile(indexDir, tarFile);
+    FileUtils.deleteDirectory(indexDir);
+
+    // Set up table data manager with peer download enabled
+    org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig validationConfig =
+        new org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig();
+    validationConfig.setPeerSegmentDownloadScheme(CommonConstants.HTTP_PROTOCOL);
+    TableConfig peerTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).build();
+    peerTableConfig.setValidationConfig(validationConfig);
+    OfflineTableDataManager tableDataManager = createTableManagerWithConfig(peerTableConfig);
+
+    SegmentZKMetadata zkMetadata = new SegmentZKMetadata(SEGMENT_NAME);
+
+    ServerMetrics serverMetrics = ServerMetrics.get();
+    org.mockito.Mockito.reset(serverMetrics);
+
+    // Mock SegmentFetcherFactory to copy the prepared tar instead of doing HTTP download
+    try (org.mockito.MockedStatic<SegmentFetcherFactory> mockedFactory =
+        org.mockito.Mockito.mockStatic(SegmentFetcherFactory.class)) {
+      mockedFactory.when(() -> SegmentFetcherFactory.fetchAndDecryptSegmentToLocal(
+          org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(),
+          org.mockito.Mockito.any(), org.mockito.Mockito.any(),
+          org.mockito.Mockito.any(), org.mockito.Mockito.anyBoolean()))
+          .thenAnswer(invocation -> {
+            File dest = invocation.getArgument(3);
+            FileUtils.copyFile(tarFile, dest);
+            return null;
+          });
+
+      File resultDir = tableDataManager.downloadSegmentFromPeers(zkMetadata,
+          () -> List.of(URI.create("http://localhost:8098/segments/testTable_OFFLINE/testSegment")), expectedCrc);
+
+      assertTrue(resultDir.exists());
+      assertEquals(new SegmentMetadataImpl(resultDir).getTotalDocs(), 5);
+
+      // Verify no CRC mismatch metric
+      org.mockito.Mockito.verify(serverMetrics, org.mockito.Mockito.never()).addMeteredTableValue(
+          org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
+          org.mockito.Mockito.eq(ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_CRC_MISMATCH),
+          org.mockito.Mockito.anyLong());
+      // Verify success metric
+      org.mockito.Mockito.verify(serverMetrics).addMeteredTableValue(
+          org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
+          org.mockito.Mockito.eq(ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_SUCCESS),
+          org.mockito.Mockito.eq(1L));
+    }
+  }
+
+  @Test
+  public void testPeerDownloadCrcVerificationMismatch()
+      throws Exception {
+    // Create a real segment and tar it
+    File indexDir = createSegment(SegmentVersion.v3, 5);
+    File tarFile = new File(TEMP_DIR, SEGMENT_NAME + TarCompressionUtils.TAR_COMPRESSED_FILE_EXTENSION);
+    TarCompressionUtils.createCompressedTarFile(indexDir, tarFile);
+    FileUtils.deleteDirectory(indexDir);
+
+    // Set up table data manager with peer download enabled
+    org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig validationConfig =
+        new org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig();
+    validationConfig.setPeerSegmentDownloadScheme(CommonConstants.HTTP_PROTOCOL);
+    TableConfig peerTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).build();
+    peerTableConfig.setValidationConfig(validationConfig);
+    OfflineTableDataManager tableDataManager = createTableManagerWithConfig(peerTableConfig);
+
+    SegmentZKMetadata zkMetadata = new SegmentZKMetadata(SEGMENT_NAME);
+
+    ServerMetrics serverMetrics = ServerMetrics.get();
+    org.mockito.Mockito.reset(serverMetrics);
+
+    // Use a wrong expectedCrc to trigger mismatch
+    long wrongCrc = 99999L;
+
+    try (org.mockito.MockedStatic<SegmentFetcherFactory> mockedFactory =
+        org.mockito.Mockito.mockStatic(SegmentFetcherFactory.class)) {
+      mockedFactory.when(() -> SegmentFetcherFactory.fetchAndDecryptSegmentToLocal(
+          org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(),
+          org.mockito.Mockito.any(), org.mockito.Mockito.any(),
+          org.mockito.Mockito.any(), org.mockito.Mockito.anyBoolean()))
+          .thenAnswer(invocation -> {
+            File dest = invocation.getArgument(3);
+            FileUtils.copyFile(tarFile, dest);
+            return null;
+          });
+
+      // Verify segment directory does NOT exist before (old segment preserved on mismatch)
+      File segmentDataDir = new File(TABLE_DATA_DIR, SEGMENT_NAME);
+      assertFalse(segmentDataDir.exists());
+
+      try {
+        tableDataManager.downloadSegmentFromPeers(zkMetadata,
+            () -> List.of(URI.create("http://localhost:8098/segments/testTable_OFFLINE/testSegment")), wrongCrc);
+        fail("Expected IllegalStateException for CRC mismatch");
+      } catch (IllegalStateException e) {
+        assertTrue(e.getMessage().contains("CRC mismatch for peer-downloaded segment"));
+      }
+
+      // Verify segment was NOT moved to final location (old segment preserved)
+      assertFalse(segmentDataDir.exists());
+
+      // Verify CRC mismatch metric was emitted
+      org.mockito.Mockito.verify(serverMetrics).addMeteredTableValue(
+          org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
+          org.mockito.Mockito.eq(ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_CRC_MISMATCH),
+          org.mockito.Mockito.eq(1L));
+      // Verify failure metric was emitted (exception caught in the catch block)
+      org.mockito.Mockito.verify(serverMetrics).addMeteredTableValue(
+          org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
+          org.mockito.Mockito.eq(ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_FAILURES),
+          org.mockito.Mockito.eq(1L));
+    }
+  }
+
+  @Test
+  public void testPeerDownloadNullCrcSkipsVerification()
+      throws Exception {
+    // Create a real segment and tar it
+    File indexDir = createSegment(SegmentVersion.v3, 5);
+    File tarFile = new File(TEMP_DIR, SEGMENT_NAME + TarCompressionUtils.TAR_COMPRESSED_FILE_EXTENSION);
+    TarCompressionUtils.createCompressedTarFile(indexDir, tarFile);
+    FileUtils.deleteDirectory(indexDir);
+
+    org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig validationConfig =
+        new org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig();
+    validationConfig.setPeerSegmentDownloadScheme(CommonConstants.HTTP_PROTOCOL);
+    TableConfig peerTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).build();
+    peerTableConfig.setValidationConfig(validationConfig);
+    OfflineTableDataManager tableDataManager = createTableManagerWithConfig(peerTableConfig);
+
+    SegmentZKMetadata zkMetadata = new SegmentZKMetadata(SEGMENT_NAME);
+
+    ServerMetrics serverMetrics = ServerMetrics.get();
+    org.mockito.Mockito.reset(serverMetrics);
+
+    try (org.mockito.MockedStatic<SegmentFetcherFactory> mockedFactory =
+        org.mockito.Mockito.mockStatic(SegmentFetcherFactory.class)) {
+      mockedFactory.when(() -> SegmentFetcherFactory.fetchAndDecryptSegmentToLocal(
+          org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(),
+          org.mockito.Mockito.any(), org.mockito.Mockito.any(),
+          org.mockito.Mockito.any(), org.mockito.Mockito.anyBoolean()))
+          .thenAnswer(invocation -> {
+            File dest = invocation.getArgument(3);
+            FileUtils.copyFile(tarFile, dest);
+            return null;
+          });
+
+      // Pass null expectedCrc — CRC verification should be skipped entirely
+      File resultDir = tableDataManager.downloadSegmentFromPeers(zkMetadata,
+          () -> List.of(URI.create("http://localhost:8098/segments/testTable_OFFLINE/testSegment")), null);
+
+      assertTrue(resultDir.exists());
+      assertEquals(new SegmentMetadataImpl(resultDir).getTotalDocs(), 5);
+
+      // Verify no CRC mismatch metric (verification was skipped)
+      org.mockito.Mockito.verify(serverMetrics, org.mockito.Mockito.never()).addMeteredTableValue(
+          org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
+          org.mockito.Mockito.eq(ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_CRC_MISMATCH),
+          org.mockito.Mockito.anyLong());
+      // Verify success metric
+      org.mockito.Mockito.verify(serverMetrics).addMeteredTableValue(
+          org.mockito.Mockito.eq(OFFLINE_TABLE_NAME),
+          org.mockito.Mockito.eq(ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_SUCCESS),
+          org.mockito.Mockito.eq(1L));
+    }
+  }
+
+  @Test
+  public void testPeerDownloadSupplierCalledOnEachRetry()
+      throws Exception {
+    // Configure peer retries = 2 with 0ms wait so retries are fast
+    Map<String, Object> properties = new HashMap<>();
+    properties.put(BaseSegmentFetcher.PEER_RETRY_COUNT_CONFIG_KEY, 2);
+    properties.put(BaseSegmentFetcher.PEER_RETRY_WAIT_MS_CONFIG_KEY, 0);
+    properties.put(BaseSegmentFetcher.RETRY_COUNT_CONFIG_KEY, 3);
+    properties.put(BaseSegmentFetcher.RETRY_WAIT_MS_CONFIG_KEY, 100);
+    properties.put(BaseSegmentFetcher.RETRY_DELAY_SCALE_FACTOR_CONFIG_KEY, 5);
+    SegmentFetcherFactory.init(new PinotConfiguration(properties));
+
+    org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig validationConfig =
+        new org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig();
+    validationConfig.setPeerSegmentDownloadScheme(CommonConstants.HTTP_PROTOCOL);
+    TableConfig peerTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).build();
+    peerTableConfig.setValidationConfig(validationConfig);
+    OfflineTableDataManager tableDataManager = createTableManagerWithConfig(peerTableConfig);
+
+    SegmentZKMetadata zkMetadata = new SegmentZKMetadata(SEGMENT_NAME);
+
+    // Track how many times the Supplier is called
+    java.util.concurrent.atomic.AtomicInteger supplierCallCount = new java.util.concurrent.atomic.AtomicInteger(0);
+    java.util.function.Supplier<List<URI>> trackingSupplier = () -> {
+      supplierCallCount.incrementAndGet();
+      return List.of(URI.create("http://localhost:1/segments/testTable_OFFLINE/testSegment"));
+    };
+
+    try {
+      tableDataManager.downloadSegmentFromPeers(zkMetadata, trackingSupplier, null);
+      fail("Expected exception when peer download fails");
+    } catch (Exception e) {
+      // Expected — no real server at localhost:1
+    }
+
+    // With peerRetryCount=2, the retry policy makes 3 attempts total (1 initial + 2 retries).
+    // The Supplier must be called on each attempt to refresh the peer list.
+    assertTrue(supplierCallCount.get() >= 2,
+        "Supplier should be called on each retry attempt, but was only called " + supplierCallCount.get() + " time(s)");
+
     initSegmentFetcher();
   }
 

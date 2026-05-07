@@ -18,6 +18,7 @@
  */
 package org.apache.pinot.core.data.manager;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.cache.Cache;
@@ -42,6 +43,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Lock;
+import java.util.function.Supplier;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 import org.apache.commons.collections.CollectionUtils;
@@ -58,10 +60,12 @@ import org.apache.pinot.common.metrics.ServerGauge;
 import org.apache.pinot.common.metrics.ServerMeter;
 import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.common.restlet.resources.SegmentErrorInfo;
+import org.apache.pinot.common.utils.SimpleHttpResponse;
 import org.apache.pinot.common.utils.TarCompressionUtils;
 import org.apache.pinot.common.utils.config.EarInfo;
 import org.apache.pinot.common.utils.config.TierConfigUtils;
 import org.apache.pinot.common.utils.fetcher.SegmentFetcherFactory;
+import org.apache.pinot.common.utils.http.HttpClient;
 import org.apache.pinot.core.data.manager.offline.ImmutableSegmentDataManager;
 import org.apache.pinot.core.data.manager.realtime.RealtimeSegmentDataManager;
 import org.apache.pinot.core.util.PeerServerSegmentFinder;
@@ -75,6 +79,7 @@ import org.apache.pinot.segment.local.segment.index.loader.IndexLoadingConfig;
 import org.apache.pinot.segment.local.segment.index.loader.LoaderUtils;
 import org.apache.pinot.segment.local.startree.StarTreeBuilderUtils;
 import org.apache.pinot.segment.local.startree.v2.builder.StarTreeV2BuilderConfig;
+import org.apache.pinot.segment.local.utils.CrcUtils;
 import org.apache.pinot.segment.local.utils.SegmentDownloadThrottler;
 import org.apache.pinot.segment.local.utils.SegmentLocks;
 import org.apache.pinot.segment.local.utils.SegmentOperationsThrottler;
@@ -106,6 +111,7 @@ import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.data.FieldSpec;
 import org.apache.pinot.spi.data.Schema;
 import org.apache.pinot.spi.utils.CommonConstants;
+import org.apache.pinot.spi.utils.JsonUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -134,7 +140,6 @@ public abstract class BaseTableDataManager implements TableDataManager {
   protected AuthProvider _authProvider;
   @Nullable
   protected String _peerDownloadScheme;
-  private boolean _peerDownloadFallbackToDeepStore;
 
 
   protected long _streamSegmentDownloadUntarRateLimitBytesPerSec;
@@ -220,8 +225,6 @@ public abstract class BaseTableDataManager implements TableDataManager {
               _peerDownloadScheme), "Unsupported peer download scheme: %s for table: %s", _peerDownloadScheme,
           _tableNameWithType);
     }
-    _peerDownloadFallbackToDeepStore = instanceDataManagerConfig.isPeerDownloadFallbackToDeepStoreEnabled();
-
     _streamSegmentDownloadUntarRateLimitBytesPerSec =
         instanceDataManagerConfig.getStreamSegmentDownloadUntarRateLimit();
     _isStreamSegmentDownloadUntar = instanceDataManagerConfig.isStreamSegmentDownloadUntar();
@@ -434,7 +437,9 @@ public abstract class BaseTableDataManager implements TableDataManager {
   }
 
   /**
-   * Replaces an already loaded segment in a table if the segment has been overridden in the deep store (CRC mismatch).
+   * Replaces an already loaded segment in a table if the segment has been overridden (CRC mismatch).
+   * When peer download is configured, checks peers' CRC first and downloads from a peer that already
+   * has the new version; otherwise falls back to deep store.
    */
   protected void replaceSegmentIfCrcMismatch(SegmentDataManager segmentDataManager, SegmentZKMetadata zkMetadata,
       IndexLoadingConfig indexLoadingConfig)
@@ -449,7 +454,9 @@ public abstract class BaseTableDataManager implements TableDataManager {
     }
     _logger.info("Replacing segment: {} because its CRC has changed from: {} to: {}", segmentName,
         localMetadata.getCrc(), zkMetadata.getCrc());
-    downloadAndLoadSegment(zkMetadata, indexLoadingConfig);
+    File indexDir = downloadSegmentForRefresh(zkMetadata);
+    addSegment(ImmutableSegmentLoader.load(indexDir, indexLoadingConfig, _segmentOperationsThrottler, _crypterCache),
+            zkMetadata);
     _logger.info("Replaced segment: {} with new CRC: {}", segmentName, zkMetadata.getCrc());
   }
 
@@ -464,6 +471,95 @@ public abstract class BaseTableDataManager implements TableDataManager {
             zkMetadata);
     _logger.info("Downloaded and loaded segment: {} with CRC: {} on tier: {}", segmentName, zkMetadata.getCrc(),
         TierConfigUtils.normalizeTierName(zkMetadata.getTier()));
+  }
+
+  /**
+   * Downloads a segment for CRC-change refresh: tries CRC-aware peer download first, then falls back to deep store.
+   * Checks ONLINE peers' CRC via the server CRC endpoint, downloads from a peer with matching CRC,
+   * and verifies CRC on the downloaded segment before replacing the existing one on disk.
+   * Falls back to deep store if no peer has the target CRC, peer download fails, or CRC verification fails.
+   */
+  private File downloadSegmentForRefresh(SegmentZKMetadata zkMetadata)
+      throws Exception {
+    String segmentName = zkMetadata.getSegmentName();
+    long expectedCrc = zkMetadata.getCrc();
+    _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_TOTAL, 1);
+
+    try {
+      if (_peerDownloadScheme != null) {
+        try {
+          List<URI> eligiblePeerURIs = findPeersWithMatchingCrc(segmentName, zkMetadata.getCrc());
+
+          if (!eligiblePeerURIs.isEmpty()) {
+            _logger.info("Found {} peers with matching CRC for segment: {}, downloading from peers",
+                eligiblePeerURIs.size(), segmentName);
+            Supplier<List<URI>> crcPeerSupplier = () -> {
+              try {
+                return findPeersWithMatchingCrc(segmentName, expectedCrc);
+              } catch (Exception e) {
+                _logger.warn("Failed to refresh CRC-matching peers for segment: {}", segmentName, e);
+                return Collections.emptyList();
+              }
+            };
+            return downloadSegmentFromPeers(zkMetadata, crcPeerSupplier, expectedCrc);
+          } else {
+            _logger.info("No peer has target CRC for segment: {}, downloading from deep store", segmentName);
+          }
+        } catch (Exception e) {
+          _logger.warn("Error during CRC-aware peer download for segment: {}, falling back to deep store",
+              segmentName, e);
+        }
+      }
+
+      return downloadFromDeepStore(zkMetadata);
+    } catch (Exception e) {
+      _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FAILURES, 1);
+      throw e;
+    }
+  }
+
+  /**
+   * Finds ONLINE peers that have the target CRC for a segment by calling the CRC endpoint on each peer.
+   * Returns download URIs for peers with matching CRC, shuffled for load distribution.
+   */
+  private List<URI> findPeersWithMatchingCrc(String segmentName, long targetCrc)
+      throws Exception {
+    List<URI> peerServerURIs =
+        PeerServerSegmentFinder.getPeerServerURIs(_helixManager, _tableNameWithType, segmentName, _peerDownloadScheme);
+    if (peerServerURIs.isEmpty()) {
+      return Collections.emptyList();
+    }
+
+    // For each ONLINE peer, query its single-segment CRC endpoint to check if it has the target CRC.
+    // The peerUri is the download URI (scheme://host:port/segments/table/segment);
+    // we derive the CRC URI (scheme://host:port/tables/table/segments/segment/crc) from it.
+    HttpClient httpClient = HttpClient.getInstance();
+    String targetCrcStr = String.valueOf(targetCrc);
+    List<URI> eligiblePeerURIs = new ArrayList<>();
+
+    for (URI peerUri : peerServerURIs) {
+      try {
+        URI crcUri = new URI(peerUri.getScheme(), null, peerUri.getHost(), peerUri.getPort(),
+            "/tables/" + _tableNameWithType + "/segments/" + segmentName + "/crc", null, null);
+        SimpleHttpResponse response = httpClient.sendGetRequest(crcUri);
+        if (response.getStatusCode() != 200) {
+          _logger.warn("CRC check on peer {}:{} for segment: {} returned status {}",
+              peerUri.getHost(), peerUri.getPort(), segmentName, response.getStatusCode());
+          continue;
+        }
+        JsonNode segmentCrcMap = JsonUtils.stringToJsonNode(response.getResponse());
+        JsonNode crcNode = segmentCrcMap.get(segmentName);
+        if (crcNode != null && targetCrcStr.equals(crcNode.asText())) {
+          eligiblePeerURIs.add(peerUri);
+        }
+      } catch (Exception e) {
+        _logger.warn("Failed to check CRC on peer {}:{} for segment: {}",
+            peerUri.getHost(), peerUri.getPort(), segmentName, e);
+      }
+    }
+    _logger.info("CRC check for segment: {} completed: {}/{} peers have matching CRC",
+        segmentName, eligiblePeerURIs.size(), peerServerURIs.size());
+    return eligiblePeerURIs;
   }
 
   @Override
@@ -826,11 +922,13 @@ public abstract class BaseTableDataManager implements TableDataManager {
         createBackup(indexDir);
         if (forceDownload) {
           _logger.info("Force downloading segment: {}", segmentName);
+          _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_TOTAL, 1);
+          indexDir = downloadFromDeepStore(zkMetadata);
         } else {
           _logger.info("Downloading segment: {} because its CRC has changed from: {} to: {}", segmentName,
               localMetadata.getCrc(), zkMetadata.getCrc());
+          indexDir = downloadSegmentForRefresh(zkMetadata);
         }
-        indexDir = downloadSegment(zkMetadata);
       } else {
         _logger.info("Reloading existing segment: {} on tier: {}", segmentName,
             TierConfigUtils.normalizeTierName(segmentTier));
@@ -934,55 +1032,41 @@ public abstract class BaseTableDataManager implements TableDataManager {
    * Downloads an immutable segment into the index directory.
    * Segment can be downloaded from deep store or from peer servers. Downloaded segment might be compressed or
    * encrypted, and this method takes care of decompressing and decrypting the segment.
+   *
+   * When peer download scheme is configured, tries peer download first (discovering ONLINE peers from
+   * ExternalView). If peer download fails or no peers are available, falls back to deep store transparently
+   * so all existing download flows continue to work.
    */
   protected File downloadSegment(SegmentZKMetadata zkMetadata)
       throws Exception {
     String segmentName = zkMetadata.getSegmentName();
-    String downloadUrl = zkMetadata.getDownloadUrl();
-    Preconditions.checkState(downloadUrl != null,
-        "Failed to find download URL in ZK metadata for segment: %s of table: %s", segmentName, _tableNameWithType);
-    // Check if peer-to-peer download should be attempted based on sourceServer
-    String sourceServer = zkMetadata.getSourceServer();
-    boolean shouldAttemptPeerDownload = shouldAttemptPeerToPeerDownload(sourceServer);
     _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_TOTAL, 1);
     try {
-      if (shouldAttemptPeerDownload) {
-        // Peer download with retry (handled inside fetchSegmentToLocalWithPeerRetry)
-        try {
-          File result = downloadSegmentFromPeers(zkMetadata);
-          _logger.info("Peer download completed successfully for segment: {} of table: {} from source server: {}",
-              segmentName, _tableNameWithType, sourceServer);
-          return result;
-        } catch (Exception e) {
-          if (_peerDownloadFallbackToDeepStore) {
-            _logger.warn("Peer-to-peer download failed for segment: {} of table: {}, falling back to deep store",
+      if (_peerDownloadScheme != null) {
+        List<URI> peerURIs = PeerServerSegmentFinder.getPeerServerURIs(
+            _helixManager, _tableNameWithType, segmentName, _peerDownloadScheme);
+        if (!peerURIs.isEmpty()) {
+          _logger.info("Found {} ONLINE peers for segment: {}, downloading from peers",
+              peerURIs.size(), segmentName);
+          try {
+            File result = downloadSegmentFromPeers(zkMetadata,
+                () -> PeerServerSegmentFinder.getPeerServerURIs(
+                    _helixManager, _tableNameWithType, segmentName, _peerDownloadScheme),
+                null);
+            _logger.info("Peer download completed successfully for segment: {} of table: {}",
+                segmentName, _tableNameWithType);
+            return result;
+          } catch (Exception e) {
+            _logger.warn("Peer download failed for segment: {} of table: {}, falling back to deep store",
                 segmentName, _tableNameWithType, e);
-          } else {
-            throw new Exception(
-                "Peer-to-peer download failed for segment: " + segmentName + " of table: " + _tableNameWithType, e);
           }
+        } else {
+          _logger.info("No ONLINE peers found for segment: {} in table: {}, downloading from deep store directly",
+              segmentName, _tableNameWithType);
         }
-        File result = downloadSegmentFromDeepStore(zkMetadata);
-        _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FROM_REMOTE, 1);
-        return result;
-      } else if (!CommonConstants.Segment.METADATA_URI_FOR_PEER_DOWNLOAD.equals(downloadUrl)) {
-        // Existing flow: download from deep store with optional peer fallback
-        try {
-          File result = downloadSegmentFromDeepStore(zkMetadata);
-          _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FROM_REMOTE, 1);
-          return result;
-        } catch (Exception e) {
-          if (_peerDownloadScheme != null) {
-            _logger.warn("Caught exception while downloading segment: {} from: {}, trying to download from peers",
-                segmentName, downloadUrl, e);
-            return downloadSegmentFromPeers(zkMetadata);
-          } else {
-            throw e;
-          }
-        }
-      } else {
-        return downloadSegmentFromPeers(zkMetadata);
       }
+
+      return downloadFromDeepStore(zkMetadata);
     } catch (Exception e) {
       _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FAILURES, 1);
       throw e;
@@ -990,32 +1074,19 @@ public abstract class BaseTableDataManager implements TableDataManager {
   }
 
   /**
-   * Determines if peer-to-peer download should be attempted.
-   * Returns true if:
-   * 1. sourceServer is set in metadata
-   * 2. This server's instanceId does NOT match the sourceServer
-   * 3. Peer download scheme is configured
+   * Validates the deep store download URL and downloads the segment. Shared by all download paths
+   * that fall back to (or go directly to) deep store.
    */
-  private boolean shouldAttemptPeerToPeerDownload(String sourceServer) {
-    if (StringUtils.isEmpty(sourceServer)) {
-      return false;
-    }
-
-    if (_peerDownloadScheme == null) {
-      _logger.warn("sourceServer is set to: {} but peer download scheme is not configured", sourceServer);
-      return false;
-    }
-
-    // Check if this server is the source server
-    boolean isSourceServer = _instanceId.equals(sourceServer);
-    if (isSourceServer) {
-      _logger.info("This server ({}) is the source server, will download from deep store", _instanceId);
-      return false;
-    }
-
-    _logger.info("This server ({}) is not the source server ({}), will attempt peer-to-peer download",
-        _instanceId, sourceServer);
-    return true;
+  private File downloadFromDeepStore(SegmentZKMetadata zkMetadata)
+      throws Exception {
+    String segmentName = zkMetadata.getSegmentName();
+    String downloadUrl = zkMetadata.getDownloadUrl();
+    Preconditions.checkState(downloadUrl != null
+            && !CommonConstants.Segment.METADATA_URI_FOR_PEER_DOWNLOAD.equals(downloadUrl),
+        "Failed to find download URL in ZK metadata for segment: %s of table: %s", segmentName, _tableNameWithType);
+    File result = downloadSegmentFromDeepStore(zkMetadata);
+    _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FROM_REMOTE, 1);
+    return result;
   }
 
   protected File downloadSegmentFromDeepStore(SegmentZKMetadata zkMetadata)
@@ -1088,7 +1159,14 @@ public abstract class BaseTableDataManager implements TableDataManager {
     }
   }
 
-  protected File downloadSegmentFromPeers(SegmentZKMetadata zkMetadata)
+  /**
+   * @param peerURISupplier called on each retry attempt to get a fresh peer list from ExternalView,
+   *                        so retries can discover newly ONLINE peers or skip peers that went OFFLINE.
+   * @param expectedCrc if non-null, verifies CRC on the untarred segment before replacing the existing one.
+   *                    Throws {@link IllegalStateException} on mismatch so the caller can fall back to deep store.
+   */
+  protected File downloadSegmentFromPeers(SegmentZKMetadata zkMetadata, Supplier<List<URI>> peerURISupplier,
+      @Nullable Long expectedCrc)
       throws Exception {
     String segmentName = zkMetadata.getSegmentName();
     Preconditions.checkState(_peerDownloadScheme != null, "Peer download is not enabled for table: %s",
@@ -1107,16 +1185,28 @@ public abstract class BaseTableDataManager implements TableDataManager {
           segmentDownloadThrottler.getQueueLength());
     }
     try {
-      SegmentFetcherFactory.fetchAndDecryptSegmentToLocal(segmentName, _peerDownloadScheme, () -> {
-        List<URI> peerServerURIs =
-            PeerServerSegmentFinder.getPeerServerURIs(_helixManager, _tableNameWithType, segmentName,
-                _peerDownloadScheme);
-        Collections.shuffle(peerServerURIs);
-        return peerServerURIs;
-      }, segmentTarFile, zkMetadata.getCrypterName(), true);
+      Supplier<List<URI>> shuffledSupplier = () -> {
+        List<URI> uris = new ArrayList<>(peerURISupplier.get());
+        Collections.shuffle(uris);
+        return uris;
+      };
+      SegmentFetcherFactory.fetchAndDecryptSegmentToLocal(segmentName, _peerDownloadScheme, shuffledSupplier,
+          segmentTarFile, zkMetadata.getCrypterName(), true);
       _logger.info("Downloaded tarred segment: {} from peers to: {}, file length: {}", segmentName, segmentTarFile,
           segmentTarFile.length());
-      File indexDir = untarAndMoveSegment(segmentName, segmentTarFile, tempRootDir);
+      File untarredDir = untarSegment(segmentName, segmentTarFile, tempRootDir);
+      if (expectedCrc != null) {
+        long computedCrc = CrcUtils.forAllFilesInFolder(untarredDir).computeCrc();
+        if (computedCrc != expectedCrc) {
+          _serverMetrics.addMeteredTableValue(_tableNameWithType,
+              ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_CRC_MISMATCH, 1);
+          throw new IllegalStateException(
+              String.format("CRC mismatch for peer-downloaded segment: %s (expected=%d, actual=%d)",
+                  segmentName, expectedCrc, computedCrc));
+        }
+        _logger.info("CRC verified for peer-downloaded segment: {}", segmentName);
+      }
+      File indexDir = moveSegment(segmentName, untarredDir);
       _logger.info("Downloaded segment: {} from peers to: {}", segmentName, indexDir);
       _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FROM_PEERS_SUCCESS, 1);
       return indexDir;

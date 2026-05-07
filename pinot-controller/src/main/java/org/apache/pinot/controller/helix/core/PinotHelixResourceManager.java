@@ -2542,10 +2542,6 @@ public class PinotHelixResourceManager {
   }
 
   public void assignSegment(TableConfig tableConfig, SegmentZKMetadata segmentZKMetadata) {
-    assignSegment(tableConfig, segmentZKMetadata, false);
-  }
-
-  public void assignSegment(TableConfig tableConfig, SegmentZKMetadata segmentZKMetadata, boolean enablePeerDownload) {
     String tableNameWithType = tableConfig.getTableName();
     String segmentName = segmentZKMetadata.getSegmentName();
 
@@ -2575,11 +2571,6 @@ public class PinotHelixResourceManager {
               tableNameWithType);
           currentAssignment.put(segmentName,
               SegmentAssignmentUtils.getInstanceStateMap(assignedInstances, SegmentStateModel.ONLINE));
-          if (enablePeerDownload && !assignedInstances.isEmpty()) {
-            List<String> shuffled = new ArrayList<>(assignedInstances);
-            Collections.shuffle(shuffled);
-            segmentZKMetadata.setSourceServer(shuffled.get(0));
-          }
         }
         return idealState;
       });

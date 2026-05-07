@@ -60,7 +60,6 @@ public class PeerServerSegmentFinderTest {
     externalView.setState(SEGMENT_1, INSTANCE_ID_3, "ONLINE");
     externalView.setState(SEGMENT_2, INSTANCE_ID_1, "OFFLINE");
     externalView.setState(SEGMENT_2, INSTANCE_ID_2, "OFFLINE");
-
     _helixManager = mock(HelixManager.class);
     HelixAdmin helixAdmin = mock(HelixAdmin.class);
     when(_helixManager.getClusterManagmentTool()).thenReturn(helixAdmin);
@@ -90,17 +89,17 @@ public class PeerServerSegmentFinderTest {
     List<URI> httpServerURIs = PeerServerSegmentFinder.getPeerServerURIs(_helixManager, REALTIME_TABLE_NAME, SEGMENT_1,
         CommonConstants.HTTP_PROTOCOL);
     assertEquals(httpServerURIs.size(), 2);
-    assertTrue(httpServerURIs.contains(new URI(
-        String.format("http://%s:%d/segments/%s/%s", HOSTNAME_1, HTTP_ADMIN_PORT, REALTIME_TABLE_NAME, SEGMENT_1))));
-    assertTrue(httpServerURIs.contains(new URI(
-        String.format("http://%s:%d/segments/%s/%s", HOSTNAME_3, HTTP_ADMIN_PORT, REALTIME_TABLE_NAME, SEGMENT_1))));
+    assertTrue(httpServerURIs.contains(new URI(CommonConstants.HTTP_PROTOCOL, null, HOSTNAME_1, HTTP_ADMIN_PORT,
+        "/segments/" + REALTIME_TABLE_NAME + "/" + SEGMENT_1, null, null)));
+    assertTrue(httpServerURIs.contains(new URI(CommonConstants.HTTP_PROTOCOL, null, HOSTNAME_3, HTTP_ADMIN_PORT,
+        "/segments/" + REALTIME_TABLE_NAME + "/" + SEGMENT_1, null, null)));
     List<URI> httpsServerURIs = PeerServerSegmentFinder.getPeerServerURIs(_helixManager, REALTIME_TABLE_NAME, SEGMENT_1,
         CommonConstants.HTTPS_PROTOCOL);
     assertEquals(httpsServerURIs.size(), 2);
-    assertTrue(httpsServerURIs.contains(new URI(
-        String.format("https://%s:%d/segments/%s/%s", HOSTNAME_1, HTTPS_ADMIN_PORT, REALTIME_TABLE_NAME, SEGMENT_1))));
-    assertTrue(httpsServerURIs.contains(new URI(
-        String.format("https://%s:%d/segments/%s/%s", HOSTNAME_3, HTTPS_ADMIN_PORT, REALTIME_TABLE_NAME, SEGMENT_1))));
+    assertTrue(httpsServerURIs.contains(new URI(CommonConstants.HTTPS_PROTOCOL, null, HOSTNAME_1, HTTPS_ADMIN_PORT,
+        "/segments/" + REALTIME_TABLE_NAME + "/" + SEGMENT_1, null, null)));
+    assertTrue(httpsServerURIs.contains(new URI(CommonConstants.HTTPS_PROTOCOL, null, HOSTNAME_3, HTTPS_ADMIN_PORT,
+        "/segments/" + REALTIME_TABLE_NAME + "/" + SEGMENT_1, null, null)));
   }
 
   @Test

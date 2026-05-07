@@ -597,8 +597,8 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
         return super.downloadSegment(zkMetadata);
       }
 
-      // Segment is still in COMMITTING status, but it might already be ONLINE on some peer servers. Try to find ONLINE
-      // segment and download it from peers.
+      // Segment is still COMMITTING — no deep store URL yet, so only try peers (not super.downloadSegment()).
+      // Single-attempt EV lookup here because the outer while loop already provides retry.
       if (_peerDownloadScheme != null) {
         try {
           List<URI> onlineServerURIs = new ArrayList<>();
@@ -606,7 +606,7 @@ public class RealtimeTableDataManager extends BaseTableDataManager {
               _helixManager.getClusterName(), _tableNameWithType, zkMetadata.getSegmentName(), _peerDownloadScheme,
               onlineServerURIs);
           if (!onlineServerURIs.isEmpty()) {
-            return downloadSegmentFromPeers(zkMetadata);
+            return downloadSegmentFromPeers(zkMetadata, () -> onlineServerURIs, null);
           }
         } catch (Exception e) {
           _logger.warn("Caught exception while trying to download segment: {} from peers, continue retrying",

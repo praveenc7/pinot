@@ -259,6 +259,27 @@ public class TablesResourceTest extends BaseResourceTest {
   }
 
   @Test
+  public void testSingleSegmentCrc()
+      throws Exception {
+    String tableNameWithType = TableNameBuilder.REALTIME.tableNameWithType(TABLE_NAME);
+    List<ImmutableSegment> immutableSegments = setUpSegments(tableNameWithType, 2, _realtimeIndexSegments);
+
+    for (ImmutableSegment immutableSegment : immutableSegments) {
+      String segmentName = immutableSegment.getSegmentName();
+      String expectedCrc = immutableSegment.getSegmentMetadata().getCrc();
+      String path = "/tables/" + tableNameWithType + "/segments/" + segmentName + "/crc";
+      String response = _webTarget.path(path).request().get(String.class);
+      JsonNode crcJson = JsonUtils.stringToJsonNode(response);
+      Assert.assertEquals(crcJson.get(segmentName).asText(), expectedCrc);
+    }
+
+    // Test 404 for unknown segment
+    Response response = _webTarget.path("/tables/" + tableNameWithType + "/segments/UNKNOWN_SEGMENT/crc")
+        .request().get(Response.class);
+    Assert.assertEquals(response.getStatus(), Response.Status.NOT_FOUND.getStatusCode());
+  }
+
+  @Test
   public void testDownloadSegments()
       throws Exception {
     // Verify the content of the downloaded segment from a realtime table.

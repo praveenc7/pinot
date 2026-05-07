@@ -246,14 +246,6 @@ public class SegmentZKMetadata implements ZKMetadata {
     setValue(Segment.DOWNLOAD_URL, downloadUrl);
   }
 
-  public String getSourceServer() {
-    return _simpleFields.get(Segment.SOURCE_SERVER);
-  }
-
-  public void setSourceServer(String sourceServer) {
-    setValue(Segment.SOURCE_SERVER, sourceServer);
-  }
-
   public String getCrypterName() {
     return _simpleFields.get(Segment.CRYPTER_NAME);
   }

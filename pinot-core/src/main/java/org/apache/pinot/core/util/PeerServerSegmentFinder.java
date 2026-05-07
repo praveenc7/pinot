@@ -30,7 +30,6 @@ import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.spi.utils.CommonConstants.Helix.Instance;
 import org.apache.pinot.spi.utils.CommonConstants.Helix.StateModel.SegmentStateModel;
 import org.apache.pinot.spi.utils.CommonConstants.Server;
-import org.apache.pinot.spi.utils.StringUtil;
 import org.apache.pinot.spi.utils.retry.AttemptsExceededException;
 import org.apache.pinot.spi.utils.retry.RetryPolicies;
 import org.slf4j.Logger;
@@ -67,10 +66,10 @@ public class PeerServerSegmentFinder {
             return !onlineServerURIs.isEmpty();
           });
     } catch (AttemptsExceededException e) {
-      LOGGER.error("Failed to find ONLINE servers for segment: {} in table: {} after {} attempts", segmentName,
+      LOGGER.info("No ONLINE servers found for segment: {} in table: {} after {} attempts", segmentName,
           tableNameWithType, MAX_NUM_ATTEMPTS);
     } catch (Exception e) {
-      LOGGER.error("Caught exception while getting peer server URIs for segment: {} in table: {}", segmentName,
+      LOGGER.warn("Caught exception while getting peer server URIs for segment: {} in table: {}", segmentName,
           tableNameWithType, e);
     }
     return onlineServerURIs;
@@ -81,13 +80,12 @@ public class PeerServerSegmentFinder {
       throws Exception {
     ExternalView externalView = helixAdmin.getResourceExternalView(clusterName, tableNameWithType);
     if (externalView == null) {
-      LOGGER.warn("Failed to find external view for table: {}", tableNameWithType);
       return;
     }
     // Find out the ONLINE servers serving the segment.
     Map<String, String> instanceStateMap = externalView.getStateMap(segmentName);
     if (instanceStateMap == null) {
-      LOGGER.warn("Failed to find segment: {} in table: {}", segmentName, tableNameWithType);
+      LOGGER.debug("Segment: {} not yet in external view for table: {}", segmentName, tableNameWithType);
       return;
     }
     for (Map.Entry<String, String> instanceState : instanceStateMap.entrySet()) {
@@ -98,9 +96,9 @@ public class PeerServerSegmentFinder {
         String hostName = instanceConfig.getHostName();
         String adminPortKey = getAdminPortKey(downloadScheme);
         int port = instanceConfig.getRecord().getIntField(adminPortKey, Server.DEFAULT_ADMIN_API_PORT);
-        onlineServerURIs.add(new URI(
-            StringUtil.join("/", downloadScheme + "://" + hostName + ":" + port, "segments", tableNameWithType,
-                segmentName)));
+        // Use multi-arg URI constructor to properly encode path components (e.g. spaces, %)
+        onlineServerURIs.add(new URI(downloadScheme, null, hostName, port,
+            "/segments/" + tableNameWithType + "/" + segmentName, null, null));
       }
     }
   }
