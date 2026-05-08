@@ -352,6 +352,11 @@ public class CommonConstants {
     public static final boolean DEFAULT_BROKER_ENABLE_ROW_COLUMN_LEVEL_AUTH = false;
     public static final String CONFIG_OF_EXTRA_PASSIVE_TIMEOUT_MS = "pinot.broker.extraPassiveTimeoutMs";
     public static final long DEFAULT_EXTRA_PASSIVE_TIMEOUT_MS = 100L;
+    // Max attempts (initial + retries) for sending a request from broker to server when channel lock acquisition
+    // times out. Default 1 disables retry.
+    public static final String CONFIG_OF_BROKER_SEND_REQUEST_MAX_ATTEMPTS =
+        "pinot.broker.query.router.send.request.max.attempts";
+    public static final int DEFAULT_BROKER_SEND_REQUEST_MAX_ATTEMPTS = 1;
     public static final String CONFIG_OF_BROKER_ID = "pinot.broker.instance.id";
     public static final String CONFIG_OF_BROKER_INSTANCE_TAGS = "pinot.broker.instance.tags";
     public static final String CONFIG_OF_BROKER_HOSTNAME = "pinot.broker.hostname";

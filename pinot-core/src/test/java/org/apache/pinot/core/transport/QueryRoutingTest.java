@@ -82,7 +82,7 @@ public class QueryRoutingTest {
     _serverRoutingStatsManager = new ServerRoutingStatsManager(cfg, mock(BrokerMetrics.class));
     _serverRoutingStatsManager.init();
     _queryRouter = new QueryRouter("testBroker", null, null, _serverRoutingStatsManager,
-        ThreadAccountantUtils.getNoOpAccountant());
+        ThreadAccountantUtils.getNoOpAccountant(), 1);
     _requestCount = 0;
   }
 

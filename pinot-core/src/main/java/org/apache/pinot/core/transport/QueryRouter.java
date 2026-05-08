@@ -36,6 +36,9 @@ import org.apache.pinot.core.routing.ServerRouteInfo;
 import org.apache.pinot.core.transport.server.routing.stats.ServerRoutingStatsManager;
 import org.apache.pinot.spi.accounting.ThreadAccountant;
 import org.apache.pinot.spi.config.table.TableType;
+import org.apache.pinot.spi.utils.retry.AttemptsExceededException;
+import org.apache.pinot.spi.utils.retry.RetriableOperationException;
+import org.apache.pinot.spi.utils.retry.RetryPolicies;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,10 +52,15 @@ import org.slf4j.LoggerFactory;
 public class QueryRouter {
   private static final Logger LOGGER = LoggerFactory.getLogger(QueryRouter.class);
 
+  // Backoff for channel lock timeout retries: 100ms initial delay, 2x scale factor (with jitter).
+  private static final long SEND_REQUEST_INITIAL_DELAY_MS = 100L;
+  private static final double SEND_REQUEST_DELAY_SCALE_FACTOR = 2.0;
+
   private final String _brokerId;
   private final ServerChannels _serverChannels;
   private final ServerChannels _serverChannelsTls;
   private final ServerRoutingStatsManager _serverRoutingStatsManager;
+  private final int _sendRequestMaxAttempts;
 
   private final BrokerMetrics _brokerMetrics = BrokerMetrics.get();
   private final ConcurrentHashMap<Long, AsyncQueryResponse> _asyncQueryResponseMap = new ConcurrentHashMap<>();
@@ -65,11 +73,13 @@ public class QueryRouter {
    * @param tlsConfig TLS config
    */
   public QueryRouter(String brokerId, @Nullable NettyConfig nettyConfig, @Nullable TlsConfig tlsConfig,
-      ServerRoutingStatsManager serverRoutingStatsManager, ThreadAccountant threadAccountant) {
+      ServerRoutingStatsManager serverRoutingStatsManager, ThreadAccountant threadAccountant,
+      int sendRequestMaxAttempts) {
     _brokerId = brokerId;
     _serverChannels = new ServerChannels(this, nettyConfig, null, threadAccountant);
     _serverChannelsTls = tlsConfig != null ? new ServerChannels(this, nettyConfig, tlsConfig, threadAccountant) : null;
     _serverRoutingStatsManager = serverRoutingStatsManager;
+    _sendRequestMaxAttempts = sendRequestMaxAttempts;
   }
 
   public AsyncQueryResponse submitQuery(long requestId, String rawTableName,
@@ -107,17 +117,16 @@ public class QueryRouter {
       ServerRoutingInstance serverRoutingInstance = entry.getKey();
       ServerChannels serverChannels = serverRoutingInstance.isTlsEnabled() ? _serverChannelsTls : _serverChannels;
       try {
-        serverChannels.sendRequest(rawTableName, asyncQueryResponse, serverRoutingInstance, entry.getValue(),
+        sendRequestWithRetry(serverChannels, rawTableName, asyncQueryResponse, serverRoutingInstance, entry.getValue(),
             timeoutMs);
         asyncQueryResponse.markRequestSubmitted(serverRoutingInstance);
-      } catch (TimeoutException e) {
-        if (ServerChannels.CHANNEL_LOCK_TIMEOUT_MSG.equals(e.getMessage())) {
-          _brokerMetrics.addMeteredTableValue(rawTableName, BrokerMeter.REQUEST_CHANNEL_LOCK_TIMEOUT_EXCEPTIONS, 1);
-        }
-        markQueryFailed(requestId, serverRoutingInstance, asyncQueryResponse, e);
-        break;
       } catch (Exception e) {
-        _brokerMetrics.addMeteredTableValue(rawTableName, BrokerMeter.REQUEST_SEND_EXCEPTIONS, 1);
+        if (e instanceof TimeoutException
+            && ServerChannels.CHANNEL_LOCK_TIMEOUT_MSG.equals(e.getMessage())) {
+          _brokerMetrics.addMeteredTableValue(rawTableName, BrokerMeter.REQUEST_CHANNEL_LOCK_TIMEOUT_EXCEPTIONS, 1);
+        } else {
+          _brokerMetrics.addMeteredTableValue(rawTableName, BrokerMeter.REQUEST_SEND_EXCEPTIONS, 1);
+        }
         if (skipUnavailableServers) {
           asyncQueryResponse.skipServerResponse();
         } else {
@@ -128,6 +137,40 @@ public class QueryRouter {
     }
 
     return asyncQueryResponse;
+  }
+
+  /**
+   * Sends a request to a server with retry on channel lock timeout using exponential backoff.
+   * Only channel lock timeouts are retried; other exceptions propagate immediately.
+   */
+  private void sendRequestWithRetry(ServerChannels serverChannels, String rawTableName,
+      AsyncQueryResponse asyncQueryResponse, ServerRoutingInstance serverRoutingInstance,
+      InstanceRequest instanceRequest, long timeoutMs)
+      throws Exception {
+    long deadlineMs = System.currentTimeMillis() + timeoutMs;
+    try {
+      RetryPolicies.exponentialBackoffRetryPolicy(_sendRequestMaxAttempts, SEND_REQUEST_INITIAL_DELAY_MS,
+          SEND_REQUEST_DELAY_SCALE_FACTOR).attempt(() -> {
+        long remainingMs = deadlineMs - System.currentTimeMillis();
+        if (remainingMs <= 0) {
+          return false;
+        }
+        try {
+          serverChannels.sendRequest(rawTableName, asyncQueryResponse, serverRoutingInstance, instanceRequest,
+              remainingMs);
+          return true;
+        } catch (TimeoutException e) {
+          if (ServerChannels.CHANNEL_LOCK_TIMEOUT_MSG.equals(e.getMessage())) {
+            return false; // channel lock contention — retry with backoff
+          }
+          throw e; // other timeout — abort
+        }
+      });
+    } catch (AttemptsExceededException e) {
+      throw new TimeoutException(ServerChannels.CHANNEL_LOCK_TIMEOUT_MSG);
+    } catch (RetriableOperationException e) {
+      throw (Exception) e.getCause();
+    }
   }
 
   private boolean isSkipUnavailableServers(@Nullable BrokerRequest offlineBrokerRequest,

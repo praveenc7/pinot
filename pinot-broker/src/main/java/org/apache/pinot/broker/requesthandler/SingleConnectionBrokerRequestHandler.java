@@ -77,7 +77,10 @@ public class SingleConnectionBrokerRequestHandler extends BaseSingleStageBrokerR
     super(config, brokerId, requestIdGenerator, routingManager, accessControlFactory, queryQuotaManager, tableCache,
         threadAccountant);
     _brokerReduceService = new BrokerReduceService(_config);
-    _queryRouter = new QueryRouter(_brokerId, nettyConfig, tlsConfig, serverRoutingStatsManager, threadAccountant);
+    int sendRequestMaxAttempts = config.getProperty(CommonConstants.Broker.CONFIG_OF_BROKER_SEND_REQUEST_MAX_ATTEMPTS,
+        CommonConstants.Broker.DEFAULT_BROKER_SEND_REQUEST_MAX_ATTEMPTS);
+    _queryRouter = new QueryRouter(_brokerId, nettyConfig, tlsConfig, serverRoutingStatsManager, threadAccountant,
+        sendRequestMaxAttempts);
     _failureDetector = failureDetector;
     _failureDetector.registerUnhealthyServerRetrier(this::retryUnhealthyServer);
   }
