@@ -19,7 +19,9 @@
 package org.apache.pinot.common.failuredetector;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import org.apache.pinot.common.metrics.BrokerGauge;
@@ -184,6 +186,143 @@ public class ConnectionFailureDetectorTest {
         expectedUnhealthyServers.size());
     assertEquals(_unhealthyServerNotifier._notifyUnhealthyServerCalled, expectedNotifyUnhealthyServerCalled);
     assertEquals(_healthyServerNotifier._notifyHealthyServerCalled, expectedNotifyHealthyServerCalled);
+  }
+
+  /**
+   * Builds an unstarted detector with the given jitter factor and initial delay.
+   */
+  private BaseExponentialBackoffRetryFailureDetector buildUnstartedDetector(double jitterFactor,
+      long initialDelayMs) {
+    PinotConfiguration config = new PinotConfiguration();
+    config.setProperty(Broker.FailureDetector.CONFIG_OF_TYPE, Broker.FailureDetector.Type.CONNECTION.name());
+    config.setProperty(Broker.FailureDetector.CONFIG_OF_RETRY_INITIAL_DELAY_MS, initialDelayMs);
+    config.setProperty(Broker.FailureDetector.CONFIG_OF_RETRY_DELAY_JITTER_FACTOR, jitterFactor);
+    BrokerMetrics metrics = new BrokerMetrics(PinotMetricUtils.getPinotMetricsRegistry());
+    BaseExponentialBackoffRetryFailureDetector detector =
+        (BaseExponentialBackoffRetryFailureDetector) FailureDetectorFactory.getFailureDetector(config, metrics);
+    detector.registerUnhealthyServerNotifier(id -> { });
+    detector.registerHealthyServerNotifier(id -> { });
+    return detector;
+  }
+
+  @Test
+  public void testApplyJitterWithZeroFactor() {
+    BaseExponentialBackoffRetryFailureDetector detector = buildUnstartedDetector(0.0, 100);
+    for (int i = 0; i < 100; i++) {
+      assertEquals(detector.applyJitter(1_000_000L), 1_000_000L);
+    }
+  }
+
+  @Test
+  public void testApplyJitterWithEqualJitter() {
+    BaseExponentialBackoffRetryFailureDetector detector = buildUnstartedDetector(0.5, 100);
+    long base = 1_000_000L;
+    long min = Long.MAX_VALUE;
+    long max = Long.MIN_VALUE;
+    Set<Long> distinctValues = new HashSet<>();
+    for (int i = 0; i < 1000; i++) {
+      long actual = detector.applyJitter(base);
+      assertTrue(actual >= base / 2 && actual <= base, "actual=" + actual);
+      min = Math.min(min, actual);
+      max = Math.max(max, actual);
+      distinctValues.add(actual);
+    }
+    // 1000 samples in a 500_000-wide range should yield many distinct values
+    assertTrue(distinctValues.size() > 100,
+        "Expected significant spread, got " + distinctValues.size() + " distinct values");
+    // Distribution should cover most of the [base/2, base] range
+    assertTrue(min < base * 0.6, "min=" + min + " did not approach base/2");
+    assertTrue(max > base * 0.9, "max=" + max + " did not approach base");
+  }
+
+  @Test
+  public void testApplyJitterWithFullJitter() {
+    BaseExponentialBackoffRetryFailureDetector detector = buildUnstartedDetector(1.0, 100);
+    long base = 1_000_000L;
+    long min = Long.MAX_VALUE;
+    for (int i = 0; i < 1000; i++) {
+      long actual = detector.applyJitter(base);
+      assertTrue(actual >= 0 && actual <= base, "actual=" + actual);
+      min = Math.min(min, actual);
+    }
+    // Full jitter should produce values close to 0 within 1000 samples
+    assertTrue(min < base * 0.1, "min=" + min + " did not approach 0 with full jitter");
+  }
+
+  @Test
+  public void testApplyJitterClampsFactorAboveOne() {
+    // Factor > 1.0 should be clamped to 1.0 in init(), behaving as full jitter
+    BaseExponentialBackoffRetryFailureDetector detector = buildUnstartedDetector(5.0, 100);
+    long base = 1_000_000L;
+    for (int i = 0; i < 1000; i++) {
+      long actual = detector.applyJitter(base);
+      assertTrue(actual >= 0 && actual <= base, "actual=" + actual + " out of [0, base]");
+    }
+  }
+
+  @Test
+  public void testApplyJitterEdgeCases() {
+    BaseExponentialBackoffRetryFailureDetector detector = buildUnstartedDetector(0.5, 100);
+    // Zero delay -> zero
+    assertEquals(detector.applyJitter(0L), 0L);
+    // Negative delay -> unchanged (short-circuited by delayNs <= 0 guard)
+    assertEquals(detector.applyJitter(-100L), -100L);
+    // Delay of 1ns with factor 0.5 -> maxJitter floors to 0 -> short-circuited, returns delay unchanged
+    assertEquals(detector.applyJitter(1L), 1L);
+  }
+
+  @Test
+  public void testThunderingHerdSpreadWithJitter() {
+    // Long initial delay so the (unstarted) queue accumulates everything before any retry could fire
+    long initialDelayMs = 60_000L;
+    BaseExponentialBackoffRetryFailureDetector detector = buildUnstartedDetector(0.5, initialDelayMs);
+    int numServers = 200;
+    for (int i = 0; i < numServers; i++) {
+      detector.markServerUnhealthy("Server_" + i);
+    }
+    assertEquals(detector._retryInfoDelayQueue.size(), numServers);
+
+    long minTimeNs = Long.MAX_VALUE;
+    long maxTimeNs = Long.MIN_VALUE;
+    Set<Long> distinctTimes = new HashSet<>();
+    for (BaseExponentialBackoffRetryFailureDetector.RetryInfo info : detector._retryInfoDelayQueue) {
+      minTimeNs = Math.min(minTimeNs, info._retryTimeNs);
+      maxTimeNs = Math.max(maxTimeNs, info._retryTimeNs);
+      distinctTimes.add(info._retryTimeNs);
+    }
+
+    // With factor 0.5 over a 60s base delay, jitter window is ~30s. Expect a real spread, not bunching.
+    long spreadMs = TimeUnit.NANOSECONDS.toMillis(maxTimeNs - minTimeNs);
+    assertTrue(spreadMs > 5_000L,
+        "Expected jittered retry times to span >5s, got " + spreadMs + "ms");
+    // Most retry times should be unique (the random draws collide rarely at nanosecond resolution)
+    assertTrue(distinctTimes.size() > numServers * 0.9,
+        "Expected most retry times unique, got " + distinctTimes.size() + "/" + numServers);
+  }
+
+  @Test
+  public void testThunderingHerdNoJitterIsBunched() {
+    // Confirms the baseline: without jitter, simultaneous failures all schedule into a tiny window,
+    // which is exactly the thundering-herd pathology that jitter fixes.
+    long initialDelayMs = 60_000L;
+    BaseExponentialBackoffRetryFailureDetector detector = buildUnstartedDetector(0.0, initialDelayMs);
+    int numServers = 200;
+    for (int i = 0; i < numServers; i++) {
+      detector.markServerUnhealthy("Server_" + i);
+    }
+    assertEquals(detector._retryInfoDelayQueue.size(), numServers);
+
+    long minTimeNs = Long.MAX_VALUE;
+    long maxTimeNs = Long.MIN_VALUE;
+    for (BaseExponentialBackoffRetryFailureDetector.RetryInfo info : detector._retryInfoDelayQueue) {
+      minTimeNs = Math.min(minTimeNs, info._retryTimeNs);
+      maxTimeNs = Math.max(maxTimeNs, info._retryTimeNs);
+    }
+
+    // Without jitter, the only spread is System.nanoTime() drift across the loop body — well under 1s.
+    long spreadMs = TimeUnit.NANOSECONDS.toMillis(maxTimeNs - minTimeNs);
+    assertTrue(spreadMs < 1_000L,
+        "Without jitter, expected schedules bunched within 1s, got " + spreadMs + "ms");
   }
 
   @AfterClass

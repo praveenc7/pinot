@@ -24,6 +24,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.DelayQueue;
 import java.util.concurrent.Delayed;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -54,6 +55,7 @@ public abstract class BaseExponentialBackoffRetryFailureDetector implements Fail
   protected BrokerMetrics _brokerMetrics;
   protected long _retryInitialDelayNs;
   protected double _retryDelayFactor;
+  protected double _retryDelayJitterFactor;
   protected int _maxRetries;
   protected Thread _retryThread;
 
@@ -67,10 +69,13 @@ public abstract class BaseExponentialBackoffRetryFailureDetector implements Fail
     _retryInitialDelayNs = TimeUnit.MILLISECONDS.toNanos(retryInitialDelayMs);
     _retryDelayFactor = config.getProperty(Broker.FailureDetector.CONFIG_OF_RETRY_DELAY_FACTOR,
         Broker.FailureDetector.DEFAULT_RETRY_DELAY_FACTOR);
+    double jitterFactor = config.getProperty(Broker.FailureDetector.CONFIG_OF_RETRY_DELAY_JITTER_FACTOR,
+        Broker.FailureDetector.DEFAULT_RETRY_DELAY_JITTER_FACTOR);
+    _retryDelayJitterFactor = Math.max(0.0, Math.min(1.0, jitterFactor));
     _maxRetries =
         config.getProperty(Broker.FailureDetector.CONFIG_OF_MAX_RETRIES, Broker.FailureDetector.DEFAULT_MAX_RETRIES);
-    LOGGER.info("Initialized {} with retry initial delay: {}ms, exponential backoff factor: {}, max retries: {}", _name,
-        retryInitialDelayMs, _retryDelayFactor, _maxRetries);
+    LOGGER.info("Initialized {} with retry initial delay: {}ms, exponential backoff factor: {}, jitter factor: {}, "
+            + "max retries: {}", _name, retryInitialDelayMs, _retryDelayFactor, _retryDelayJitterFactor, _maxRetries);
   }
 
   @Override
@@ -122,7 +127,7 @@ public abstract class BaseExponentialBackoffRetryFailureDetector implements Fail
           } else {
             // Update the retry info and add it back to the delay queue
             retryInfo._retryDelayNs = (long) (retryInfo._retryDelayNs * _retryDelayFactor);
-            retryInfo._retryTimeNs = System.nanoTime() + retryInfo._retryDelayNs;
+            retryInfo._retryTimeNs = System.nanoTime() + applyJitter(retryInfo._retryDelayNs);
             retryInfo._numRetries++;
             _retryInfoDelayQueue.offer(retryInfo);
           }
@@ -179,6 +184,22 @@ public abstract class BaseExponentialBackoffRetryFailureDetector implements Fail
   }
 
   /**
+   * Returns the given delay reduced by a random amount in [0, delay * jitterFactor], so the actual scheduled
+   * delay falls in [delay * (1 - jitterFactor), delay]. This prevents synchronized retries when many brokers
+   * detect the same server failure at the same time (thundering herd).
+   */
+  protected long applyJitter(long delayNs) {
+    if (_retryDelayJitterFactor <= 0.0 || delayNs <= 0) {
+      return delayNs;
+    }
+    long maxJitterNs = (long) (delayNs * _retryDelayJitterFactor);
+    if (maxJitterNs <= 0) {
+      return delayNs;
+    }
+    return delayNs - ThreadLocalRandom.current().nextLong(maxJitterNs + 1);
+  }
+
+  /**
    * Encapsulates the retry related information.
    */
   protected class RetryInfo implements Delayed {
@@ -190,7 +211,7 @@ public abstract class BaseExponentialBackoffRetryFailureDetector implements Fail
 
     RetryInfo(String instanceId) {
       _instanceId = instanceId;
-      _retryTimeNs = System.nanoTime() + _retryInitialDelayNs;
+      _retryTimeNs = System.nanoTime() + applyJitter(_retryInitialDelayNs);
       _retryDelayNs = _retryInitialDelayNs;
       _numRetries = 0;
     }

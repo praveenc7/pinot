@@ -726,6 +726,12 @@ public class CommonConstants {
       public static final long DEFAULT_RETRY_INITIAL_DELAY_MS = 5_000L;
       public static final String CONFIG_OF_RETRY_DELAY_FACTOR = "pinot.broker.failure.detector.retry.delay.factor";
       public static final double DEFAULT_RETRY_DELAY_FACTOR = 2.0;
+      // Jitter factor in [0.0, 1.0] applied to the retry delay: each scheduled retry is randomized in
+      // [delay * (1 - jitterFactor), delay] to avoid synchronized retries across brokers (thundering herd).
+      // 0.0 = no jitter, 0.5 = equal jitter (default), 1.0 = full jitter.
+      public static final String CONFIG_OF_RETRY_DELAY_JITTER_FACTOR =
+          "pinot.broker.failure.detector.retry.delay.jitter.factor";
+      public static final double DEFAULT_RETRY_DELAY_JITTER_FACTOR = 0.5;
       public static final String CONFIG_OF_MAX_RETRIES = "pinot.broker.failure.detector.max.retries";
       public static final int DEFAULT_MAX_RETRIES = 10;
     }
