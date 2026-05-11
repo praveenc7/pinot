@@ -343,6 +343,12 @@ public class CommonConstants {
     public static final String CONFIG_OF_BROKER_ENABLE_QUERY_FINGERPRINTING =
         "pinot.broker.enable.query.fingerprinting";
     public static final boolean DEFAULT_BROKER_ENABLE_QUERY_FINGERPRINTING = false;
+    // MSE-specific override. Defaults to false so that fingerprinting stays off for multi-stage
+    // queries even when the single-stage flag above is enabled. MSE operators must opt in
+    // explicitly by setting this to true.
+    public static final String CONFIG_OF_BROKER_ENABLE_QUERY_FINGERPRINTING_MSE =
+        "pinot.broker.enable.query.fingerprinting.mse";
+    public static final boolean DEFAULT_BROKER_ENABLE_QUERY_FINGERPRINTING_MSE = false;
     public static final String DEFAULT_QUERY_HASH = "";
     public static final double DEFAULT_BROKER_QUERY_LOG_MAX_RATE_PER_SECOND = 10_000d;
     public static final String CONFIG_OF_BROKER_TIMEOUT_MS = "pinot.broker.timeoutMs";

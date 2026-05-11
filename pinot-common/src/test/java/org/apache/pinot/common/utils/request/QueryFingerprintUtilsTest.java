@@ -282,6 +282,150 @@ public class QueryFingerprintUtilsTest {
         "Fingerprint should not contain newlines");
   }
 
+  /**
+   * Regression test: generateFingerprint() must not mutate the original SqlNode in SqlNodeAndOptions.
+   * If the visitor mutates in place, subsequent compileToPinotQuery() on the same SqlNodeAndOptions
+   * will fail because literals have been replaced with SqlDynamicParam (?) which PinotQuery compilation
+   * cannot handle.
+   *
+   * This reproduces the production issue where enabling query fingerprinting caused SQLParsingError
+   * for queries that would otherwise compile successfully.
+   */
+  @DataProvider(name = "fingerprintThenCompileQueries")
+  public Object[][] provideFingerprintThenCompileQueries() {
+    // Each entry exercises a different visitor branch / literal-handling path so that any
+    // future regression to in-place mutation will be caught by at least one shape.
+    // Limited to queries that single-stage compileToPinotQuery can compile.
+    return new Object[][]{
+        // ----- baseline shapes -----
+        // Simple select with only LIMIT
+        {"SELECT * FROM table1 LIMIT 3"},
+        // Simple filter
+        {"SELECT col1 FROM table1 WHERE col2 = 100"},
+        // ----- IN family (visitIn branches) -----
+        // IN clause with GROUP BY, ORDER BY, LIMIT offset,count
+        {"SELECT sum(col1), col2 FROM table1 "
+            + "WHERE ((((col3 = 'value1' AND col4 = 'null') "
+            + "OR col5 = 'value2') "
+            + "AND col2 IN ('VIEW')) "
+            + "AND col6 >= 20552) "
+            + "GROUP BY col2 ORDER BY sum(col1) DESC LIMIT 0,400"},
+        // NOT IN — exercises the NOT_IN SqlKind branch
+        {"SELECT col1 FROM table1 WHERE col2 NOT IN (1, 2, 3) AND col3 = 'x'"},
+        // Long IN list — stress-tests the all-data-literals squash path
+        {"SELECT col1 FROM table1 WHERE col2 IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)"},
+        // IN with mixed expressions / function calls — visitIn Case 2 (visit each value individually)
+        {"SELECT col1 FROM table1 WHERE col2 IN (UPPER('a'), LOWER('b'), 'c')"},
+        // ----- ranges, predicates, NULL preservation -----
+        // BETWEEN with ORDER BY
+        {"SELECT col1 FROM table1 WHERE col2 BETWEEN 100 AND 200 ORDER BY col1 LIMIT 10"},
+        // IS NULL / IS NOT NULL — exercises NULL literal preservation
+        {"SELECT col1 FROM table1 WHERE col2 IS NULL OR (col3 IS NOT NULL AND col4 = 100)"},
+        // NOT operator on a predicate
+        {"SELECT col1 FROM table1 WHERE NOT (col2 = 100) AND col3 > 50"},
+        // Negative number literal
+        {"SELECT col1 FROM table1 WHERE col2 = -100 AND col3 > -50"},
+        // ----- aggregation / DISTINCT (SYMBOL preservation) -----
+        // Multiple aggregations with HAVING
+        {"SELECT col1, COUNT(*), SUM(col2) FROM table1 WHERE col3 > 100 "
+            + "GROUP BY col1 HAVING COUNT(*) > 10 ORDER BY SUM(col2) DESC LIMIT 100"},
+        // DISTINCT — exercises SYMBOL keyword preservation in the keywordList operand
+        {"SELECT DISTINCT col1, col2 FROM table1 WHERE col3 > 100"},
+        // ----- CASE / function call / cast -----
+        // CASE expression with ELSE
+        {"SELECT CASE WHEN col1 > 100 THEN 'high' ELSE 'low' END FROM table1 WHERE col2 = 'test'"},
+        // CASE without ELSE — visitCase with null elseOperand
+        {"SELECT CASE WHEN col1 > 100 THEN 'high' END FROM table1"},
+        // CAST and COALESCE — exercises generic SqlCall fallback (super.visit) for nested functions
+        {"SELECT CAST(col1 AS VARCHAR), COALESCE(col2, 0) FROM table1 WHERE col3 = 100"},
+        // LIKE operator
+        {"SELECT col1 FROM table1 WHERE col2 LIKE '%pattern%' AND col3 = 100"},
+        // ----- joins -----
+        // JOIN without aliases (single-stage supports this)
+        {"SELECT table1.col1, table2.col2 FROM table1 "
+            + "LEFT JOIN table2 ON table1.id = table2.id WHERE table1.col3 > 100 AND table2.col4 = 'active'"},
+    };
+  }
+
+  /**
+   * Queries that exercise visitor branches single-stage <code>compileToPinotQuery</code> can't
+   * compile (window functions, CTEs, sub-queries in IN, multi-stage joins, set operations).
+   * For these we still want to verify the visitor leaves the original <code>SqlNode</code>
+   * structurally unchanged — checked via <code>toString()</code> snapshot comparison.
+   */
+  @DataProvider(name = "fingerprintNonMutationOnlyQueries")
+  public Object[][] provideFingerprintNonMutationOnlyQueries() {
+    return new Object[][]{
+        // Window function — visitor's OVER branch
+        {"SELECT col1, ROW_NUMBER() OVER (PARTITION BY col2 ORDER BY col3) AS rn "
+            + "FROM table1 WHERE col4 = 100"},
+        // Window function with aggregate
+        {"SELECT col1, SUM(col2) OVER (PARTITION BY col3 ORDER BY col4 "
+            + "ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) FROM table1"},
+        // CTE / WITH — visitor's WITH and WITH_ITEM branches
+        {"WITH cte AS (SELECT col1 FROM table1 WHERE col2 = 100) "
+            + "SELECT * FROM cte WHERE col1 > 50"},
+        // Multiple CTEs
+        {"WITH a AS (SELECT col1 FROM t1 WHERE col2 = 1), "
+            + "b AS (SELECT col3 FROM t2 WHERE col4 = 2) "
+            + "SELECT * FROM a JOIN b ON a.col1 = b.col3"},
+        // Sub-query in IN — visitIn fallback path (operand is SqlSelect, not SqlNodeList)
+        {"SELECT col1 FROM table1 WHERE col2 IN (SELECT col2 FROM table2 WHERE col3 = 100)"},
+        // Nested sub-queries
+        {"SELECT col1 FROM table1 WHERE col2 IN "
+            + "(SELECT col2 FROM table2 WHERE col3 IN "
+            + "(SELECT col3 FROM table3 WHERE col4 = 100))"},
+        // EXPLAIN — visitor strips the EXPLAIN wrapper
+        {"EXPLAIN PLAN FOR SELECT col1 FROM table1 WHERE col2 = 100"},
+        // Set operations
+        {"SELECT col1 FROM t1 WHERE col2 = 100 UNION ALL SELECT col1 FROM t2 WHERE col3 = 200"},
+        {"SELECT col1 FROM t1 WHERE col2 = 100 INTERSECT SELECT col1 FROM t2 WHERE col3 = 200"},
+        // Multi-stage joins
+        {"SELECT * FROM t1 RIGHT JOIN t2 ON t1.id = t2.id WHERE t2.col1 > 100"},
+        {"SELECT * FROM t1 FULL OUTER JOIN t2 ON t1.id = t2.id"},
+        // Self-join
+        {"SELECT t1.col1 FROM table1 t1 JOIN table1 t2 ON t1.id = t2.parent_id WHERE t1.col3 > 100"},
+    };
+  }
+
+  @Test(dataProvider = "fingerprintThenCompileQueries")
+  public void testFingerprintDoesNotMutateSqlNode(String query) throws Exception {
+    SqlNodeAndOptions sqlNodeAndOptions = CalciteSqlParser.compileToSqlNodeAndOptions(query);
+
+    // Snapshot the SqlNode's structure before fingerprint generation.
+    String sqlNodeBefore = sqlNodeAndOptions.getSqlNode().toString();
+
+    // Step 1: Generate fingerprint — must not mutate the original SqlNode.
+    QueryFingerprint fingerprint = QueryFingerprintUtils.generateFingerprint(sqlNodeAndOptions);
+    Assert.assertNotNull(fingerprint, "Fingerprint should be generated successfully");
+
+    // Step 2: Verify the SqlNode is structurally identical to the snapshot.
+    // Catches in-place mutation (setOperand) regardless of whether downstream compile succeeds.
+    String sqlNodeAfter = sqlNodeAndOptions.getSqlNode().toString();
+    Assert.assertEquals(sqlNodeAfter, sqlNodeBefore,
+        "Original SqlNode was mutated by generateFingerprint. Query: " + query);
+
+    // Step 3: Compile to PinotQuery using the SAME SqlNodeAndOptions.
+    // This will throw if mutation slipped through (e.g., literals replaced with SqlDynamicParam).
+    // Letting the exception propagate preserves the original stack trace.
+    CalciteSqlParser.compileToPinotQuery(sqlNodeAndOptions);
+  }
+
+  @Test(dataProvider = "fingerprintNonMutationOnlyQueries")
+  public void testFingerprintPreservesSqlNodeStructure(String query) throws Exception {
+    // Pure non-mutation check for queries that single-stage compileToPinotQuery can't compile
+    // but whose AST shapes still need protection (window functions, CTEs, sub-queries, etc.).
+    SqlNodeAndOptions sqlNodeAndOptions = CalciteSqlParser.compileToSqlNodeAndOptions(query);
+    String sqlNodeBefore = sqlNodeAndOptions.getSqlNode().toString();
+
+    QueryFingerprint fingerprint = QueryFingerprintUtils.generateFingerprint(sqlNodeAndOptions);
+    Assert.assertNotNull(fingerprint, "Fingerprint should be generated successfully");
+
+    String sqlNodeAfter = sqlNodeAndOptions.getSqlNode().toString();
+    Assert.assertEquals(sqlNodeAfter, sqlNodeBefore,
+        "Original SqlNode was mutated by generateFingerprint. Query: " + query);
+  }
+
   @Test
   public void testComplexMultiStageQuery() throws Exception {
     // Test a complex multi-stage query with JOINs, subqueries, and aggregations

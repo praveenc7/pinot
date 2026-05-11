@@ -153,8 +153,8 @@ public class MultiStageBrokerRequestHandler extends BaseBrokerRequestHandler {
             Math.max(1, Runtime.getRuntime().availableProcessors() / 2),
             new NamedThreadFactory("multi-stage-query-compile-executor")));
     _enableQueryFingerprinting = _config.getProperty(
-        CommonConstants.Broker.CONFIG_OF_BROKER_ENABLE_QUERY_FINGERPRINTING,
-        CommonConstants.Broker.DEFAULT_BROKER_ENABLE_QUERY_FINGERPRINTING);
+        CommonConstants.Broker.CONFIG_OF_BROKER_ENABLE_QUERY_FINGERPRINTING_MSE,
+        CommonConstants.Broker.DEFAULT_BROKER_ENABLE_QUERY_FINGERPRINTING_MSE);
   }
 
   @Override

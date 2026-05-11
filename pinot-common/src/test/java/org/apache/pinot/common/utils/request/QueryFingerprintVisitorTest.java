@@ -544,6 +544,27 @@ public class QueryFingerprintVisitorTest {
   }
 
   @Test
+  public void testComplexNestedFilterWithInAndLimitOffset() throws Exception {
+    String sql = "SELECT sum(col1), col2 FROM table1 "
+        + "WHERE ((((col3 = 'urn:li:member:123456789' AND col4 = 'null') "
+        + "OR col5 = 'urn:li:member:123456789') "
+        + "AND col2 IN ('VIEW')) "
+        + "AND col6 >= 20552) "
+        + "GROUP BY col2 ORDER BY sum(col1) DESC LIMIT 0,400";
+    String expected = "SELECT SUM(`col1`), `col2` FROM `table1` "
+        + "WHERE (`col3` = ? AND `col4` = ? "
+        + "OR `col5` = ?) "
+        + "AND `col2` IN (?) "
+        + "AND `col6` >= ? "
+        + "GROUP BY `col2` "
+        + "ORDER BY SUM(`col1`) DESC "
+        + "OFFSET ? ROWS FETCH NEXT ? ROWS ONLY";
+    String actual = generateFingerprint(sql);
+    assertEquals(actual, expected,
+        "Complex nested filter with IN clause and LIMIT offset,count should be normalized correctly");
+  }
+
+  @Test
   public void testFactDimensionJoin() throws Exception {
     String sql = "SELECT d.product_name, SUM(f.sales_amount) "
         + "FROM sales_fact f "
