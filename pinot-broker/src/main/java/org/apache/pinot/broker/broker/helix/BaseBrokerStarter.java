@@ -294,6 +294,14 @@ public abstract class BaseBrokerStarter implements ServiceStartable {
     _isStarting = true;
     Utils.logVersions();
 
+    // install default SSL context if necessary (even if not force-enabled everywhere)
+    TlsConfig defaultTlsConfig = TlsUtils.extractTlsConfig(_brokerConf, Broker.BROKER_TLS_PREFIX);
+    if (StringUtils.isNotBlank(defaultTlsConfig.getKeyStorePath()) || StringUtils.isNotBlank(
+        defaultTlsConfig.getTrustStorePath())) {
+      LOGGER.info("Installing default SSL context for any client requests");
+      TlsUtils.installDefaultSSLSocketFactory(defaultTlsConfig);
+    }
+
     LOGGER.info("Connecting spectator Helix manager");
     _spectatorHelixManager =
         HelixManagerFactory.getZKHelixManager(_clusterName, _instanceId, InstanceType.SPECTATOR, _zkServers);
