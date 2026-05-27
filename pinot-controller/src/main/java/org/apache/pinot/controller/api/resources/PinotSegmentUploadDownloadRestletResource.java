@@ -1020,6 +1020,10 @@ public class PinotSegmentUploadDownloadRestletResource {
       @ApiParam(value = "OFFLINE|REALTIME", required = true) @QueryParam("type") String tableTypeStr,
       @ApiParam(value = "Segment lineage entry id returned by startReplaceSegments API", required = true)
       @QueryParam("segmentLineageEntryId") String segmentLineageEntryId,
+      @ApiParam(value = "If true, leave the lineage entry in STAGED state instead of advancing to COMPLETED. Queries "
+          + "continue to route to segmentsFrom until an operator calls completeStagedLineage to flip STAGED entries to "
+          + "COMPLETED atomically.")
+      @QueryParam("stageOnComplete") @DefaultValue("false") boolean stageOnComplete,
       @ApiParam(value = "Fields belonging to end replace segment request")
       EndReplaceSegmentsRequest endReplaceSegmentsRequest, @Context HttpHeaders headers) {
     tableName = DatabaseUtils.translateTableName(tableName, headers);
@@ -1034,10 +1038,74 @@ public class PinotSegmentUploadDownloadRestletResource {
       // Check that the segment lineage entry id is valid
       Preconditions.checkNotNull(segmentLineageEntryId, "'segmentLineageEntryId' should not be null");
       _pinotHelixResourceManager.endReplaceSegments(tableNameWithType, segmentLineageEntryId,
-          endReplaceSegmentsRequest);
+          endReplaceSegmentsRequest, stageOnComplete);
       return Response.ok().build();
     } catch (Exception e) {
       _controllerMetrics.addMeteredTableValue(tableNameWithType, ControllerMeter.NUMBER_END_REPLACE_FAILURE, 1);
+      throw new ControllerApplicationException(LOGGER, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR, e);
+    }
+  }
+
+  @POST
+  @Path("segments/{tableName}/completeStagedLineage")
+  @Authorize(targetType = TargetType.TABLE, paramName = "tableName", action = Actions.Table.REPLACE_SEGMENT)
+  @Authenticate(AccessType.UPDATE)
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = "Complete staged lineage entries",
+      notes = "Atomically flip every STAGED lineage entry on the table to COMPLETED in a single ZK write. Used by the "
+          + "delayed consistent push protocol to commit a multi-job backfill campaign atomically. For surgical aborts "
+          + "of individual STAGED entries use revertStagedLineage instead.")
+  public Response completeStagedLineage(
+      @ApiParam(value = "Name of the table", required = true) @PathParam("tableName") String tableName,
+      @ApiParam(value = "OFFLINE|REALTIME", required = true) @QueryParam("type") String tableTypeStr,
+      @Context HttpHeaders headers) {
+    tableName = DatabaseUtils.translateTableName(tableName, headers);
+    TableType tableType = Constants.validateTableType(tableTypeStr);
+    if (tableType == null) {
+      throw new ControllerApplicationException(LOGGER, "Table type should either be offline or realtime",
+          Response.Status.BAD_REQUEST);
+    }
+    String tableNameWithType =
+        ResourceUtils.getExistingTableNamesWithType(_pinotHelixResourceManager, tableName, tableType, LOGGER).get(0);
+    try {
+      _pinotHelixResourceManager.completeStagedLineage(tableNameWithType);
+      return Response.ok().build();
+    } catch (Exception e) {
+      _controllerMetrics.addMeteredTableValue(tableNameWithType, ControllerMeter.NUMBER_END_REPLACE_FAILURE, 1);
+      throw new ControllerApplicationException(LOGGER, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR, e);
+    }
+  }
+
+  @POST
+  @Path("segments/{tableName}/revertStagedLineage")
+  @Authorize(targetType = TargetType.TABLE, paramName = "tableName", action = Actions.Table.REPLACE_SEGMENT)
+  @Authenticate(AccessType.UPDATE)
+  @Produces(MediaType.APPLICATION_JSON)
+  @ApiOperation(value = "Revert staged lineage entries",
+      notes = "Atomically flip STAGED lineage entries to REVERTED in a single ZK write and delete their segmentsTo. "
+          + "Request body is an optional JSON array of lineage entry ids; if null, every STAGED entry on the table is "
+          + "flipped. Empty array is rejected as a no-op (pass null instead). Used to abort a delayed consistent push "
+          + "campaign.")
+  public Response revertStagedLineage(
+      @ApiParam(value = "Name of the table", required = true) @PathParam("tableName") String tableName,
+      @ApiParam(value = "OFFLINE|REALTIME", required = true) @QueryParam("type") String tableTypeStr,
+      @ApiParam(value = "Optional list of lineage entry ids to revert. Omit body or pass null to operate on all "
+          + "STAGED entries for the table.")
+          @Nullable List<String> lineageEntryIds,
+      @Context HttpHeaders headers) {
+    tableName = DatabaseUtils.translateTableName(tableName, headers);
+    TableType tableType = Constants.validateTableType(tableTypeStr);
+    if (tableType == null) {
+      throw new ControllerApplicationException(LOGGER, "Table type should either be offline or realtime",
+          Response.Status.BAD_REQUEST);
+    }
+    String tableNameWithType =
+        ResourceUtils.getExistingTableNamesWithType(_pinotHelixResourceManager, tableName, tableType, LOGGER).get(0);
+    try {
+      _pinotHelixResourceManager.revertStagedLineage(tableNameWithType, lineageEntryIds);
+      return Response.ok().build();
+    } catch (Exception e) {
+      _controllerMetrics.addMeteredTableValue(tableNameWithType, ControllerMeter.NUMBER_REVERT_REPLACE_FAILURE, 1);
       throw new ControllerApplicationException(LOGGER, e.getMessage(), Response.Status.INTERNAL_SERVER_ERROR, e);
     }
   }

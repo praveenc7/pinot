@@ -432,6 +432,26 @@ public class ControllerRequestURLBuilder {
     return StringUtil.join("/", _baseUrl, "segments", tableName, "lineage?type=" + tableType);
   }
 
+  public String forStartReplaceSegments(String tableName, String tableType, boolean forceCleanup) {
+    return StringUtil.join("/", _baseUrl, "segments", tableName,
+        "startReplaceSegments?type=" + tableType + "&forceCleanup=" + forceCleanup);
+  }
+
+  public String forEndReplaceSegments(String tableName, String tableType, String segmentLineageEntryId,
+      boolean stageOnComplete) {
+    return StringUtil.join("/", _baseUrl, "segments", tableName,
+        "endReplaceSegments?type=" + tableType + "&segmentLineageEntryId=" + segmentLineageEntryId
+            + "&stageOnComplete=" + stageOnComplete);
+  }
+
+  public String forCompleteStagedLineage(String tableName, String tableType) {
+    return StringUtil.join("/", _baseUrl, "segments", tableName, "completeStagedLineage?type=" + tableType);
+  }
+
+  public String forRevertStagedLineage(String tableName, String tableType) {
+    return StringUtil.join("/", _baseUrl, "segments", tableName, "revertStagedLineage?type=" + tableType);
+  }
+
   public String forListAllCrcInformationForTable(String tableName) {
     return StringUtil.join("/", _baseUrl, "segments", tableName, "crc");
   }

@@ -48,6 +48,7 @@ public class SegmentLineageUtils {
         if (lineageEntry.getState() == LineageEntryState.COMPLETED) {
           lineageEntry.getSegmentsFrom().forEach(segments::remove);
         } else {
+          // IN_PROGRESS, STAGED and REVERTED all route queries to segmentsFrom; segmentsTo is hidden until COMPLETED.
           lineageEntry.getSegmentsTo().forEach(segments::remove);
         }
       }

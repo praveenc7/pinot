@@ -19,8 +19,12 @@
 package org.apache.pinot.common.lineage;
 
 /**
- * Enum for represent the state of lineage entry
+ * Enum for represent the state of lineage entry.
+ *
+ * STAGED is a terminal-but-not-visible state used by the delayed consistent push protocol: new segments are ONLINE in
+ * the external view but queries still route to {@code segmentsFrom} (same routing behavior as IN_PROGRESS). An
+ * operator-driven bulk transition flips STAGED entries to COMPLETED atomically.
  */
 public enum LineageEntryState {
-  IN_PROGRESS, COMPLETED, REVERTED
+  IN_PROGRESS, STAGED, COMPLETED, REVERTED
 }

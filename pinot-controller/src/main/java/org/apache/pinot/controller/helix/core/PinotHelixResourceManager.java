@@ -4003,14 +4003,16 @@ public class PinotHelixResourceManager {
             // 2. Proactively delete the oldest data snapshot to make sure that we only keep at most 2 data snapshots
             //    at any time in case of REFRESH use case.
             if (forceCleanup) {
-              if (lineageEntry.getState() == LineageEntryState.IN_PROGRESS && (
+              boolean isInProgressOrStaged = lineageEntry.getState() == LineageEntryState.IN_PROGRESS
+                  || lineageEntry.getState() == LineageEntryState.STAGED;
+              if (isInProgressOrStaged && (
                   !Collections.disjoint(segmentsFrom, lineageEntry.getSegmentsFrom()) || !Collections.disjoint(
                       segmentsTo, lineageEntry.getSegmentsTo()))) {
                 LOGGER.info(
                     "Detected the incomplete lineage entry with overlapped 'segmentsFrom' or 'segmentsTo'. Deleting or "
                         + "reverting the lineage entry to unblock the new segment protocol. tableNameWithType={}, "
-                        + "entryId={}, segmentsFrom={}, segmentsTo={}", tableNameWithType, entryId,
-                    lineageEntry.getSegmentsFrom(), lineageEntry.getSegmentsTo());
+                        + "entryId={}, state={}, segmentsFrom={}, segmentsTo={}", tableNameWithType, entryId,
+                    lineageEntry.getState(), lineageEntry.getSegmentsFrom(), lineageEntry.getSegmentsTo());
 
                 failIfCanNotApplyForceCleanup(tableNameWithType, entryId, lineageEntry.getPriority(), priority);
 
@@ -4138,7 +4140,21 @@ public class PinotHelixResourceManager {
    */
   public void endReplaceSegments(String tableNameWithType, String segmentLineageEntryId,
       @Nullable EndReplaceSegmentsRequest endReplaceSegmentsRequest) {
+    endReplaceSegments(tableNameWithType, segmentLineageEntryId, endReplaceSegmentsRequest, false);
+  }
+
+  /**
+   * Same as {@link #endReplaceSegments(String, String, EndReplaceSegmentsRequest)} but with the option to leave the
+   * lineage entry in {@link LineageEntryState#STAGED} instead of advancing to {@code COMPLETED}.
+   *
+   * STAGED is used by the delayed consistent push protocol: segments are pushed to ONLINE in the external view as
+   * usual, but queries continue to route to {@code segmentsFrom} until an operator atomically flips one or more STAGED
+   * entries to {@code COMPLETED} via {@link #completeStagedLineage(String, List)}.
+   */
+  public void endReplaceSegments(String tableNameWithType, String segmentLineageEntryId,
+      @Nullable EndReplaceSegmentsRequest endReplaceSegmentsRequest, boolean stageOnComplete) {
     long endReplaceSegmentsTs = System.currentTimeMillis();
+    LineageEntryState targetState = stageOnComplete ? LineageEntryState.STAGED : LineageEntryState.COMPLETED;
     int attemptCount;
     try {
       attemptCount = DEFAULT_RETRY_POLICY.attempt(() -> {
@@ -4152,15 +4168,18 @@ public class PinotHelixResourceManager {
         Preconditions.checkState(lineageEntry != null, "Failed to find entry id: %s from segment lineage for table: %s",
             segmentLineageEntryId, tableNameWithType);
 
-        // NO-OPS if the entry is already 'COMPLETED', reject if the entry is 'REVERTED'
-        if (lineageEntry.getState() == LineageEntryState.COMPLETED) {
-          LOGGER.info("Found lineage entry is already in COMPLETED status. (tableNameWithType = {}, "
-              + "segmentLineageEntryId = {})", tableNameWithType, segmentLineageEntryId);
+        // Idempotency: requesting the same target state on an entry already in that state is a no-op.
+        if (lineageEntry.getState() == targetState) {
+          LOGGER.info("Found lineage entry is already in {} status. (tableNameWithType = {}, "
+              + "segmentLineageEntryId = {})", targetState, tableNameWithType, segmentLineageEntryId);
           return true;
-        } else if (lineageEntry.getState() == LineageEntryState.REVERTED) {
-          String errorMsg = "The target lineage entry state is not 'IN_PROGRESS'. Cannot update to 'COMPLETED' state. "
-              + "(tableNameWithType=" + tableNameWithType + ", segmentLineageEntryId=" + segmentLineageEntryId
-              + ", state=" + lineageEntry.getState() + ")";
+        }
+        // Lifecycle is IN_PROGRESS -> {STAGED, COMPLETED}; STAGED -> COMPLETED is handled by completeStagedLineage.
+        // Reject any other transition explicitly to avoid accidentally promoting operator-staged data.
+        if (lineageEntry.getState() != LineageEntryState.IN_PROGRESS) {
+          String errorMsg = "The target lineage entry state is not 'IN_PROGRESS'. Cannot update to '" + targetState
+              + "' state. (tableNameWithType=" + tableNameWithType + ", segmentLineageEntryId=" + segmentLineageEntryId
+              + ", state=" + lineageEntry.getState() + ", stageOnComplete=" + stageOnComplete + ")";
           LOGGER.error(errorMsg);
           throw new RuntimeException(errorMsg);
         }
@@ -4184,15 +4203,19 @@ public class PinotHelixResourceManager {
               "Segment: %s from 'segmentsTo' does not exist in table: %s", segment, tableNameWithType);
         }
 
-        // Check that all the segments from 'segmentsTo' become ONLINE in the external view
+        // Check that all the segments from 'segmentsTo' become ONLINE in the external view. This invariant is what
+        // makes the eventual STAGED -> COMPLETED flip safe without re-checking the external view.
         if (!waitForSegmentsBecomeOnline(tableNameWithType, segmentsTo)) {
           return false;
         }
-        // Could be used to perform operation before segments replacement
-        preSegmentReplaceUpdateRouting(tableNameWithType, segmentsTo, lineageEntry.getSegmentsFrom());
+        // Routing only switches to segmentsTo when entries reach COMPLETED. For STAGED transitions we skip the
+        // pre-switch hook since queries still serve from segmentsFrom.
+        if (!stageOnComplete) {
+          preSegmentReplaceUpdateRouting(tableNameWithType, segmentsTo, lineageEntry.getSegmentsFrom());
+        }
         // Update lineage entry
         LineageEntry lineageEntryToUpdate =
-            new LineageEntry(lineageEntry.getSegmentsFrom(), segmentsTo, LineageEntryState.COMPLETED,
+            new LineageEntry(lineageEntry.getSegmentsFrom(), segmentsTo, targetState,
                 System.currentTimeMillis(), lineageEntry.getPriority());
 
         TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, tableNameWithType);
@@ -4289,14 +4312,16 @@ public class PinotHelixResourceManager {
             segmentLineageEntryId, tableNameWithType);
 
         // Do not allow reverting 'REVERTED' lineage entry. Allow reverting 'IN_PROGRESS' lineage entry only when
-        // 'forceRevert' is set to true
+        // 'forceRevert' is set to true. STAGED and COMPLETED entries can always be reverted.
         Preconditions.checkState(lineageEntry.getState() != LineageEntryState.REVERTED && (
                 lineageEntry.getState() != LineageEntryState.IN_PROGRESS || forceRevert),
             "Lineage state is not valid. Cannot update the lineage entry to be 'REVERTED'. (tableNameWithType=%s, "
                 + "segmentLineageEntryId=%s, segmentLineageEntryState=%s, forceRevert=%s)", tableNameWithType,
             segmentLineageEntryId, lineageEntry.getState(), forceRevert);
 
-        // Do not allow reverting 'COMPLETED' lineage entry when 'segmentsFrom' do not exist in the ideal state
+        // Do not allow reverting 'COMPLETED' lineage entry when 'segmentsFrom' do not exist in the ideal state.
+        // STAGED entries are skipped here: queries already route to segmentsFrom while STAGED, so the operator is
+        // expected to handle a missing-segmentsFrom situation directly; reverting STAGED never makes routing worse.
         if (lineageEntry.getState() == LineageEntryState.COMPLETED) {
           Set<String> onlineSegments = getOnlineSegmentsFromIdealState(tableNameWithType, true);
           for (String segment : lineageEntry.getSegmentsFrom()) {
@@ -4307,10 +4332,10 @@ public class PinotHelixResourceManager {
         }
 
         // Do not allow reverting the lineage entry which segments in 'segmentsTo' appear in 'segmentsFrom' of other
-        // 'IN_PROGRESS' or 'COMPLETED' entries. E.g. we do not allow reverting entry1 because it will block reverting
-        // entry2.
+        // active entries (IN_PROGRESS, STAGED, COMPLETED). E.g. we do not allow reverting entry1 because it will
+        // block reverting entry2.
         // entry1: {(Seg_0, Seg_1, Seg_2) -> (Seg_3, Seg_4, Seg_5), COMPLETED}
-        // entry2: {(Seg_3, Seg_4, Seg_5) -> (Seg_6, Seg_7, Seg_8), IN_PROGRESS/COMPLETED}
+        // entry2: {(Seg_3, Seg_4, Seg_5) -> (Seg_6, Seg_7, Seg_8), IN_PROGRESS/STAGED/COMPLETED}
         // TODO: need to expand the logic to revert multiple entries in one go when we support > 2 data snapshots
         List<String> segmentsTo = lineageEntry.getSegmentsTo();
         if (!segmentsTo.isEmpty()) {
@@ -4318,6 +4343,7 @@ public class PinotHelixResourceManager {
             String currentEntryId = entry.getKey();
             LineageEntry currentLineageEntry = entry.getValue();
             if (currentLineageEntry.getState() == LineageEntryState.IN_PROGRESS
+                || currentLineageEntry.getState() == LineageEntryState.STAGED
                 || currentLineageEntry.getState() == LineageEntryState.COMPLETED) {
               Set<String> segmentsFromInLineageEntry = new HashSet<>(currentLineageEntry.getSegmentsFrom());
               if (!segmentsFromInLineageEntry.isEmpty()) {
@@ -4366,6 +4392,138 @@ public class PinotHelixResourceManager {
     // Only successful attempt can reach here
     LOGGER.info("revertReplaceSegments is successfully processed. (tableNameWithType = {}, segmentLineageEntryId = {})",
         tableNameWithType, segmentLineageEntryId);
+  }
+
+  /**
+   * Atomically flip every {@link LineageEntryState#STAGED} lineage entry on the given table to
+   * {@link LineageEntryState#COMPLETED} in a single ZK write, then trigger a routing rebuild on brokers. Used to commit
+   * a delayed-consistent-push campaign once the operator decides every backfill in the campaign should become visible
+   * to queries simultaneously.
+   *
+   * <p>Operates on the full set of STAGED entries by design — completion is the end-of-campaign action and partial
+   * completion has no use case that isn't equally well served by reverting the unwanted entries first and then calling
+   * this method. For surgical aborts use {@link #revertStagedLineage} (which does accept a list).
+   */
+  public void completeStagedLineage(String tableNameWithType) {
+    bulkUpdateStagedLineage(tableNameWithType, null, LineageEntryState.COMPLETED);
+  }
+
+  /**
+   * Atomically flip {@link LineageEntryState#STAGED} lineage entries for the given table to
+   * {@link LineageEntryState#REVERTED} in a single ZK write, then delete their {@code segmentsTo}. Used to abort a
+   * staged push campaign.
+   *
+   * @param tableNameWithType table name with type
+   * @param lineageEntryIds optional list of entry ids to revert; null means "all STAGED entries for this table"
+   */
+  public void revertStagedLineage(String tableNameWithType, @Nullable List<String> lineageEntryIds) {
+    bulkUpdateStagedLineage(tableNameWithType, lineageEntryIds, LineageEntryState.REVERTED);
+  }
+
+  private void bulkUpdateStagedLineage(String tableNameWithType, @Nullable List<String> lineageEntryIds,
+      LineageEntryState newState) {
+    Preconditions.checkArgument(newState == LineageEntryState.COMPLETED || newState == LineageEntryState.REVERTED,
+        "bulkUpdateStagedLineage only supports COMPLETED or REVERTED, got: %s", newState);
+    long startTs = System.currentTimeMillis();
+    // null requestedIds means "all STAGED entries for this table"; empty list is treated as an explicit no-op rather
+    // than silently fanning out to everything, to avoid accidentally completing/reverting an entire campaign.
+    Set<String> requestedIds = lineageEntryIds == null ? null : new HashSet<>(lineageEntryIds);
+    if (requestedIds != null && requestedIds.isEmpty()) {
+      LOGGER.warn("bulkUpdateStagedLineage called with an empty entry id list for table: {} (newState: {}). "
+          + "No-op. Pass null to operate on all STAGED entries.", tableNameWithType, newState);
+      return;
+    }
+
+    List<String> processedEntryIds = new ArrayList<>();
+    List<String> segmentsToDeleteOnRevert = new ArrayList<>();
+    synchronized (getLineageUpdaterLock(tableNameWithType)) {
+      try {
+        DEFAULT_RETRY_POLICY.attempt(() -> {
+          processedEntryIds.clear();
+          segmentsToDeleteOnRevert.clear();
+
+          ZNRecord segmentLineageZNRecord =
+              SegmentLineageAccessHelper.getSegmentLineageZNRecord(_propertyStore, tableNameWithType);
+          Preconditions.checkState(segmentLineageZNRecord != null,
+              "Failed to find segment lineage for table: %s", tableNameWithType);
+          SegmentLineage segmentLineage = SegmentLineage.fromZNRecord(segmentLineageZNRecord);
+          int expectedVersion = segmentLineageZNRecord.getVersion();
+
+          List<String> entriesToFlip = new ArrayList<>();
+          if (requestedIds == null) {
+            for (Map.Entry<String, LineageEntry> entry : segmentLineage.getLineageEntries().entrySet()) {
+              if (entry.getValue().getState() == LineageEntryState.STAGED) {
+                entriesToFlip.add(entry.getKey());
+              }
+            }
+          } else {
+            for (String entryId : requestedIds) {
+              LineageEntry entry = segmentLineage.getLineageEntry(entryId);
+              Preconditions.checkState(entry != null,
+                  "Lineage entry %s not found for table: %s", entryId, tableNameWithType);
+              Preconditions.checkState(entry.getState() == LineageEntryState.STAGED,
+                  "Lineage entry %s for table %s is not in STAGED state (current state: %s)", entryId,
+                  tableNameWithType, entry.getState());
+              entriesToFlip.add(entryId);
+            }
+          }
+
+          if (entriesToFlip.isEmpty()) {
+            LOGGER.info("No STAGED entries to {} for table: {}",
+                newState == LineageEntryState.COMPLETED ? "complete" : "revert", tableNameWithType);
+            return true;
+          }
+
+          TableConfig tableConfig = ZKMetadataProvider.getTableConfig(_propertyStore, tableNameWithType);
+          long now = System.currentTimeMillis();
+          for (String entryId : entriesToFlip) {
+            LineageEntry old = segmentLineage.getLineageEntry(entryId);
+            // The hook is for pre-routing-switch operations (e.g. server-side warmup). Only fire it when we are
+            // actually switching routing — i.e. STAGED -> COMPLETED. REVERTED never serves segmentsTo.
+            if (newState == LineageEntryState.COMPLETED) {
+              preSegmentReplaceUpdateRouting(tableNameWithType, old.getSegmentsTo(), old.getSegmentsFrom());
+            } else {
+              segmentsToDeleteOnRevert.addAll(old.getSegmentsTo());
+            }
+            LineageEntry updated = new LineageEntry(old.getSegmentsFrom(), old.getSegmentsTo(), newState, now,
+                old.getPriority());
+            segmentLineage.updateLineageEntry(entryId, updated);
+            if (newState == LineageEntryState.COMPLETED) {
+              _lineageManager.updateLineageForEndReplaceSegments(tableConfig, entryId, null, segmentLineage);
+            } else {
+              _lineageManager.updateLineageForRevertReplaceSegments(tableConfig, entryId, null, segmentLineage);
+            }
+          }
+
+          if (SegmentLineageAccessHelper.writeSegmentLineage(_propertyStore, segmentLineage, expectedVersion)) {
+            processedEntryIds.addAll(entriesToFlip);
+            return true;
+          } else {
+            LOGGER.warn("Failed to write segment lineage during bulkUpdateStagedLineage for table: {}",
+                tableNameWithType);
+            return false;
+          }
+        });
+      } catch (Exception e) {
+        String errorMsg = "Failed to bulk update STAGED lineage entries to " + newState + " for table: "
+            + tableNameWithType;
+        LOGGER.error(errorMsg, e);
+        throw new RuntimeException(errorMsg, e);
+      }
+    }
+
+    if (processedEntryIds.isEmpty()) {
+      return;
+    }
+    // Single routing rebuild covers all flipped entries; brokers re-derive the served set from the updated lineage.
+    sendRoutingTableRebuildMessage(tableNameWithType);
+    if (!segmentsToDeleteOnRevert.isEmpty()) {
+      deleteSegments(tableNameWithType, segmentsToDeleteOnRevert);
+    }
+    LOGGER.info(
+        "bulkUpdateStagedLineage flipped {} entries to {} in {} ms for table: {} (entryIds={})",
+        processedEntryIds.size(), newState, System.currentTimeMillis() - startTs, tableNameWithType,
+        processedEntryIds);
   }
 
   /**

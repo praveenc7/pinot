@@ -41,24 +41,36 @@ public class BatchIngestionConfig extends BaseJsonConfig {
   @JsonPropertyDescription("Ingestion frequency HOURLY or DAILY")
   private String _segmentIngestionFrequency;
 
-  @JsonPropertyDescription("True to enable consistent data push")
+  @JsonPropertyDescription("True to enable consistent data push (REFRESH tables): each push transitions directly to "
+      + "COMPLETED on endReplaceSegments.")
   private boolean _consistentDataPush;
+
+  @JsonPropertyDescription("True to enable staged consistent data push (APPEND tables): endReplaceSegments leaves "
+      + "entries in STAGED until an operator atomically completes them via completeStagedLineage endpoint. Treated as "
+      + "a self-contained switch — it implies consistent-push behavior independently of consistentDataPush.")
+  private boolean _stageOnlyConsistentDataPush;
 
   @JsonCreator
   public BatchIngestionConfig(@JsonProperty("batchConfigMaps") @Nullable List<Map<String, String>> batchConfigMaps,
       @JsonProperty("segmentIngestionType") String segmentIngestionType,
       @JsonProperty("segmentIngestionFrequency") String segmentIngestionFrequency,
-      @JsonProperty("consistentDataPush") boolean consistentDataPush) {
+      @JsonProperty("consistentDataPush") boolean consistentDataPush,
+      @JsonProperty("stageOnlyConsistentDataPush") boolean stageOnlyConsistentDataPush) {
     _batchConfigMaps = batchConfigMaps;
     _segmentIngestionType = segmentIngestionType;
     _segmentIngestionFrequency = segmentIngestionFrequency;
     _consistentDataPush = consistentDataPush;
+    _stageOnlyConsistentDataPush = stageOnlyConsistentDataPush;
   }
 
-  public BatchIngestionConfig(@JsonProperty("batchConfigMaps") @Nullable List<Map<String, String>> batchConfigMaps,
-      @JsonProperty("segmentIngestionType") String segmentIngestionType,
-      @JsonProperty("segmentIngestionFrequency") String segmentIngestionFrequency) {
-    this(batchConfigMaps, segmentIngestionType, segmentIngestionFrequency, false);
+  public BatchIngestionConfig(@Nullable List<Map<String, String>> batchConfigMaps, String segmentIngestionType,
+      String segmentIngestionFrequency, boolean consistentDataPush) {
+    this(batchConfigMaps, segmentIngestionType, segmentIngestionFrequency, consistentDataPush, false);
+  }
+
+  public BatchIngestionConfig(@Nullable List<Map<String, String>> batchConfigMaps, String segmentIngestionType,
+      String segmentIngestionFrequency) {
+    this(batchConfigMaps, segmentIngestionType, segmentIngestionFrequency, false, false);
   }
 
   @Nullable
@@ -78,6 +90,10 @@ public class BatchIngestionConfig extends BaseJsonConfig {
     return _consistentDataPush;
   }
 
+  public boolean getStageOnlyConsistentDataPush() {
+    return _stageOnlyConsistentDataPush;
+  }
+
   public void setBatchConfigMaps(List<Map<String, String>> batchConfigMaps) {
     _batchConfigMaps = batchConfigMaps;
   }
@@ -92,5 +108,9 @@ public class BatchIngestionConfig extends BaseJsonConfig {
 
   public void setConsistentDataPush(boolean consistentDataPush) {
     _consistentDataPush = consistentDataPush;
+  }
+
+  public void setStageOnlyConsistentDataPush(boolean stageOnlyConsistentDataPush) {
+    _stageOnlyConsistentDataPush = stageOnlyConsistentDataPush;
   }
 }

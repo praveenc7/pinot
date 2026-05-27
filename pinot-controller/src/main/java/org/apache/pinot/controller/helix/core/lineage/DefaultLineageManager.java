@@ -72,6 +72,11 @@ public class DefaultLineageManager implements LineageManager {
     Iterator<LineageEntry> lineageEntryIterator = lineage.getLineageEntries().values().iterator();
     while (lineageEntryIterator.hasNext()) {
       LineageEntry lineageEntry = lineageEntryIterator.next();
+      if (lineageEntry.getState() == LineageEntryState.STAGED) {
+        // STAGED entries are owned by the delayed consistent push protocol: queries route to segmentsFrom and
+        // segmentsTo are ONLINE-but-shadowed. Skip retention entirely until the operator completes or reverts.
+        continue;
+      }
       if (lineageEntry.getState() == LineageEntryState.COMPLETED) {
         Set<String> sourceSegments = new HashSet<>(lineageEntry.getSegmentsFrom());
         sourceSegments.retainAll(segmentsForTable);
