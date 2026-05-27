@@ -191,10 +191,6 @@ public abstract class BaseClusterIntegrationTest extends ClusterTest {
     return new ArrayList<>(DEFAULT_INVERTED_INDEX_COLUMNS);
   }
 
-  protected boolean isCreateInvertedIndexDuringSegmentGeneration() {
-    return false;
-  }
-
   @Nullable
   protected List<String> getNoDictionaryColumns() {
     return new ArrayList<>(DEFAULT_NO_DICTIONARY_COLUMNS);
@@ -309,7 +305,6 @@ public abstract class BaseClusterIntegrationTest extends ClusterTest {
         .setTimeColumnName(getTimeColumnName())
         .setSortedColumn(getSortedColumn())
         .setInvertedIndexColumns(getInvertedIndexColumns())
-        .setCreateInvertedIndexDuringSegmentGeneration(isCreateInvertedIndexDuringSegmentGeneration())
         .setNoDictionaryColumns(getNoDictionaryColumns())
         .setRangeIndexColumns(getRangeIndexColumns())
         .setBloomFilterColumns(getBloomFilterColumns())

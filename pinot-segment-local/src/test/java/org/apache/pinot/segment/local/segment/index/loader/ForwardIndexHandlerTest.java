@@ -571,7 +571,7 @@ public class ForwardIndexHandlerTest {
     return new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME)
         .setNoDictionaryColumns(new ArrayList<>(noDictionaryColumns))
         .setInvertedIndexColumns(new ArrayList<>(invertedIndexColumns))
-        .setCreateInvertedIndexDuringSegmentGeneration(true).setRangeIndexColumns(new ArrayList<>(rangeIndexColumns))
+        .setRangeIndexColumns(new ArrayList<>(rangeIndexColumns))
         .setFieldConfigList(new ArrayList<>(fieldConfigMap.values())).build();
   }
 

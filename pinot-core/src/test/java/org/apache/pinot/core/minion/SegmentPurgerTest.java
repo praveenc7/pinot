@@ -20,7 +20,6 @@ package org.apache.pinot.core.minion;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -100,10 +99,11 @@ public class SegmentPurgerTest {
     FileUtils.deleteDirectory(TEMP_DIR);
 
     _tableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(TABLE_NAME)
-        .setInvertedIndexColumns(Collections.singletonList(D1)).setCreateInvertedIndexDuringSegmentGeneration(true)
+        .setInvertedIndexColumns(List.of(D1))
         .build();
     _schema = new Schema.SchemaBuilder().addSingleValueDimension(D1, FieldSpec.DataType.INT)
-        .addSingleValueDimension(D2, FieldSpec.DataType.INT).build();
+        .addSingleValueDimension(D2, FieldSpec.DataType.INT)
+        .build();
 
     List<GenericRow> rows = new ArrayList<>(NUM_ROWS);
     for (int i = 0; i < NUM_ROWS; i++) {
@@ -132,7 +132,7 @@ public class SegmentPurgerTest {
 
     // Create a segment WITH star tree index
     TableConfig starTreeTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(TABLE_NAME)
-        .setStarTreeIndexConfigs(Collections.singletonList(STAR_TREE_CONFIG_A)).build();
+        .setStarTreeIndexConfigs(List.of(STAR_TREE_CONFIG_A)).build();
     SegmentGeneratorConfig starTreeConfig = new SegmentGeneratorConfig(starTreeTableConfig, _schema);
     starTreeConfig.setOutDir(STAR_TREE_SEGMENT_DIR.getPath());
     starTreeConfig.setSegmentName(STAR_TREE_SEGMENT_NAME);

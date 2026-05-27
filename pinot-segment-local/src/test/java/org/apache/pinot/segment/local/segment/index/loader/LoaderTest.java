@@ -444,8 +444,7 @@ public class LoaderTest {
       builder.setSegmentVersion(segmentVersion.toString());
     }
     if (enableInvertedIndex) {
-      builder.setInvertedIndexColumns(List.of(NO_FORWARD_INDEX_COL_NAME))
-          .setCreateInvertedIndexDuringSegmentGeneration(true);
+      builder.setInvertedIndexColumns(List.of(NO_FORWARD_INDEX_COL_NAME));
     }
     return builder.build();
   }

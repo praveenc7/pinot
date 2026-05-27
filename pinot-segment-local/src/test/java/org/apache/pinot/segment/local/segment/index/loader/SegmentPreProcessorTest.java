@@ -293,7 +293,6 @@ public class SegmentPreProcessorTest implements PinotBuffersAfterClassCheckRule 
         new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).setTimeColumnName("daysSinceEpoch")
             .setNoDictionaryColumns(new ArrayList<>(_noDictionaryColumns))
             .setInvertedIndexColumns(new ArrayList<>(_invertedIndexColumns))
-            .setCreateInvertedIndexDuringSegmentGeneration(true)
             .setRangeIndexColumns(new ArrayList<>(_rangeIndexColumns))
             .setFieldConfigList(new ArrayList<>(_fieldConfigMap.values())).setNullHandlingEnabled(true)
             .setIngestionConfig(_ingestionConfig).build();
