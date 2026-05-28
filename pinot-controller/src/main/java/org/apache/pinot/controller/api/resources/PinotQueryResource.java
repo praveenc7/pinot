@@ -20,6 +20,7 @@ package org.apache.pinot.controller.api.resources;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.common.net.InetAddresses;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -412,7 +413,17 @@ public class PinotQueryResource {
   }
 
   private String getQueryURL(String protocol, String hostName, int port) {
-    return String.format("%s://%s:%d/query/sql", protocol, hostName, port);
+    return String.format("%s://%s:%d/query/sql", protocol, encodeHostForUrl(hostName), port);
+  }
+
+  // IPv6 literals must be wrapped in brackets per RFC 3986; hostnames and IPv4 are passed through.
+  // IPv6 values are returned in RFC 5952 canonical form.
+  static String encodeHostForUrl(String hostName) {
+    try {
+      return InetAddresses.toUriString(InetAddresses.forString(hostName));
+    } catch (IllegalArgumentException e) {
+      return hostName;  // DNS hostname, bracketed literal, empty, or garbage — pass through
+    }
   }
 
   public void sendPostRaw(String urlStr, String requestStr, Map<String, String> headers, OutputStream outputStream) {

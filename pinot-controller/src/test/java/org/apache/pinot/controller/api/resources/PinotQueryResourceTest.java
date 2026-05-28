@@ -19,6 +19,8 @@
 package org.apache.pinot.controller.api.resources;
 
 import java.io.ByteArrayOutputStream;
+import java.net.URI;
+import java.net.URL;
 import javax.ws.rs.core.StreamingOutput;
 import org.apache.pinot.common.config.provider.TableCache;
 import org.apache.pinot.controller.ControllerConf;
@@ -77,6 +79,54 @@ public class PinotQueryResourceTest {
     );
     Assert.assertTrue(response.contains(String.valueOf(QueryErrorCode.SQL_PARSING.getId())));
     Assert.assertFalse(response.contains("retry the query using the multi-stage query engine"));
+  }
+
+  @Test
+  public void testEncodeHostForUrlHostname() {
+    Assert.assertEquals(PinotQueryResource.encodeHostForUrl("broker-0.pinot.svc"), "broker-0.pinot.svc");
+  }
+
+  @Test
+  public void testEncodeHostForUrlIpv4() {
+    Assert.assertEquals(PinotQueryResource.encodeHostForUrl("10.20.30.40"), "10.20.30.40");
+  }
+
+  @Test
+  public void testEncodeHostForUrlIpv6() {
+    // Guava normalizes to RFC 5952 canonical form (zero-runs compressed with "::").
+    Assert.assertEquals(PinotQueryResource.encodeHostForUrl("2a04:f547:4a:706:0:0:0:e1ae"),
+        "[2a04:f547:4a:706::e1ae]");
+  }
+
+  @Test
+  public void testEncodeHostForUrlGarbageHostname() {
+    // Strings that look almost-IPv6 but are invalid stay untouched (no brackets added).
+    Assert.assertEquals(PinotQueryResource.encodeHostForUrl("not:a:real:address"), "not:a:real:address");
+  }
+
+  @Test
+  public void testEncodeHostForUrlIpv6Loopback() {
+    Assert.assertEquals(PinotQueryResource.encodeHostForUrl("::1"), "[::1]");
+  }
+
+  @Test
+  public void testEncodeHostForUrlAlreadyBracketedIpv6() {
+    Assert.assertEquals(PinotQueryResource.encodeHostForUrl("[2a04:f547:4a:706:0:0:0:e1ae]"),
+        "[2a04:f547:4a:706:0:0:0:e1ae]");
+  }
+
+  // Reproduces the failure: building a broker URL from an IPv6 host without brackets makes
+  // new URL(...) throw because the IPv6 colons collide with the port separator.
+  @Test
+  public void testIpv6BrokerUrlIsParseable()
+      throws Exception {
+    String urlStr = String.format("https://%s:%d/query/sql",
+        PinotQueryResource.encodeHostForUrl("2a04:f547:4a:706:0:0:0:e1ae"), 8099);
+    URL url = new URL(urlStr);
+    URI uri = url.toURI();
+    Assert.assertEquals(uri.getHost(), "[2a04:f547:4a:706::e1ae]");
+    Assert.assertEquals(uri.getPort(), 8099);
+    Assert.assertEquals(uri.getPath(), "/query/sql");
   }
 
   public static String streamingOutputToString(StreamingOutput streamingOutput) {
