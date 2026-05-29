@@ -60,7 +60,7 @@ public interface SegmentFetcher {
   void fetchSegmentToLocal(String segmentName, Supplier<List<URI>> uriSupplier, File dest) throws Exception;
 
   /**
-   * Fetches a segment from peers with fixed-delay retry, intended for peer-to-peer downloads.
+   * Fetches a segment from peers, intended for peer-to-peer downloads.
    * Default implementation delegates to {@link #fetchSegmentToLocal(String, Supplier, File)}.
    */
   default void fetchSegmentToLocalWithPeerRetry(String segmentName, Supplier<List<URI>> uriSupplier, File dest)

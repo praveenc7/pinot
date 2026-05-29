@@ -42,6 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.inject.Named;
@@ -66,6 +67,8 @@ import org.apache.helix.model.IdealState;
 import org.apache.pinot.common.metadata.ZKMetadataProvider;
 import org.apache.pinot.common.metadata.segment.SegmentZKMetadata;
 import org.apache.pinot.common.metadata.segment.SegmentZKMetadataUtils;
+import org.apache.pinot.common.metrics.ServerMeter;
+import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.common.response.server.TableIndexMetadataResponse;
 import org.apache.pinot.common.restlet.resources.ResourceUtils;
 import org.apache.pinot.common.restlet.resources.SegmentConsumerInfo;
@@ -143,6 +146,13 @@ public class TablesResource {
   @Inject
   @Named(AdminApiApplication.SERVER_INSTANCE_ID)
   private String _instanceId;
+
+  @Inject
+  @Named(AdminApiApplication.SEGMENT_SERVE_SEMAPHORE)
+  private Semaphore _segmentServeSemaphore;
+
+  @Inject
+  private ServerMetrics _serverMetrics;
 
   @GET
   @Path("/tables")
@@ -503,11 +513,14 @@ public class TablesResource {
           String.format("Table %s segment %s does not exist", tableNameWithType, segmentName),
           Response.Status.NOT_FOUND);
     }
+    if (!_segmentServeSemaphore.tryAcquire()) {
+      tableDataManager.releaseSegment(segmentDataManager);
+      _serverMetrics.addMeteredGlobalValue(ServerMeter.SEGMENT_SERVE_THROTTLED, 1);
+      LOGGER.info("Throttled segment download request for {} of table {}", segmentName, tableNameWithType);
+      throw new WebApplicationException("Server busy, too many concurrent segment downloads",
+          Response.status(429).entity("Server busy, too many concurrent segment downloads").build());
+    }
     try {
-      // TODO Limit the number of concurrent downloads of segments because compression is an expensive operation.
-      // Store the tar.gz segment file in the server's segmentTarDir folder with a unique file name.
-      // Note that two clients asking the same segment file will result in the same tar.gz files being created twice.
-      // Will revisit for optimization if performance becomes an issue.
       File tmpSegmentTarDir =
           new File(_serverInstance.getInstanceDataManager().getSegmentFileDirectory(), PEER_SEGMENT_DOWNLOAD_DIR);
       tmpSegmentTarDir.mkdir();
@@ -530,6 +543,7 @@ public class TablesResource {
       builder.header(HttpHeaders.CONTENT_LENGTH, segmentTarFile.length());
       return builder.build();
     } finally {
+      _segmentServeSemaphore.release();
       tableDataManager.releaseSegment(segmentDataManager);
     }
   }

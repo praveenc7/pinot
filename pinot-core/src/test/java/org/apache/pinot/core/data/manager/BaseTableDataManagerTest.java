@@ -645,7 +645,7 @@ public class BaseTableDataManagerTest {
   /**
    * Tests that SEGMENT_DOWNLOAD_FROM_PEERS_FAILURES metric is emitted inside downloadSegmentFromPeers
    * when peer download fails, and that downloadSegment falls back to deep store.
-   * With peer.retry.count=0 the retry policy exhausts immediately without making any network calls.
+   * The peer download path tries each peer once and fails fast to allow deep store fallback.
    */
   @Test
   public void testDownloadFromPeersFallsBackToDeepStore()
@@ -692,11 +692,8 @@ public class BaseTableDataManagerTest {
   @Test
   public void testDownloadFailsWhenBothPeerAndDeepStoreFail()
       throws Exception {
-    // Configure segment fetcher with 0 peer retries so peer download fails immediately
-    Map<String, Object> properties = new HashMap<>();
-    properties.put(BaseSegmentFetcher.PEER_RETRY_COUNT_CONFIG_KEY, 0);
-    properties.put(BaseSegmentFetcher.PEER_RETRY_WAIT_MS_CONFIG_KEY, 0);
-    SegmentFetcherFactory.init(new PinotConfiguration(properties));
+    // Re-init segment fetcher with default config
+    SegmentFetcherFactory.init(new PinotConfiguration(new HashMap<>()));
 
     org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig validationConfig =
         new org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig();
@@ -903,12 +900,9 @@ public class BaseTableDataManagerTest {
   }
 
   @Test
-  public void testPeerDownloadSupplierCalledOnEachRetry()
+  public void testPeerDownloadTriesEachPeerOnceAndFailsFast()
       throws Exception {
-    // Configure peer retries = 2 with 0ms wait so retries are fast
     Map<String, Object> properties = new HashMap<>();
-    properties.put(BaseSegmentFetcher.PEER_RETRY_COUNT_CONFIG_KEY, 2);
-    properties.put(BaseSegmentFetcher.PEER_RETRY_WAIT_MS_CONFIG_KEY, 0);
     properties.put(BaseSegmentFetcher.RETRY_COUNT_CONFIG_KEY, 3);
     properties.put(BaseSegmentFetcher.RETRY_WAIT_MS_CONFIG_KEY, 100);
     properties.put(BaseSegmentFetcher.RETRY_DELAY_SCALE_FACTOR_CONFIG_KEY, 5);
@@ -923,24 +917,23 @@ public class BaseTableDataManagerTest {
 
     SegmentZKMetadata zkMetadata = new SegmentZKMetadata(SEGMENT_NAME);
 
-    // Track how many times the Supplier is called
     java.util.concurrent.atomic.AtomicInteger supplierCallCount = new java.util.concurrent.atomic.AtomicInteger(0);
     java.util.function.Supplier<List<URI>> trackingSupplier = () -> {
       supplierCallCount.incrementAndGet();
-      return List.of(URI.create("http://localhost:1/segments/testTable_OFFLINE/testSegment"));
+      return List.of(
+          URI.create("http://localhost:1/segments/testTable_OFFLINE/testSegment"),
+          URI.create("http://localhost:2/segments/testTable_OFFLINE/testSegment"));
     };
 
     try {
       tableDataManager.downloadSegmentFromPeers(zkMetadata, trackingSupplier, null);
       fail("Expected exception when peer download fails");
     } catch (Exception e) {
-      // Expected — no real server at localhost:1
+      // Expected — no real server at localhost:1 or localhost:2
     }
 
-    // With peerRetryCount=2, the retry policy makes 3 attempts total (1 initial + 2 retries).
-    // The Supplier must be called on each attempt to refresh the peer list.
-    assertTrue(supplierCallCount.get() >= 2,
-        "Supplier should be called on each retry attempt, but was only called " + supplierCallCount.get() + " time(s)");
+    assertEquals(supplierCallCount.get(), 1,
+        "Supplier should be called exactly once (no retry), but was called " + supplierCallCount.get() + " time(s)");
 
     initSegmentFetcher();
   }

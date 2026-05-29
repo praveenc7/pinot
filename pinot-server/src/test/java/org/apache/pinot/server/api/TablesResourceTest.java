@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Semaphore;
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.Response;
 import org.apache.commons.configuration2.ex.ConfigurationException;
@@ -569,6 +570,28 @@ public class TablesResourceTest extends BaseResourceTest {
     response = _webTarget.path(String.format("/segments/%s/%s/upload", TABLE_NAME, LLC_SEGMENT_NAME_FOR_UPLOAD_FAILURE))
         .request().post(null);
     Assert.assertEquals(response.getStatus(), Response.Status.INTERNAL_SERVER_ERROR.getStatusCode());
+  }
+
+  @Test
+  public void testDownloadSegmentThrottled()
+      throws Exception {
+    String segmentPath = "/segments/" + TableNameBuilder.REALTIME.tableNameWithType(TABLE_NAME)
+        + "/" + _realtimeIndexSegments.get(0).getSegmentName();
+
+    // Drain all permits so the next request gets throttled
+    Semaphore semaphore = _adminApiApplication.getSegmentServeSemaphore();
+    int permits = semaphore.availablePermits();
+    semaphore.acquire(permits);
+    try {
+      Response response = _webTarget.path(segmentPath).request().get(Response.class);
+      Assert.assertEquals(response.getStatus(), 429);
+    } finally {
+      semaphore.release(permits);
+    }
+
+    // Verify normal download still works after permits are released
+    Response response = _webTarget.path(segmentPath).request().get(Response.class);
+    Assert.assertEquals(response.getStatus(), Response.Status.OK.getStatusCode());
   }
 
   @Test

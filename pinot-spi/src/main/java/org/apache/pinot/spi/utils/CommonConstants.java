@@ -294,6 +294,11 @@ public class CommonConstants {
     public static final String DEFAULT_MAX_SEGMENT_STARTREE_PREPROCESS_PARALLELISM_BEFORE_SERVING_QUERIES =
         String.valueOf(Integer.MAX_VALUE);
 
+    // Segment serve throttle config (server-side limit on concurrent peer download requests served)
+    public static final String CONFIG_OF_MAX_SEGMENT_SERVE_CONCURRENCY =
+        "pinot.server.max.segment.serve.concurrency";
+    public static final int DEFAULT_MAX_SEGMENT_SERVE_CONCURRENCY = 4;
+
     // Download throttle config
     public static final String CONFIG_OF_MAX_SEGMENT_DOWNLOAD_PARALLELISM =
         "pinot.server.max.segment.download.parallelism";

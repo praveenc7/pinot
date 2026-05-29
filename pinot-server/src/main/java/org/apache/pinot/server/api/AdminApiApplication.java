@@ -18,10 +18,12 @@
  */
 package org.apache.pinot.server.api;
 
+import com.google.common.annotations.VisibleForTesting;
 import io.swagger.jaxrs.listing.SwaggerSerializers;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import javax.ws.rs.container.ContainerRequestContext;
 import javax.ws.rs.container.ContainerResponseContext;
@@ -52,6 +54,7 @@ public class AdminApiApplication extends ResourceConfig {
   private static final Logger LOGGER = LoggerFactory.getLogger(AdminApiApplication.class);
   public static final String PINOT_CONFIGURATION = "pinotConfiguration";
   public static final String SERVER_INSTANCE_ID = "serverInstanceId";
+  public static final String SEGMENT_SERVE_SEMAPHORE = "segmentServeSemaphore";
 
   public static final String START_TIME = "serverStartTime";
 
@@ -59,6 +62,7 @@ public class AdminApiApplication extends ResourceConfig {
   private final ServerInstance _serverInstance;
   private HttpServer _httpServer;
   private final String _adminApiResourcePackages;
+  private Semaphore _segmentServeSemaphore;
 
 
   public AdminApiApplication(ServerInstance instance, AccessControlFactory accessControlFactory,
@@ -87,6 +91,11 @@ public class AdminApiApplication extends ResourceConfig {
           bind(new DummyLogFileServer()).to(LogFileServer.class);
         }
         bind(serverStartTime).named(START_TIME);
+        int maxConcurrentServes = serverConf.getProperty(
+            CommonConstants.Helix.CONFIG_OF_MAX_SEGMENT_SERVE_CONCURRENCY,
+            CommonConstants.Helix.DEFAULT_MAX_SEGMENT_SERVE_CONCURRENCY);
+        _segmentServeSemaphore = new Semaphore(maxConcurrentServes);
+        bind(_segmentServeSemaphore).named(SEGMENT_SERVE_SEMAPHORE);
       }
     });
 
@@ -144,5 +153,10 @@ public class AdminApiApplication extends ResourceConfig {
 
   public HttpServer getHttpServer() {
     return _httpServer;
+  }
+
+  @VisibleForTesting
+  Semaphore getSegmentServeSemaphore() {
+    return _segmentServeSemaphore;
   }
 }

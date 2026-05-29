@@ -479,8 +479,13 @@ public class PeerToPeerSegmentDownloadIntegrationTest extends BaseClusterIntegra
     long failureCount = getTotalMetricCount(tableNameWithType, ServerMeter.SEGMENT_DOWNLOAD_FAILURES);
     assertEquals(failureCount, 0, "Expected 0 download failures, got " + failureCount);
 
-    LOGGER.info("Download metrics — total: {}, peer_success: {}, deep_store: {}, failures: {}",
-        totalDownloads, peerSuccessCount, deepStoreCount, failureCount);
+    // SEGMENT_SERVE_THROTTLED (global meter) should be 0 under normal load — confirms the metric
+    // is wired up and not spuriously incrementing
+    long throttledCount = getTotalGlobalMetricCount(ServerMeter.SEGMENT_SERVE_THROTTLED);
+    assertEquals(throttledCount, 0, "Expected 0 throttled segment serves under normal load, got " + throttledCount);
+
+    LOGGER.info("Download metrics — total: {}, peer_success: {}, deep_store: {}, failures: {}, throttled: {}",
+        totalDownloads, peerSuccessCount, deepStoreCount, failureCount, throttledCount);
 
     LOGGER.info("testDownloadMetricsEmitted completed successfully");
   }
@@ -742,6 +747,16 @@ public class PeerToPeerSegmentDownloadIntegrationTest extends BaseClusterIntegra
           serverStarter.getServerInstance().getServerMetrics();
       long count = serverMetrics.getMeteredTableValue(tableNameWithType, meter).count();
       total += count;
+    }
+    return total;
+  }
+
+  private long getTotalGlobalMetricCount(ServerMeter meter) {
+    long total = 0;
+    for (BaseServerStarter serverStarter : _serverStarters) {
+      ServerMetrics serverMetrics =
+          serverStarter.getServerInstance().getServerMetrics();
+      total += serverMetrics.getMeteredValue(meter).count();
     }
     return total;
   }

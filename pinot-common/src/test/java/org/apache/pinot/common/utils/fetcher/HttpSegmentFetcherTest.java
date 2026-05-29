@@ -127,4 +127,26 @@ public class HttpSegmentFetcherTest {
     List<URI> uris = List.of();
     segmentFetcher.fetchSegmentToLocal(SEGMENT_NAME, () -> uris, SEGMENT_FILE);
   }
+
+  @Test
+  public void testPeerRetry429SkipsToNextPeerAndSucceeds()
+      throws Exception {
+    FileUploadDownloadClient client = mock(FileUploadDownloadClient.class);
+    // First peer returns 429 (throws in fetchSegmentToLocalWithoutRetry), second peer succeeds
+    when(client.downloadFile(any(), any(), any())).thenReturn(429).thenReturn(200);
+    HttpSegmentFetcher segmentFetcher = getSegmentFetcher(client);
+    List<URI> uris = List.of(new URI("http://h1:8080"), new URI("http://h2:8080"));
+    segmentFetcher.fetchSegmentToLocalWithPeerRetry(SEGMENT_NAME, () -> uris, SEGMENT_FILE);
+  }
+
+  @Test(expectedExceptions = Exception.class)
+  public void testPeerRetryAllPeers429FailsFast()
+      throws Exception {
+    FileUploadDownloadClient client = mock(FileUploadDownloadClient.class);
+    // All peers return 429 — fails fast without retry to allow deep store fallback
+    when(client.downloadFile(any(), any(), any())).thenReturn(429);
+    HttpSegmentFetcher segmentFetcher = getSegmentFetcher(client);
+    List<URI> uris = List.of(new URI("http://h1:8080"), new URI("http://h2:8080"));
+    segmentFetcher.fetchSegmentToLocalWithPeerRetry(SEGMENT_NAME, () -> uris, SEGMENT_FILE);
+  }
 }
