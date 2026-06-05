@@ -40,6 +40,7 @@ import java.util.regex.Pattern;
 import javax.annotation.Nullable;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.pinot.common.response.broker.BrokerResponseNativeV2;
+import org.apache.pinot.core.data.manager.offline.DimensionTableDataManager;
 import org.apache.pinot.query.QueryEnvironmentTestBase;
 import org.apache.pinot.query.QueryServerEnclosure;
 import org.apache.pinot.query.mailbox.MailboxService;
@@ -55,10 +56,13 @@ import org.apache.pinot.segment.spi.ImmutableSegment;
 import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.data.Schema;
 import org.apache.pinot.spi.data.readers.GenericRow;
+import org.apache.pinot.spi.data.readers.PrimaryKey;
 import org.apache.pinot.spi.env.PinotConfiguration;
 import org.apache.pinot.spi.utils.CommonConstants.MultiStageQueryRunner;
 import org.apache.pinot.spi.utils.JsonUtils;
 import org.apache.pinot.spi.utils.builder.TableNameBuilder;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.testng.Assert;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.BeforeClass;
@@ -99,6 +103,7 @@ public class ResourceBasedQueriesTest extends QueryRunnerTestBase {
 
     // Scan through all the test cases.
     Map<String, Pair<String, List<List<String>>>> partitionedSegmentsMap = new HashMap<>();
+    Set<String> dimTables = new HashSet<>();
     for (Map.Entry<String, QueryTestCase> testCaseEntry : getTestCases().entrySet()) {
       String testCaseName = testCaseEntry.getKey();
       QueryTestCase testCase = testCaseEntry.getValue();
@@ -116,6 +121,9 @@ public class ResourceBasedQueriesTest extends QueryRunnerTestBase {
         QueryTestCase.Table table = entry.getValue();
         Schema schema = constructSchema(tableName, table._schema);
         schema.setEnableColumnBasedNullHandling(testCase._extraProps.isEnableColumnBasedNullHandling());
+        if (table._primaryKeyColumns != null && !table._primaryKeyColumns.isEmpty()) {
+          schema.setPrimaryKeyColumns(table._primaryKeyColumns);
+        }
         schemaMap.put(tableName, schema);
         factory1.registerTable(schema, offlineTableName);
         factory2.registerTable(schema, offlineTableName);
@@ -123,6 +131,12 @@ public class ResourceBasedQueriesTest extends QueryRunnerTestBase {
         List<GenericRow> genericRows = toRow(columnAndTypes, table._inputs);
         if (table._replicated) {
           addSegmentReplicated(factory1, factory2, offlineTableName, genericRows);
+          if (table._isDimTable) {
+            registerMockDimensionTable(offlineTableName, schema, table, genericRows);
+            // Also signal isDimTable to the planner so rules keyed on the dim flag (e.g. PinotJoinCommuteRule)
+            // can be exercised end-to-end via this test harness.
+            dimTables.add(offlineTableName);
+          }
           continue;
         }
         // generate segments and dump into server1 and server2
@@ -228,7 +242,7 @@ public class ResourceBasedQueriesTest extends QueryRunnerTestBase {
 
     _queryEnvironment = QueryEnvironmentTestBase.getQueryEnvironment(_reducerPort, server1.getPort(), server2.getPort(),
         factory1.getRegisteredSchemaMap(), factory1.buildTableSegmentNameMap(), factory2.buildTableSegmentNameMap(),
-        partitionedSegmentsMap);
+        partitionedSegmentsMap, dimTables);
   }
 
   private void addSegments(MockInstanceDataManagerFactory factory1, MockInstanceDataManagerFactory factory2,
@@ -251,6 +265,48 @@ public class ResourceBasedQueriesTest extends QueryRunnerTestBase {
       String offlineTableName, List<GenericRow> rows) {
     ImmutableSegment segment = factory1.addSegment(offlineTableName, rows);
     factory2.addSegment(offlineTableName, segment);
+  }
+
+  /**
+   * Registers a mock DimensionTableDataManager for lookup join testing.
+   * The mock stores all rows in a HashMap keyed by primary key, supporting lookupValues() and containsKey().
+   */
+  private void registerMockDimensionTable(String offlineTableName, Schema schema, QueryTestCase.Table table,
+      List<GenericRow> rows) {
+    List<String> primaryKeyColumns = table._primaryKeyColumns;
+    if (primaryKeyColumns == null || primaryKeyColumns.isEmpty()) {
+      throw new IllegalStateException(
+          "isDimTable=true requires primaryKeyColumns to be set for table: " + offlineTableName);
+    }
+    Map<PrimaryKey, GenericRow> lookupMap = new HashMap<>();
+    for (GenericRow row : rows) {
+      Object[] pkValues = new Object[primaryKeyColumns.size()];
+      for (int i = 0; i < primaryKeyColumns.size(); i++) {
+        pkValues[i] = row.getValue(primaryKeyColumns.get(i));
+      }
+      lookupMap.put(new PrimaryKey(pkValues), row);
+    }
+    DimensionTableDataManager mockDimManager = Mockito.mock(DimensionTableDataManager.class);
+    Mockito.when(mockDimManager.containsKey(ArgumentMatchers.any(PrimaryKey.class)))
+        .thenAnswer(invocation -> {
+          PrimaryKey pk = invocation.getArgument(0);
+          return lookupMap.containsKey(pk);
+        });
+    Mockito.when(mockDimManager.lookupValues(ArgumentMatchers.any(PrimaryKey.class),
+        ArgumentMatchers.any(String[].class))).thenAnswer(invocation -> {
+          PrimaryKey pk = invocation.getArgument(0);
+          String[] columns = invocation.getArgument(1);
+          GenericRow row = lookupMap.get(pk);
+          if (row == null) {
+            return null;
+          }
+          Object[] values = new Object[columns.length];
+          for (int i = 0; i < columns.length; i++) {
+            values[i] = row.getValue(columns[i]);
+          }
+          return values;
+        });
+    DimensionTableDataManager.registerDimensionTable(offlineTableName, mockDimManager);
   }
 
   @AfterClass

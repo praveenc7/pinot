@@ -720,6 +720,14 @@ public class CommonConstants {
       }
     }
 
+    /**
+     * Calcite and Pinot rule names used for registration and identification of MSE planner rules.
+     * Rules reference these constants when constructed so they show up by a stable name in tooling.
+     */
+    public static class PlannerRuleNames {
+      public static final String PINOT_JOIN_COMMUTE = "PinotJoinCommuteRule";
+    }
+
     public static class FailureDetector {
       public enum Type {
         // Do not detect any failure

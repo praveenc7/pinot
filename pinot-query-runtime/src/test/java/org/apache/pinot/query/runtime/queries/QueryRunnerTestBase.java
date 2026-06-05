@@ -586,6 +586,10 @@ public abstract class QueryRunnerTestBase extends QueryTestSet {
       public Integer _partitionCount;
       @JsonProperty("replicated")
       public boolean _replicated;
+      @JsonProperty("isDimTable")
+      public boolean _isDimTable;
+      @JsonProperty("primaryKeyColumns")
+      public List<String> _primaryKeyColumns;
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

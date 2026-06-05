@@ -35,10 +35,22 @@ import org.apache.pinot.spi.data.Schema;
  * {@link RelDataType} of the table to the planner.
  */
 public class PinotTable extends AbstractTable implements ScannableTable {
-  private Schema _schema;
+  private final Schema _schema;
+  private final boolean _isDimTable;
 
   public PinotTable(Schema schema) {
+    this(schema, false);
+  }
+
+  /**
+   * Constructor with dim-table flag. {@code isDimTable} is consulted by planner rules that benefit from knowing
+   * a table is a small, fully-replicated dimension table (e.g. join-input commutation that wants the dim side as
+   * the build/broadcast side of a join). It must be derived from the table's {@code TableConfig.isDimTable()} at
+   * catalog construction time; the rules themselves do not have access to {@code TableCache}.
+   */
+  public PinotTable(Schema schema, boolean isDimTable) {
     _schema = schema;
+    _isDimTable = isDimTable;
   }
 
   @Override
@@ -50,6 +62,10 @@ public class PinotTable extends AbstractTable implements ScannableTable {
       typeFactory = TypeFactory.INSTANCE;
     }
     return typeFactory.createRelDataTypeFromSchema(_schema);
+  }
+
+  public boolean isDimTable() {
+    return _isDimTable;
   }
 
   @Override

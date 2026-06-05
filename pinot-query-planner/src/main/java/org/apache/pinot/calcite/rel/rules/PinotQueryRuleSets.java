@@ -24,6 +24,7 @@ import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.rules.PruneEmptyRules;
 import org.apache.pinot.calcite.rel.rules.PinotFilterJoinRule.PinotFilterIntoJoinRule;
 import org.apache.pinot.calcite.rel.rules.PinotFilterJoinRule.PinotJoinConditionPushRule;
+import org.apache.pinot.spi.utils.CommonConstants.Broker.PlannerRuleNames;
 
 
 /**
@@ -70,6 +71,11 @@ public class PinotQueryRuleSets {
 
       // join rules
       CoreRules.JOIN_PUSH_EXPRESSIONS,
+
+      // swap join inputs so a dimension table is on the right (= build / broadcast / lookup side) regardless of
+      // how the user wrote the SQL. Cardinality-aware commute is future work; this rule fires on a dim-table
+      // signal that is already known at catalog construction time. See PinotJoinCommuteRule for the full predicate.
+      PinotJoinCommuteRule.instanceWithDescription(PlannerRuleNames.PINOT_JOIN_COMMUTE),
 
       // join and semi-join rules
       CoreRules.PROJECT_TO_SEMI_JOIN,
