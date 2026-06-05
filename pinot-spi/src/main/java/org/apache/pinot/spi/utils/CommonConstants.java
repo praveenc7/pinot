@@ -1140,6 +1140,12 @@ public class CommonConstants {
     // Default to 0.0 (no limit)
     public static final double DEFAULT_SERVER_CONSUMPTION_RATE_LIMIT = 0.0;
 
+    // Config for realtime consumption byte rate limit (bytes/sec)
+    public static final String CONFIG_OF_SERVER_CONSUMPTION_RATE_LIMIT_BYTES =
+        "pinot.server.consumption.rate.limit.bytes";
+    // Default to 0.0 (no limit)
+    public static final double DEFAULT_SERVER_CONSUMPTION_RATE_LIMIT_BYTES = 0.0;
+
     public static final String CONFIG_OF_MMAP_DEFAULT_ADVICE = "pinot.server.mmap.advice.default";
     public static final String PREFIX_OF_CONFIG_OF_SEGMENT_FETCHER_FACTORY = "pinot.server.segment.fetcher";
 

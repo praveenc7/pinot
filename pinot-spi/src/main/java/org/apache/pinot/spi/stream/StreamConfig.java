@@ -30,9 +30,9 @@ import org.apache.pinot.spi.utils.TimeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
 /**
- * Provides all the configs related to the stream as configured in the table config
+ * Provides all the configs related to the stream as configured in the table
+ * config
  */
 public class StreamConfig {
   private static final Logger LOGGER = LoggerFactory.getLogger(StreamConfig.class);
@@ -73,41 +73,46 @@ public class StreamConfig {
 
   private final String _groupId;
 
-  private final double _topicConsumptionRateLimit;
+  private final double _topicConsumptionRateLimitEvents;
+  private final double _topicConsumptionRateLimitBytes;
 
   private final Map<String, String> _streamConfigMap = new HashMap<>();
 
   // Allow overriding it to use different offset criteria
   private OffsetCriteria _offsetCriteria;
 
-  // Indicate StreamConfig flag for table if segment should be uploaded to the deep store's file system or to the
-  // controller during the segment commit protocol. if config is not present in Table StreamConfig
-  // _serverUploadToDeepStore is null and method isServerUploadToDeepStore() overrides the default value with Server
+  // Indicate StreamConfig flag for table if segment should be uploaded to the
+  // deep store's file system or to the
+  // controller during the segment commit protocol. if config is not present in
+  // Table StreamConfig
+  // _serverUploadToDeepStore is null and method isServerUploadToDeepStore()
+  // overrides the default value with Server
   // level config
   private final Boolean _serverUploadToDeepStore;
 
   /**
-   * Initializes a StreamConfig using the map of stream configs from the table config
+   * Initializes a StreamConfig using the map of stream configs from the table
+   * config
    */
   public StreamConfig(String tableNameWithType, Map<String, String> streamConfigMap) {
     _type = streamConfigMap.get(StreamConfigProperties.STREAM_TYPE);
     Preconditions.checkNotNull(_type, StreamConfigProperties.STREAM_TYPE + " cannot be null");
 
-    String topicNameKey =
-        StreamConfigProperties.constructStreamProperty(_type, StreamConfigProperties.STREAM_TOPIC_NAME);
+    String topicNameKey = StreamConfigProperties.constructStreamProperty(_type,
+        StreamConfigProperties.STREAM_TOPIC_NAME);
     _topicName = streamConfigMap.get(topicNameKey);
     Preconditions.checkNotNull(_topicName, "Stream topic name " + topicNameKey + " cannot be null");
 
     _tableNameWithType = tableNameWithType;
 
-    String consumerFactoryClassKey =
-        StreamConfigProperties.constructStreamProperty(_type, StreamConfigProperties.STREAM_CONSUMER_FACTORY_CLASS);
+    String consumerFactoryClassKey = StreamConfigProperties.constructStreamProperty(_type,
+        StreamConfigProperties.STREAM_CONSUMER_FACTORY_CLASS);
     // For backward compatibility, default consumer factory is for Kafka.
-    _consumerFactoryClassName =
-        streamConfigMap.getOrDefault(consumerFactoryClassKey, DEFAULT_CONSUMER_FACTORY_CLASS_NAME_STRING);
+    _consumerFactoryClassName = streamConfigMap.getOrDefault(consumerFactoryClassKey,
+        DEFAULT_CONSUMER_FACTORY_CLASS_NAME_STRING);
 
-    String offsetCriteriaKey =
-        StreamConfigProperties.constructStreamProperty(_type, StreamConfigProperties.STREAM_CONSUMER_OFFSET_CRITERIA);
+    String offsetCriteriaKey = StreamConfigProperties.constructStreamProperty(_type,
+        StreamConfigProperties.STREAM_CONSUMER_OFFSET_CRITERIA);
     String offsetCriteriaValue = streamConfigMap.get(offsetCriteriaKey);
     if (offsetCriteriaValue != null) {
       _offsetCriteria = new OffsetCriteria.OffsetCriteriaBuilder().withOffsetString(offsetCriteriaValue);
@@ -115,13 +120,13 @@ public class StreamConfig {
       _offsetCriteria = new OffsetCriteria.OffsetCriteriaBuilder().withOffsetLargest();
     }
 
-    String decoderClassKey =
-        StreamConfigProperties.constructStreamProperty(_type, StreamConfigProperties.STREAM_DECODER_CLASS);
+    String decoderClassKey = StreamConfigProperties.constructStreamProperty(_type,
+        StreamConfigProperties.STREAM_DECODER_CLASS);
     _decoderClass = streamConfigMap.get(decoderClassKey);
     Preconditions.checkNotNull(_decoderClass, "Must specify decoder class name " + decoderClassKey);
 
-    String streamDecoderPropPrefix =
-        StreamConfigProperties.constructStreamProperty(_type, StreamConfigProperties.DECODER_PROPS_PREFIX);
+    String streamDecoderPropPrefix = StreamConfigProperties.constructStreamProperty(_type,
+        StreamConfigProperties.DECODER_PROPS_PREFIX);
     for (String key : streamConfigMap.keySet()) {
       if (key.startsWith(streamDecoderPropPrefix)) {
         _decoderProperties.put(StreamConfigProperties.getPropertySuffix(key, streamDecoderPropPrefix),
@@ -130,8 +135,8 @@ public class StreamConfig {
     }
 
     long connectionTimeoutMillis = DEFAULT_STREAM_CONNECTION_TIMEOUT_MILLIS;
-    String connectionTimeoutKey =
-        StreamConfigProperties.constructStreamProperty(_type, StreamConfigProperties.STREAM_CONNECTION_TIMEOUT_MILLIS);
+    String connectionTimeoutKey = StreamConfigProperties.constructStreamProperty(_type,
+        StreamConfigProperties.STREAM_CONNECTION_TIMEOUT_MILLIS);
     String connectionTimeoutValue = streamConfigMap.get(connectionTimeoutKey);
     if (connectionTimeoutValue != null) {
       try {
@@ -144,8 +149,8 @@ public class StreamConfig {
     _connectionTimeoutMillis = connectionTimeoutMillis;
 
     int fetchTimeoutMillis = DEFAULT_STREAM_FETCH_TIMEOUT_MILLIS;
-    String fetchTimeoutKey =
-        StreamConfigProperties.constructStreamProperty(_type, StreamConfigProperties.STREAM_FETCH_TIMEOUT_MILLIS);
+    String fetchTimeoutKey = StreamConfigProperties.constructStreamProperty(_type,
+        StreamConfigProperties.STREAM_FETCH_TIMEOUT_MILLIS);
     String fetchTimeoutValue = streamConfigMap.get(fetchTimeoutKey);
     if (fetchTimeoutValue != null) {
       try {
@@ -158,8 +163,8 @@ public class StreamConfig {
     _fetchTimeoutMillis = fetchTimeoutMillis;
 
     int idleTimeoutMillis = DEFAULT_IDLE_TIMEOUT_MILLIS;
-    String idleTimeoutMillisKey =
-        StreamConfigProperties.constructStreamProperty(_type, StreamConfigProperties.STREAM_IDLE_TIMEOUT_MILLIS);
+    String idleTimeoutMillisKey = StreamConfigProperties.constructStreamProperty(_type,
+        StreamConfigProperties.STREAM_IDLE_TIMEOUT_MILLIS);
     String idleTimeoutMillisValue = streamConfigMap.get(idleTimeoutMillisKey);
     if (idleTimeoutMillisValue != null) {
       try {
@@ -196,8 +201,20 @@ public class StreamConfig {
     String groupIdKey = StreamConfigProperties.constructStreamProperty(_type, StreamConfigProperties.GROUP_ID);
     _groupId = streamConfigMap.get(groupIdKey);
 
-    String rate = streamConfigMap.get(StreamConfigProperties.TOPIC_CONSUMPTION_RATE_LIMIT);
-    _topicConsumptionRateLimit = rate != null ? Double.parseDouble(rate) : CONSUMPTION_RATE_LIMIT_NOT_SPECIFIED;
+    String rate = streamConfigMap.get(StreamConfigProperties.TOPIC_CONSUMPTION_RATE_LIMIT_EVENTS);
+    if (rate == null) {
+      rate = streamConfigMap.get(StreamConfigProperties.DEPRECATED_TOPIC_CONSUMPTION_RATE_LIMIT);
+      if (rate != null) {
+        LOGGER.warn("Config {} is deprecated, please use {} instead",
+            StreamConfigProperties.DEPRECATED_TOPIC_CONSUMPTION_RATE_LIMIT,
+            StreamConfigProperties.TOPIC_CONSUMPTION_RATE_LIMIT_EVENTS);
+      }
+    }
+    _topicConsumptionRateLimitEvents = rate != null ? Double.parseDouble(rate) : CONSUMPTION_RATE_LIMIT_NOT_SPECIFIED;
+
+    String rateBytes = streamConfigMap.get(StreamConfigProperties.TOPIC_CONSUMPTION_RATE_LIMIT_BYTES);
+    _topicConsumptionRateLimitBytes = rateBytes != null ? Double.parseDouble(rateBytes)
+        : CONSUMPTION_RATE_LIMIT_NOT_SPECIFIED;
 
     _streamConfigMap.putAll(streamConfigMap);
   }
@@ -378,9 +395,14 @@ public class StreamConfig {
     return _groupId;
   }
 
-  public Optional<Double> getTopicConsumptionRateLimit() {
-    return _topicConsumptionRateLimit == CONSUMPTION_RATE_LIMIT_NOT_SPECIFIED ? Optional.empty()
-        : Optional.of(_topicConsumptionRateLimit);
+  public Optional<Double> getTopicConsumptionRateLimitEvents() {
+    return _topicConsumptionRateLimitEvents == CONSUMPTION_RATE_LIMIT_NOT_SPECIFIED ? Optional.empty()
+        : Optional.of(_topicConsumptionRateLimitEvents);
+  }
+
+  public Optional<Double> getTopicConsumptionRateLimitBytes() {
+    return _topicConsumptionRateLimitBytes == CONSUMPTION_RATE_LIMIT_NOT_SPECIFIED ? Optional.empty()
+        : Optional.of(_topicConsumptionRateLimitBytes);
   }
 
   public String getTableNameWithType() {
@@ -402,7 +424,9 @@ public class StreamConfig {
         + _flushThresholdTimeMillis + ", _flushThresholdSegmentSizeBytes=" + _flushThresholdSegmentSizeBytes
         + ", _flushThresholdVarianceFraction=" + _flushThresholdVarianceFraction
         + ", _flushAutotuneInitialRows=" + _flushAutotuneInitialRows + ", _groupId='" + _groupId + '\''
-        + ", _topicConsumptionRateLimit=" + _topicConsumptionRateLimit + ", _streamConfigMap=" + _streamConfigMap
+        + ", _topicConsumptionRateLimitEvents=" + _topicConsumptionRateLimitEvents
+        + ", _topicConsumptionRateLimitBytes=" + _topicConsumptionRateLimitBytes + ", _streamConfigMap="
+        + _streamConfigMap
         + ", _offsetCriteria=" + _offsetCriteria + ", _serverUploadToDeepStore=" + _serverUploadToDeepStore + '}';
   }
 
@@ -421,13 +445,17 @@ public class StreamConfig {
         && _flushThresholdTimeMillis == that._flushThresholdTimeMillis
         && _flushThresholdSegmentSizeBytes == that._flushThresholdSegmentSizeBytes
         && _flushAutotuneInitialRows == that._flushAutotuneInitialRows
-        && Double.compare(_topicConsumptionRateLimit, that._topicConsumptionRateLimit) == 0
+        && Double.compare(_topicConsumptionRateLimitEvents, that._topicConsumptionRateLimitEvents) == 0
+        && Double.compare(_topicConsumptionRateLimitBytes, that._topicConsumptionRateLimitBytes) == 0
         && Objects.equals(_serverUploadToDeepStore, that._serverUploadToDeepStore) && Objects.equals(_type, that._type)
         && Objects.equals(_topicName, that._topicName) && Objects.equals(_tableNameWithType, that._tableNameWithType)
         && Objects.equals(_consumerFactoryClassName, that._consumerFactoryClassName) && Objects.equals(_decoderClass,
-        that._decoderClass) && Objects.equals(_decoderProperties, that._decoderProperties) && Objects.equals(_groupId,
-        that._groupId) && Objects.equals(_streamConfigMap, that._streamConfigMap) && Objects.equals(_offsetCriteria,
-        that._offsetCriteria) && Objects.equals(_flushThresholdVarianceFraction, that._flushThresholdVarianceFraction);
+            that._decoderClass)
+        && Objects.equals(_decoderProperties, that._decoderProperties) && Objects.equals(_groupId,
+            that._groupId)
+        && Objects.equals(_streamConfigMap, that._streamConfigMap) && Objects.equals(_offsetCriteria,
+            that._offsetCriteria)
+        && Objects.equals(_flushThresholdVarianceFraction, that._flushThresholdVarianceFraction);
   }
 
   @Override
@@ -435,7 +463,8 @@ public class StreamConfig {
     return Objects.hash(_type, _topicName, _tableNameWithType, _consumerFactoryClassName, _decoderClass,
         _decoderProperties, _connectionTimeoutMillis, _fetchTimeoutMillis, _idleTimeoutMillis, _flushThresholdRows,
         _flushThresholdSegmentRows, _flushThresholdTimeMillis, _flushThresholdSegmentSizeBytes,
-        _flushAutotuneInitialRows, _groupId, _topicConsumptionRateLimit, _streamConfigMap, _offsetCriteria,
+        _flushAutotuneInitialRows, _groupId, _topicConsumptionRateLimitEvents, _topicConsumptionRateLimitBytes,
+        _streamConfigMap, _offsetCriteria,
         _serverUploadToDeepStore, _flushThresholdVarianceFraction);
   }
 }

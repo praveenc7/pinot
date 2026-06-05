@@ -89,6 +89,19 @@ public interface MessageBatch<T> {
   }
 
   /**
+   * Returns the total serialized size in bytes of all messages in this batch.
+   * Uses {@link StreamMessage#getLength()} for each message.
+   */
+  default long getBatchSizeBytes() {
+    int count = getMessageCount();
+    long total = 0;
+    for (int i = 0; i < count; i++) {
+      total += getStreamMessage(i).getLength();
+    }
+    return total;
+  }
+
+  /**
    * Returns {code true} if the current batch is the end of the consumer, and no more messages can be read from this
    * partition group.
    */

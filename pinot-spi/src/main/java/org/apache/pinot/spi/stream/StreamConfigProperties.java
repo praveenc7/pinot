@@ -47,7 +47,10 @@ public class StreamConfigProperties {
   public static final String DECODER_PROPS_PREFIX = "decoder.prop";
   public static final String GROUP_ID = "hlc.group.id";
   public static final String PARTITION_MSG_OFFSET_FACTORY_CLASS = "partition.offset.factory.class.name";
-  public static final String TOPIC_CONSUMPTION_RATE_LIMIT = "topic.consumption.rate.limit";
+  // Deprecated alias for TOPIC_CONSUMPTION_RATE_LIMIT_EVENTS, retained for backward compatibility.
+  public static final String DEPRECATED_TOPIC_CONSUMPTION_RATE_LIMIT = "topic.consumption.rate.limit";
+  public static final String TOPIC_CONSUMPTION_RATE_LIMIT_EVENTS = "topic.consumption.rate.limit.events";
+  public static final String TOPIC_CONSUMPTION_RATE_LIMIT_BYTES = "topic.consumption.rate.limit.bytes";
   public static final String METADATA_POPULATE = "metadata.populate";
 
   /**

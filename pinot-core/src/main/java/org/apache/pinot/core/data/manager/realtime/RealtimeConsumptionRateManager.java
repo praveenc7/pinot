@@ -30,10 +30,12 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.ToLongFunction;
 import org.apache.pinot.common.metrics.ServerGauge;
 import org.apache.pinot.common.metrics.ServerMeter;
 import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.spi.env.PinotConfiguration;
+import org.apache.pinot.spi.stream.MessageBatch;
 import org.apache.pinot.spi.stream.StreamConfig;
 import org.apache.pinot.spi.stream.StreamConsumerFactory;
 import org.apache.pinot.spi.stream.StreamConsumerFactoryProvider;
@@ -60,7 +62,10 @@ public class RealtimeConsumptionRateManager {
 
   private static final String SERVER_CONSUMPTION_RATE_METRIC_KEY_NAME =
       ServerMeter.REALTIME_ROWS_CONSUMED.getMeterName();
+  private static final String SERVER_BYTES_CONSUMPTION_RATE_METRIC_KEY_NAME =
+      ServerMeter.REALTIME_BYTES_CONSUMED.getMeterName();
   private ConsumptionRateLimiter _serverRateLimiter = NOOP_RATE_LIMITER;
+  private ConsumptionRateLimiter _serverBytesRateLimiter = NOOP_RATE_LIMITER;
 
   // stream config object is required for fetching the partition count from the stream
   private final LoadingCache<StreamConfig, Integer> _streamConfigToTopicPartitionCountMap;
@@ -90,8 +95,9 @@ public class RealtimeConsumptionRateManager {
             CommonConstants.Server.DEFAULT_SERVER_CONSUMPTION_RATE_LIMIT);
     if (serverRateLimit > 0) {
       LOGGER.info("Set up ConsumptionRateLimiter with rate limit: {}", serverRateLimit);
-      MetricEmitter metricEmitter = new MetricEmitter(serverMetrics, SERVER_CONSUMPTION_RATE_METRIC_KEY_NAME);
-      _serverRateLimiter = new RateLimiterImpl(serverRateLimit, metricEmitter);
+      MetricEmitter metricEmitter = new MetricEmitter(serverMetrics, SERVER_CONSUMPTION_RATE_METRIC_KEY_NAME,
+          ServerGauge.CONSUMPTION_QUOTA_UTILIZATION);
+      _serverRateLimiter = new RateLimiterImpl(serverRateLimit, metricEmitter, MessageBatch::getMessageCount);
     } else {
       LOGGER.info("ConsumptionRateLimiter is disabled");
       _serverRateLimiter = NOOP_RATE_LIMITER;
@@ -103,9 +109,58 @@ public class RealtimeConsumptionRateManager {
     return _serverRateLimiter;
   }
 
+  public ConsumptionRateLimiter createServerBytesRateLimiter(PinotConfiguration serverConfig,
+      ServerMetrics serverMetrics) {
+    double serverBytesRateLimit =
+        serverConfig.getProperty(CommonConstants.Server.CONFIG_OF_SERVER_CONSUMPTION_RATE_LIMIT_BYTES,
+            CommonConstants.Server.DEFAULT_SERVER_CONSUMPTION_RATE_LIMIT_BYTES);
+    if (serverBytesRateLimit > 0) {
+      LOGGER.info("Set up bytes ConsumptionRateLimiter with rate limit: {} bytes/sec", serverBytesRateLimit);
+      MetricEmitter metricEmitter =
+          new MetricEmitter(serverMetrics, SERVER_BYTES_CONSUMPTION_RATE_METRIC_KEY_NAME,
+              ServerGauge.BYTES_CONSUMPTION_QUOTA_UTILIZATION);
+      _serverBytesRateLimiter =
+          new RateLimiterImpl(serverBytesRateLimit, metricEmitter, MessageBatch::getBatchSizeBytes);
+    } else {
+      LOGGER.info("Bytes ConsumptionRateLimiter is disabled");
+      _serverBytesRateLimiter = NOOP_RATE_LIMITER;
+    }
+    return _serverBytesRateLimiter;
+  }
+
+  public ConsumptionRateLimiter getServerBytesRateLimiter() {
+    return _serverBytesRateLimiter;
+  }
+
+  public ConsumptionRateLimiter createBytesRateLimiter(StreamConfig streamConfig, String tableName,
+      ServerMetrics serverMetrics, String metricKeyName) {
+    if (streamConfig.getTopicConsumptionRateLimitBytes().isEmpty()) {
+      return NOOP_RATE_LIMITER;
+    }
+    int partitionCount;
+    try {
+      partitionCount = _streamConfigToTopicPartitionCountMap.get(streamConfig);
+    } catch (ExecutionException e) {
+      throw new RuntimeException(e);
+    }
+    double topicBytesRateLimit = streamConfig.getTopicConsumptionRateLimitBytes().get();
+    double partitionBytesRateLimit = topicBytesRateLimit / partitionCount;
+    LOGGER.info("A bytes consumption rate limiter is set up for topic {} in table {} with rate limit: {} bytes/sec "
+            + "(topic rate limit: {} bytes/sec, partition count: {})", streamConfig.getTopicName(), tableName,
+        partitionBytesRateLimit, topicBytesRateLimit, partitionCount);
+    MetricEmitter metricEmitter = new MetricEmitter(serverMetrics, metricKeyName,
+        ServerGauge.BYTES_CONSUMPTION_QUOTA_UTILIZATION);
+    return new RateLimiterImpl(partitionBytesRateLimit, metricEmitter, MessageBatch::getBatchSizeBytes);
+  }
+
+  @VisibleForTesting
+  ConsumptionRateLimiter createBytesRateLimiter(StreamConfig streamConfig, String tableName) {
+    return createBytesRateLimiter(streamConfig, tableName, null, null);
+  }
+
   public ConsumptionRateLimiter createRateLimiter(StreamConfig streamConfig, String tableName,
       ServerMetrics serverMetrics, String metricKeyName) {
-    if (streamConfig.getTopicConsumptionRateLimit().isEmpty()) {
+    if (streamConfig.getTopicConsumptionRateLimitEvents().isEmpty()) {
       return NOOP_RATE_LIMITER;
     }
     int partitionCount;
@@ -115,13 +170,14 @@ public class RealtimeConsumptionRateManager {
       // Exception here means for some reason, partition count cannot be fetched from stream!
       throw new RuntimeException(e);
     }
-    double topicRateLimit = streamConfig.getTopicConsumptionRateLimit().get();
+    double topicRateLimit = streamConfig.getTopicConsumptionRateLimitEvents().get();
     double partitionRateLimit = topicRateLimit / partitionCount;
     LOGGER.info("A consumption rate limiter is set up for topic {} in table {} with rate limit: {} "
             + "(topic rate limit: {}, partition count: {})", streamConfig.getTopicName(), tableName, partitionRateLimit,
         topicRateLimit, partitionCount);
-    MetricEmitter metricEmitter = new MetricEmitter(serverMetrics, metricKeyName);
-    return new RateLimiterImpl(partitionRateLimit, metricEmitter);
+    MetricEmitter metricEmitter = new MetricEmitter(serverMetrics, metricKeyName,
+        ServerGauge.CONSUMPTION_QUOTA_UTILIZATION);
+    return new RateLimiterImpl(partitionRateLimit, metricEmitter, MessageBatch::getMessageCount);
   }
 
   @VisibleForTesting
@@ -156,34 +212,40 @@ public class RealtimeConsumptionRateManager {
 
   @FunctionalInterface
   public interface ConsumptionRateLimiter {
-    void throttle(int numMsgs);
+    void throttle(MessageBatch messageBatch);
   }
 
   @VisibleForTesting
-  static final ConsumptionRateLimiter NOOP_RATE_LIMITER = n -> {
+  static final ConsumptionRateLimiter NOOP_RATE_LIMITER = b -> {
   };
 
   @VisibleForTesting
   static class RateLimiterImpl implements ConsumptionRateLimiter {
     private final double _rate;
     private final RateLimiter _rateLimiter;
-    private MetricEmitter _metricEmitter;
+    private final MetricEmitter _metricEmitter;
+    private final ToLongFunction<MessageBatch> _amountExtractor;
 
-    private RateLimiterImpl(double rate, MetricEmitter metricEmitter) {
+    private RateLimiterImpl(double rate, MetricEmitter metricEmitter,
+        ToLongFunction<MessageBatch> amountExtractor) {
       _rate = rate;
       _rateLimiter = RateLimiter.create(rate);
       _metricEmitter = metricEmitter;
+      _amountExtractor = amountExtractor;
     }
 
     @Override
-    public void throttle(int numMsgs) {
+    public void throttle(MessageBatch messageBatch) {
       if (InstanceHolder.INSTANCE._isThrottlingAllowed) {
-        // Only emit metrics when throttling is allowed. Throttling is not enabled.
+        long amount = _amountExtractor.applyAsLong(messageBatch);
+        // Only emit metrics when throttling is allowed. Throttling is not enabled
         // until the server has passed startup checks. Otherwise, we will see
         // consumption well over 100% during startup.
-        _metricEmitter.emitMetric(numMsgs, _rate, Clock.systemUTC().instant());
-        if (numMsgs > 0) {
-          _rateLimiter.acquire(numMsgs);
+        _metricEmitter.emitMetric(amount, _rate, Clock.systemUTC().instant());
+        if (amount > 0) {
+          // Guava RateLimiter.acquire() takes int permits; clamp to avoid overflow on large byte batches.
+          int permits = amount > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) amount;
+          _rateLimiter.acquire(permits);
         }
       }
     }
@@ -214,38 +276,40 @@ public class RealtimeConsumptionRateManager {
   };
 
   /**
-   * This class is responsible to emit a gauge metric for the ratio of the actual consumption rate to the rate limit.
-   * Number of messages consumed are aggregated over one minute. Each minute the ratio percentage is calculated and
-   * emitted.
+   * Emits a gauge metric for the ratio of actual consumption rate to the rate limit.
+   * Counts are aggregated over one minute; each minute the ratio percentage is calculated and emitted.
    */
   @VisibleForTesting
   static class MetricEmitter {
 
     private final ServerMetrics _serverMetrics;
     private final String _metricKeyName;
+    private final ServerGauge _gauge;
 
     // state variables
     private long _previousMinute = -1;
-    private int _aggregateNumMessages = 0;
+    private long _aggregateCount = 0;
 
-    public MetricEmitter(ServerMetrics serverMetrics, String metricKeyName) {
+    public MetricEmitter(ServerMetrics serverMetrics, String metricKeyName, ServerGauge gauge) {
       _serverMetrics = serverMetrics;
       _metricKeyName = metricKeyName;
+      _gauge = gauge;
     }
 
-    int emitMetric(int numMsgsConsumed, double rateLimit, Instant now) {
+    int emitMetric(long count, double rateLimit, Instant now) {
       int ratioPercentage = 0;
       long nowInMinutes = now.getEpochSecond() / 60;
       if (nowInMinutes == _previousMinute) {
-        _aggregateNumMessages += numMsgsConsumed;
+        _aggregateCount += count;
       } else {
         if (_previousMinute != -1) { // not first time
-          double actualRate = _aggregateNumMessages / ((nowInMinutes - _previousMinute) * 60.0); // messages per second
+          double actualRate = _aggregateCount / ((nowInMinutes - _previousMinute) * 60.0);
           ratioPercentage = (int) Math.round(actualRate / rateLimit * 100);
-          _serverMetrics.setOrUpdateGauge(_metricKeyName, ServerGauge.CONSUMPTION_QUOTA_UTILIZATION,
-              ratioPercentage, ImmutableMap.of());
+          if (_serverMetrics != null) {
+            _serverMetrics.setOrUpdateGauge(_metricKeyName, _gauge, ratioPercentage, ImmutableMap.of());
+          }
         }
-        _aggregateNumMessages = numMsgsConsumed;
+        _aggregateCount = count;
         _previousMinute = nowInMinutes;
       }
       return ratioPercentage;

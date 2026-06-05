@@ -764,8 +764,9 @@ public abstract class BaseServerStarter implements ServiceStartable {
 
     preServeQueries();
 
-    // Enable Server level realtime ingestion rate limier
+    // Enable Server level realtime ingestion rate limiters (message-count and byte-based)
     RealtimeConsumptionRateManager.getInstance().createServerRateLimiter(_serverConf, serverMetrics);
+    RealtimeConsumptionRateManager.getInstance().createServerBytesRateLimiter(_serverConf, serverMetrics);
 
     // Start the thread accountant
     _threadAccountant.startWatcherTask();

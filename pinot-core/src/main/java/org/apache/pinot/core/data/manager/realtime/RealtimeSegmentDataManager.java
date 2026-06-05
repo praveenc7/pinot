@@ -333,6 +333,8 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
   private final SegmentCommitterFactory _segmentCommitterFactory;
   private final ConsumptionRateLimiter _partitionRateLimiter;
   private final ConsumptionRateLimiter _serverRateLimiter;
+  private final ConsumptionRateLimiter _partitionBytesRateLimiter;
+  private final ConsumptionRateLimiter _serverBytesRateLimiter;
 
   private final StreamPartitionMsgOffset _latestStreamOffsetAtStartupTime;
   private final CompletionMode _segmentCompletionMode;
@@ -573,9 +575,10 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
    * otherwise
    */
   private boolean processStreamEvents(MessageBatch messageBatch, long idlePipeSleepTimeMillis) {
-    int messageCount = messageBatch.getMessageCount();
-    _partitionRateLimiter.throttle(messageCount);
-    _serverRateLimiter.throttle(messageCount);
+    _partitionRateLimiter.throttle(messageBatch);
+    _serverRateLimiter.throttle(messageBatch);
+    _partitionBytesRateLimiter.throttle(messageBatch);
+    _serverBytesRateLimiter.throttle(messageBatch);
 
     PinotMeter realtimeBytesIngestedMeter = null;
     PinotMeter realtimeBytesDroppedMeter = null;
@@ -591,6 +594,7 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
     TransformPipeline.Result reusedResult = new TransformPipeline.Result();
     boolean prematureExit = false;
 
+    int messageCount = messageBatch.getMessageCount();
     for (int index = 0; index < messageCount; index++) {
       prematureExit = _shouldStop || endCriteriaReached();
       if (prematureExit) {
@@ -1705,6 +1709,9 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
     _partitionRateLimiter = RealtimeConsumptionRateManager.getInstance()
         .createRateLimiter(_streamConfig, _tableNameWithType, _serverMetrics, _clientId);
     _serverRateLimiter = RealtimeConsumptionRateManager.getInstance().getServerRateLimiter();
+    _partitionBytesRateLimiter = RealtimeConsumptionRateManager.getInstance()
+        .createBytesRateLimiter(_streamConfig, _tableNameWithType, _serverMetrics, _clientId);
+    _serverBytesRateLimiter = RealtimeConsumptionRateManager.getInstance().getServerBytesRateLimiter();
 
     // Read the max number of rows
     int segmentMaxRowCount = segmentZKMetadata.getSizeThresholdToFlushSegment();
