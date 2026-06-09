@@ -33,7 +33,6 @@ import org.apache.pinot.common.metrics.MetricAttributeConstants;
 import org.apache.pinot.common.metrics.ServerMeter;
 import org.apache.pinot.common.metrics.ServerMetrics;
 import org.apache.pinot.spi.accounting.WorkloadBudgetManager;
-import org.apache.pinot.spi.accounting.WorkloadBudgetManagerFactory;
 import org.apache.pinot.spi.config.instance.InstanceType;
 import org.apache.pinot.spi.exception.QueryErrorCode;
 import org.apache.pinot.spi.metrics.PinotMetricUtils;
@@ -68,13 +67,15 @@ public class WorkloadResourceAggregator implements ResourceAggregator {
   private Map<String, LongLongMutablePair> _currentCpuMemUsage = new HashMap<>();
 
   public WorkloadResourceAggregator(String instanceId, InstanceType instanceType, boolean cpuSamplingEnabled,
-      boolean memorySamplingEnabled, AtomicReference<QueryMonitorConfig> queryMonitorConfig) {
+      boolean memorySamplingEnabled, AtomicReference<QueryMonitorConfig> queryMonitorConfig,
+      WorkloadBudgetManager workloadBudgetManager) {
+    assert workloadBudgetManager.isCostCollectionEnabled();
     _instanceId = instanceId;
     _instanceType = instanceType;
     _cpuSamplingEnabled = cpuSamplingEnabled;
     _memorySamplingEnabled = memorySamplingEnabled;
     _queryMonitorConfig = queryMonitorConfig;
-    _workloadBudgetManager = WorkloadBudgetManagerFactory.get();
+    _workloadBudgetManager = workloadBudgetManager;
     switch (_instanceType) {
       case SERVER:
         _metrics = ServerMetrics.get();
