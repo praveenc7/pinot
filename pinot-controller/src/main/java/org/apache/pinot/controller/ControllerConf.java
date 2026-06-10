@@ -304,7 +304,8 @@ public class ControllerConf extends PinotConfiguration {
       "controller.workload.http.executor.queueSize";
   public static final String CONTROLLER_WORKLOAD_PROPAGATION_TIMEOUT_SECONDS =
       "controller.workload.propagation.timeoutSeconds";
-  public static final String CONTROLLER_ENABLE_BROKER_CHANGE_PROPAGATION = "controller.enable.table.change.propagation";
+  public static final String CONTROLLER_ENABLE_BROKER_CHANGE_PROPAGATION =
+      "controller.enable.broker.change.propagation";
   public static final String CONTROLLER_ENABLE_INSTANCE_CHANGE_PROPAGATION =
       "controller.enable.instance.change.propagation";
   public static final String DELETED_SEGMENTS_RETENTION_IN_DAYS = "controller.deleted.segments.retentionInDays";
