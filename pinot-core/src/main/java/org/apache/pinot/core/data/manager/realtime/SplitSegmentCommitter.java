@@ -25,8 +25,6 @@ import javax.annotation.Nullable;
 import org.apache.pinot.common.protocols.SegmentCompletionProtocol;
 import org.apache.pinot.common.utils.LLCSegmentName;
 import org.apache.pinot.server.realtime.ServerSegmentCompletionProtocolHandler;
-import org.apache.pinot.spi.utils.CommonConstants;
-import org.apache.pinot.spi.utils.StringUtil;
 import org.slf4j.Logger;
 
 
@@ -96,10 +94,7 @@ public class SplitSegmentCommitter implements SegmentCommitter {
     if (segmentLocation != null) {
       return segmentLocation.toString();
     }
-    if (_peerDownloadScheme != null) {
-        return StringUtil.join("/", CommonConstants.Segment.PEER_SEGMENT_DOWNLOAD_SCHEME,
-            params.getSegmentName());
-    }
+    // TODO: use placeholder (peer://segmentName) fallback if want to support PeerSegmentFetcher in future
     return null;
   }
 }

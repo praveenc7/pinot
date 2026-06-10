@@ -214,17 +214,7 @@ public abstract class BaseTableDataManager implements TableDataManager {
         .build();
     _cachedTableConfigAndSchema = Pair.of(tableConfig, schema);
 
-    _peerDownloadScheme = tableConfig.getValidationConfig().getPeerSegmentDownloadScheme();
-    if (_peerDownloadScheme == null) {
-      _peerDownloadScheme = instanceDataManagerConfig.getSegmentPeerDownloadScheme();
-    }
-    if (_peerDownloadScheme != null) {
-      _peerDownloadScheme = _peerDownloadScheme.toLowerCase();
-      Preconditions.checkState(
-          CommonConstants.HTTP_PROTOCOL.equals(_peerDownloadScheme) || CommonConstants.HTTPS_PROTOCOL.equals(
-              _peerDownloadScheme), "Unsupported peer download scheme: %s for table: %s", _peerDownloadScheme,
-          _tableNameWithType);
-    }
+    updatePeerDownloadScheme(tableConfig);
     _streamSegmentDownloadUntarRateLimitBytesPerSec =
         instanceDataManagerConfig.getStreamSegmentDownloadUntarRateLimit();
     _isStreamSegmentDownloadUntar = instanceDataManagerConfig.isStreamSegmentDownloadUntar();
@@ -419,12 +409,29 @@ public abstract class BaseTableDataManager implements TableDataManager {
     IndexLoadingConfig indexLoadingConfig = new IndexLoadingConfig(_instanceDataManagerConfig, tableConfig, schema);
     indexLoadingConfig.setTableDataDir(_tableDataDir);
     _cachedTableConfigAndSchema = Pair.of(tableConfig, schema);
+    updatePeerDownloadScheme(tableConfig);
     return indexLoadingConfig;
   }
 
   @Override
   public Pair<TableConfig, Schema> getCachedTableConfigAndSchema() {
     return _cachedTableConfigAndSchema;
+  }
+
+  private void updatePeerDownloadScheme(TableConfig tableConfig) {
+    String scheme = tableConfig.getValidationConfig().getPeerSegmentDownloadScheme();
+    if (scheme == null) {
+      scheme = _instanceDataManagerConfig.getSegmentPeerDownloadScheme();
+    }
+    if (scheme != null) {
+      scheme = scheme.toLowerCase();
+      if (!CommonConstants.HTTP_PROTOCOL.equals(scheme) && !CommonConstants.HTTPS_PROTOCOL.equals(scheme)) {
+        LOGGER.warn("Unsupported peer download scheme: {} for table: {}, disabling peer download", scheme,
+            _tableNameWithType);
+        scheme = null;
+      }
+    }
+    _peerDownloadScheme = scheme;
   }
 
   @Override

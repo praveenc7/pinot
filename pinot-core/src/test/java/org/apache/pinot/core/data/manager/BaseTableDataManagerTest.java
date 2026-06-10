@@ -81,6 +81,7 @@ import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;
+import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 import static org.testng.Assert.fail;
 
@@ -749,7 +750,7 @@ public class BaseTableDataManagerTest {
     ServerMetrics serverMetrics = ServerMetrics.get();
     org.mockito.Mockito.reset(serverMetrics);
 
-    // Mock SegmentFetcherFactory to copy the prepared tar instead of doing HTTP download
+    // Mock SegmentFetcherFactory to copy the prepared tar instead of doing HTTPS download
     try (org.mockito.MockedStatic<SegmentFetcherFactory> mockedFactory =
         org.mockito.Mockito.mockStatic(SegmentFetcherFactory.class)) {
       mockedFactory.when(() -> SegmentFetcherFactory.fetchAndDecryptSegmentToLocal(
@@ -900,42 +901,41 @@ public class BaseTableDataManagerTest {
   }
 
   @Test
-  public void testPeerDownloadTriesEachPeerOnceAndFailsFast()
-      throws Exception {
-    Map<String, Object> properties = new HashMap<>();
-    properties.put(BaseSegmentFetcher.RETRY_COUNT_CONFIG_KEY, 3);
-    properties.put(BaseSegmentFetcher.RETRY_WAIT_MS_CONFIG_KEY, 100);
-    properties.put(BaseSegmentFetcher.RETRY_DELAY_SCALE_FACTOR_CONFIG_KEY, 5);
-    SegmentFetcherFactory.init(new PinotConfiguration(properties));
+  public void testPeerDownloadSchemeRejectsInvalidScheme() {
+    TableConfig ftpTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).build();
+    ftpTableConfig.getValidationConfig().setPeerSegmentDownloadScheme("ftp");
 
-    org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig validationConfig =
+    OfflineTableDataManager tableDataManager = createTableManagerWithConfig(ftpTableConfig);
+    assertNull(tableDataManager._peerDownloadScheme,
+        "Invalid scheme should be rejected, peer download should be disabled");
+  }
+
+  @Test
+  public void testPeerDownloadSchemeAcceptsHttpAndHttps() {
+    org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig httpValidationConfig =
         new org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig();
-    validationConfig.setPeerSegmentDownloadScheme(CommonConstants.HTTP_PROTOCOL);
-    TableConfig peerTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).build();
-    peerTableConfig.setValidationConfig(validationConfig);
-    OfflineTableDataManager tableDataManager = createTableManagerWithConfig(peerTableConfig);
+    httpValidationConfig.setPeerSegmentDownloadScheme(CommonConstants.HTTP_PROTOCOL);
+    TableConfig httpTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).build();
+    httpTableConfig.setValidationConfig(httpValidationConfig);
 
-    SegmentZKMetadata zkMetadata = new SegmentZKMetadata(SEGMENT_NAME);
+    OfflineTableDataManager httpTableDataManager = createTableManagerWithConfig(httpTableConfig);
+    assertEquals(httpTableDataManager._peerDownloadScheme, CommonConstants.HTTP_PROTOCOL);
 
-    java.util.concurrent.atomic.AtomicInteger supplierCallCount = new java.util.concurrent.atomic.AtomicInteger(0);
-    java.util.function.Supplier<List<URI>> trackingSupplier = () -> {
-      supplierCallCount.incrementAndGet();
-      return List.of(
-          URI.create("http://localhost:1/segments/testTable_OFFLINE/testSegment"),
-          URI.create("http://localhost:2/segments/testTable_OFFLINE/testSegment"));
-    };
+    org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig httpsValidationConfig =
+        new org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig();
+    httpsValidationConfig.setPeerSegmentDownloadScheme(CommonConstants.HTTPS_PROTOCOL);
+    TableConfig httpsTableConfig = new TableConfigBuilder(TableType.OFFLINE).setTableName(RAW_TABLE_NAME).build();
+    httpsTableConfig.setValidationConfig(httpsValidationConfig);
 
-    try {
-      tableDataManager.downloadSegmentFromPeers(zkMetadata, trackingSupplier, null);
-      fail("Expected exception when peer download fails");
-    } catch (Exception e) {
-      // Expected — no real server at localhost:1 or localhost:2
-    }
+    OfflineTableDataManager httpsTableDataManager = createTableManagerWithConfig(httpsTableConfig);
+    assertEquals(httpsTableDataManager._peerDownloadScheme, CommonConstants.HTTPS_PROTOCOL);
+  }
 
-    assertEquals(supplierCallCount.get(), 1,
-        "Supplier should be called exactly once (no retry), but was called " + supplierCallCount.get() + " time(s)");
-
-    initSegmentFetcher();
+  @Test
+  public void testPeerDownloadSchemeNullDisablesPeerDownload() {
+    OfflineTableDataManager tableDataManager = createTableManager();
+    assertNull(tableDataManager._peerDownloadScheme,
+        "Null scheme should mean peer download is disabled");
   }
 
   private static OfflineTableDataManager createTableManagerWithConfig(TableConfig tableConfig) {

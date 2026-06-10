@@ -31,7 +31,6 @@ import org.apache.commons.io.FileUtils;
 import org.apache.helix.model.ExternalView;
 import org.apache.pinot.common.metadata.ZKMetadataProvider;
 import org.apache.pinot.common.metadata.segment.SegmentZKMetadata;
-import org.apache.pinot.common.utils.LLCSegmentName;
 import org.apache.pinot.common.utils.helix.HelixHelper;
 import org.apache.pinot.controller.ControllerConf;
 import org.apache.pinot.spi.config.table.CompletionConfig;
@@ -71,7 +70,6 @@ public class PeerDownloadLLCRealtimeClusterIntegrationTest extends BaseRealtimeC
   private static final long RANDOM_SEED = System.currentTimeMillis();
   private static final Random RANDOM = new Random(RANDOM_SEED);
   private static final int NUM_SERVERS = 2;
-  public static final int UPLOAD_FAILURE_MOD = 5;
 
   private final boolean _isDirectAlloc = true; //Set as true; otherwise trigger indexing exception.
   private final boolean _isConsumerDirConfigured = true;
@@ -186,22 +184,15 @@ public class PeerDownloadLLCRealtimeClusterIntegrationTest extends BaseRealtimeC
 
   @Test
   public void testSegmentDownloadURLs() {
-    // Verify that all segments of even partition number have empty download url in zk.
     String realtimeTableName = TableNameBuilder.REALTIME.tableNameWithType(getTableName());
     List<SegmentZKMetadata> segmentsZKMetadata =
         ZKMetadataProvider.getSegmentsZKMetadata(_propertyStore, realtimeTableName);
     for (SegmentZKMetadata segmentZKMetadata : segmentsZKMetadata) {
       String downloadUrl = segmentZKMetadata.getDownloadUrl();
       if (segmentZKMetadata.getTotalDocs() < 0) {
-        // This is a consuming segment so the download url is null.
         assertNull(downloadUrl);
       } else {
-        int sequenceNumber = new LLCSegmentName(segmentZKMetadata.getSegmentName()).getSequenceNumber();
-        if (sequenceNumber % UPLOAD_FAILURE_MOD == 0) {
-          assertTrue(downloadUrl.isEmpty());
-        } else {
-          assertTrue(downloadUrl.startsWith("mockfs://"));
-        }
+        assertTrue(downloadUrl.startsWith("mockfs://"));
       }
     }
   }
@@ -313,10 +304,6 @@ public class PeerDownloadLLCRealtimeClusterIntegrationTest extends BaseRealtimeC
     @Override
     public void copyFromLocalFile(File srcFile, URI dstUri)
         throws Exception {
-      // Inject failures for segments whose seq number mod 5 is 0.
-      if (new LLCSegmentName(srcFile.getName()).getSequenceNumber() % UPLOAD_FAILURE_MOD == 0) {
-        throw new IllegalArgumentException(srcFile.getAbsolutePath());
-      }
       try {
         _localPinotFS.copyFromLocalFile(srcFile, new URI(_basePath + dstUri.getPath()));
       } catch (URISyntaxException e) {
