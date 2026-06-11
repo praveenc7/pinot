@@ -52,9 +52,8 @@ public class PinotReflectionUtils {
       Class<? extends Annotation> annotation) {
     try {
       synchronized (REFLECTION_LOCK) {
-        // we use deprecated method include here to avoid the compatibility issue with reflections 0.9.11 -> 0.10.2
         return new Reflections(new ConfigurationBuilder().setUrls(ClasspathHelper.forPackage(packageName))
-            .filterInputsBy(new FilterBuilder().include(regexPattern))).getTypesAnnotatedWith(annotation);
+            .filterInputsBy(new FilterBuilder().includePattern(regexPattern))).getTypesAnnotatedWith(annotation);
       }
     } catch (Throwable t) {
       // Log an error then re-throw it because this method is usually called in a static block, where exception might
@@ -73,9 +72,8 @@ public class PinotReflectionUtils {
         for (String packageName : packages) {
           urls.addAll(ClasspathHelper.forPackage(packageName));
         }
-        // we use deprecated method include here to avoid the compatibility issue with reflections 0.9.11 -> 0.10.2
         return new Reflections(new ConfigurationBuilder().setUrls(urls)
-            .filterInputsBy(new FilterBuilder().include(regexPattern))).getTypesAnnotatedWith(annotation);
+            .filterInputsBy(new FilterBuilder().includePattern(regexPattern))).getTypesAnnotatedWith(annotation);
       }
     } catch (Throwable t) {
       // Log an error then re-throw it because this method is usually called in a static block, where exception might
@@ -94,9 +92,8 @@ public class PinotReflectionUtils {
       Class<? extends Annotation> annotation) {
     try {
       synchronized (REFLECTION_LOCK) {
-        // we use deprecated method include here to avoid the compatibility issue with reflections 0.9.11 -> 0.10.2
         return new Reflections(new ConfigurationBuilder().setUrls(ClasspathHelper.forPackage(packageName))
-            .filterInputsBy(new FilterBuilder().include(regexPattern))
+            .filterInputsBy(new FilterBuilder().includePattern(regexPattern))
             .setScanners(new MethodAnnotationsScanner())).getMethodsAnnotatedWith(annotation);
       }
     } catch (Throwable t) {
