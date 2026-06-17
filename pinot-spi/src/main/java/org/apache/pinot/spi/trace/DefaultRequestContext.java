@@ -38,6 +38,7 @@ public class DefaultRequestContext implements RequestScope {
   private int _errorCode = 0;
   private String _query;
   private QueryFingerprint _queryFingerprint;
+  private boolean _enableQueryFingerprinting;
   private List<String> _tableNames = new ArrayList<>();
   private long _processingTimeMillis = -1;
   private long _totalDocs;
@@ -196,6 +197,16 @@ public class DefaultRequestContext implements RequestScope {
   @Override
   public void setQueryFingerprint(QueryFingerprint queryFingerprint) {
     _queryFingerprint = queryFingerprint;
+  }
+
+  @Override
+  public void setEnableQueryFingerprinting(boolean enableQueryFingerprinting) {
+    _enableQueryFingerprinting = enableQueryFingerprinting;
+  }
+
+  @Override
+  public boolean isEnableQueryFingerprinting() {
+    return _enableQueryFingerprinting;
   }
 
   @Override

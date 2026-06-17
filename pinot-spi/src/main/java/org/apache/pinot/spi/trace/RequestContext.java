@@ -102,6 +102,19 @@ public interface RequestContext {
 
   QueryFingerprint getQueryFingerprint();
 
+  /**
+   * Per-request override to enable query fingerprinting regardless of the broker-wide
+   * {@code pinot.broker.enableQueryFingerprinting} config. Carried out-of-band on the request
+   * context (rather than as a query option) so it never appears in the query or is propagated to
+   * servers. Used for table-level (e.g. feature-flag-driven) rollout of fingerprinting.
+   */
+  default void setEnableQueryFingerprinting(boolean enableQueryFingerprinting) {
+  }
+
+  default boolean isEnableQueryFingerprinting() {
+    return false;
+  }
+
   String getTableName();
 
   List<String> getTableNames();

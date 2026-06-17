@@ -329,7 +329,10 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
     _queryLogger.log(requestId, query);
 
     String queryHash = CommonConstants.Broker.DEFAULT_QUERY_HASH;
-    if (_enableQueryFingerprinting) {
+    // Fingerprint when enabled broker-wide, or when enabled per-request via the request context
+    // (e.g. set for table-level LiX rollout). The latter is carried out-of-band so it never appears
+    // in the query.
+    if (_enableQueryFingerprinting || requestContext.isEnableQueryFingerprinting()) {
       try {
         QueryFingerprint queryFingerprint = QueryFingerprintUtils.generateFingerprint(sqlNodeAndOptions);
         if (queryFingerprint != null) {
@@ -918,14 +921,14 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
       }
     }
 
-    // Add queryHash to pinotQuery so it gets passed to servers for observability
-    if (_enableQueryFingerprinting) {
-      QueryFingerprint queryFingerprint = requestContext.getQueryFingerprint();
-      if (queryFingerprint != null) {
-        pinotQuery.putToQueryOptions(
-              CommonConstants.Broker.Request.QueryOptionKey.QUERY_HASH,
-              queryFingerprint.getQueryHash());
-      }
+    // Add queryHash to pinotQuery so it gets passed to servers for observability. Gate on the
+    // fingerprint actually having been generated above (broker-wide or per-query) rather than on the
+    // broker-wide flag alone, so per-query fingerprinting also propagates the hash.
+    QueryFingerprint queryFingerprint = requestContext.getQueryFingerprint();
+    if (queryFingerprint != null) {
+      pinotQuery.putToQueryOptions(
+            CommonConstants.Broker.Request.QueryOptionKey.QUERY_HASH,
+            queryFingerprint.getQueryHash());
     }
 
     if (isDefaultQueryResponseLimitEnabled() && !pinotQuery.isSetLimit()) {
