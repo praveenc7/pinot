@@ -54,6 +54,7 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
  * - simple: basic SELECT with 2 WHERE filters (~2 literals to replace)
  * - average: GROUP BY with aggregations, HAVING, ORDER BY, LIMIT (~6 literals)
  * - heavy_filter: IN clause with 1000 values (tests IN-squashing, 1 replacement)
+ * - huge_in_list: IN clause with 10000 values (isolates IN-squash; cost should stay flat vs list size)
  * - many_filters: 200 individual AND filters (no squashing, 200 replacements)
  * - wide_aggregation: 168 SUM columns with minimal literals (large AST, few mutations)
  */
@@ -65,14 +66,19 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 @State(Scope.Benchmark)
 public class BenchmarkQueryFingerprint {
 
-  @Param({"simple", "average", "heavy_filter", "many_filters", "wide_aggregation"})
+  @Param({"simple", "average", "heavy_filter", "huge_in_list", "many_filters", "wide_aggregation"})
   private String _queryType;
 
   private String _sql;
+  // Pre-parsed once in setup so fingerprintOnly() can measure the fingerprint path in isolation
+  // (visitor + serialize + hash), excluding Calcite parse cost. Safe to reuse across invocations
+  // because the fingerprint visitor is non-mutating and never modifies this node.
+  private SqlNodeAndOptions _parsed;
 
   @Setup
   public void setup() {
     _sql = buildQuery(_queryType);
+    _parsed = CalciteSqlParser.compileToSqlNodeAndOptions(_sql);
   }
 
   /**
@@ -92,6 +98,17 @@ public class BenchmarkQueryFingerprint {
       throws Exception {
     SqlNodeAndOptions parsed = CalciteSqlParser.compileToSqlNodeAndOptions(_sql);
     return QueryFingerprintUtils.generateFingerprint(parsed);
+  }
+
+  /**
+   * Fingerprint only: visitor + serialize + FarmHash over a pre-parsed SqlNode, excluding parse cost.
+   * This isolates the work the fingerprint visitor itself does, which the end-to-end benchmark cannot
+   * resolve because Calcite parse cost dominates and swamps it (notably for large IN lists).
+   */
+  @Benchmark
+  public QueryFingerprint fingerprintOnly()
+      throws Exception {
+    return QueryFingerprintUtils.generateFingerprint(_parsed);
   }
 
   private static String buildQuery(String queryType) {
@@ -116,6 +133,15 @@ public class BenchmarkQueryFingerprint {
         return "SELECT col1, col2, col3 FROM myTable "
             + "WHERE col4 IN (" + inValues + ") "
             + "AND col5 > 100 AND col6 = 'active' AND col7 BETWEEN 10 AND 1000";
+
+      case "huge_in_list":
+        // Very large IN list with 10000 values: isolates the IN-squash path. The visitor collapses
+        // the whole list to a single ? without iterating its elements, so cost should stay flat
+        // relative to list size (contrast with heavy_filter's 1000 values).
+        String hugeInValues = IntStream.rangeClosed(1, 10000)
+            .mapToObj(Integer::toString)
+            .collect(Collectors.joining(", "));
+        return "SELECT col1 FROM myTable WHERE col2 IN (" + hugeInValues + ")";
 
       case "many_filters":
         // 200 individual AND filters: each literal must be replaced one-by-one (no squashing)

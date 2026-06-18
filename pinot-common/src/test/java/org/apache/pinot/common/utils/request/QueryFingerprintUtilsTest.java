@@ -312,9 +312,9 @@ public class QueryFingerprintUtilsTest {
             + "GROUP BY col2 ORDER BY sum(col1) DESC LIMIT 0,400"},
         // NOT IN — exercises the NOT_IN SqlKind branch
         {"SELECT col1 FROM table1 WHERE col2 NOT IN (1, 2, 3) AND col3 = 'x'"},
-        // Long IN list — stress-tests the all-data-literals squash path
+        // Long IN list — stress-tests the value-list squash path
         {"SELECT col1 FROM table1 WHERE col2 IN (1,2,3,4,5,6,7,8,9,10,11,12,13,14,15)"},
-        // IN with mixed expressions / function calls — visitIn Case 2 (visit each value individually)
+        // IN with mixed expressions / function calls — value list is squashed wholesale to a single ?
         {"SELECT col1 FROM table1 WHERE col2 IN (UPPER('a'), LOWER('b'), 'c')"},
         // ----- ranges, predicates, NULL preservation -----
         // BETWEEN with ORDER BY

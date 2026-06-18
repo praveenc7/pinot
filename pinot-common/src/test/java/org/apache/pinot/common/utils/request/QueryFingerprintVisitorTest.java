@@ -124,9 +124,9 @@ public class QueryFingerprintVisitorTest {
   @Test
   public void testInClauseWithNullValue() throws Exception {
     String sql = "SELECT col1 FROM table1 WHERE col2 IN (100, 200, NULL)";
-    String expected = "SELECT `col1` FROM `table1` WHERE `col2` IN (?, ?, NULL)";
+    String expected = "SELECT `col1` FROM `table1` WHERE `col2` IN (?)";
     String actual = generateFingerprint(sql);
-    assertEquals(actual, expected, "IN clause with NULL should preserve NULL and replace other literals");
+    assertEquals(actual, expected, "IN clause value list (including NULL) should be squashed to a single ?");
   }
 
   @Test
@@ -139,29 +139,29 @@ public class QueryFingerprintVisitorTest {
 
   @Test
   public void testInClauseWithExpressions() throws Exception {
-    // Expressions like col1 + 1 should be visited normally
+    // An explicit value list is squashed wholesale, even when it contains expressions.
     String sql = "SELECT col1 FROM table1 WHERE col2 IN (col3 + 1, 2)";
-    String expected = "SELECT `col1` FROM `table1` WHERE `col2` IN (`col3` + ?, ?)";
+    String expected = "SELECT `col1` FROM `table1` WHERE `col2` IN (?)";
     String actual = generateFingerprint(sql);
-    assertEquals(actual, expected, "IN clause with expressions should visit each value normally");
+    assertEquals(actual, expected, "IN clause value list with expressions should be squashed to a single ?");
   }
 
   @Test
   public void testInClauseWithFunctionCalls() throws Exception {
-    // Function calls should be visited normally
+    // An explicit value list is squashed wholesale, even when it contains function calls.
     String sql = "SELECT col1 FROM table1 WHERE col2 IN (UPPER('hello'), LOWER('WORLD'))";
-    String expected = "SELECT `col1` FROM `table1` WHERE `col2` IN (UPPER(?), LOWER(?))";
+    String expected = "SELECT `col1` FROM `table1` WHERE `col2` IN (?)";
     String actual = generateFingerprint(sql);
-    assertEquals(actual, expected, "IN clause with function calls should visit each function normally");
+    assertEquals(actual, expected, "IN clause value list with function calls should be squashed to a single ?");
   }
 
   @Test
   public void testInClauseWithMixedExpressionsAndLiterals() throws Exception {
-    // Mix of expressions and literals should visit each one
+    // An explicit value list is squashed wholesale, even when it mixes literals and expressions.
     String sql = "SELECT col1 FROM table1 WHERE col2 IN (10, col3 * 2, 20)";
-    String expected = "SELECT `col1` FROM `table1` WHERE `col2` IN (?, `col3` * ?, ?)";
+    String expected = "SELECT `col1` FROM `table1` WHERE `col2` IN (?)";
     String actual = generateFingerprint(sql);
-    assertEquals(actual, expected, "IN clause with mixed expressions and literals should visit each value");
+    assertEquals(actual, expected, "IN clause value list mixing literals and expressions should be squashed to ?");
   }
 
   @Test

@@ -43,9 +43,11 @@ import org.apache.calcite.sql.util.SqlShuttle;
  * <p>
  * <ul>
  *   <li>All data literals are replaced with dynamic parameters (?)</li>
- *   <li>IN/NOT IN clauses with multiple constants are squashed to a single parameter.</li>
+ *   <li>IN/NOT IN clauses with an explicit value list are squashed to a single parameter, regardless of
+ *       what the list contains (literals, expressions, function calls, NULL). Subqueries are visited normally.</li>
  *   <li>EXPLAIN PLAN FOR is NOT preserved.</li>
- *   <li>Symbolic keywords (DISTINCT, ASC, DESC, etc.) and NULL literals are preserved.</li>
+ *   <li>Symbolic keywords (DISTINCT, ASC, DESC, etc.) and NULL literals are preserved, except that a NULL
+ *       inside an explicit IN/NOT IN value list is squashed along with the rest of the list (see above).</li>
  *   <li>Hints are preserved.</li>
  *   <li>Window functions: window specification (operand 1) are preserved.</li>
  * </ul>
@@ -74,21 +76,9 @@ public class QueryFingerprintVisitor extends SqlShuttle {
   private static final int SQLJOIN_CONDITION_TYPE_INDEX = 4;
   private static final int SQLJOIN_CONDITION_INDEX = 5;
 
-  private final boolean _squashNullInList;
   private int _dynamicParamIndex;
 
   public QueryFingerprintVisitor() {
-    this(false);
-  }
-
-  /**
-   * Creates a QueryFingerprintVisitor with configurable NULL handling in IN-lists.
-   *
-   * @param squashNullInList if true, NULL values in IN/NOT IN lists are treated as data literals
-   *                         and squashed together with other values into a single placeholder.
-   */
-  public QueryFingerprintVisitor(boolean squashNullInList) {
-    _squashNullInList = squashNullInList;
     _dynamicParamIndex = 0;
   }
 
@@ -255,24 +245,23 @@ public class QueryFingerprintVisitor extends SqlShuttle {
   }
 
   /**
-   * Visit IN/NOT IN clause and normalize data literals.
+   * Visit IN/NOT IN clause.
    * <p>
-   * Three cases:
+   * Two cases:
    * <ul>
-   *   <li><b>Case 1:</b> All values are data literals → replace entire list with a single ?
-   *       <br>Example: IN (1, 2, 3) → IN (?)</li>
-   *   <li><b>Case 2:</b> Contains any of the following → visit each value individually and replace only data literals:
+   *   <li><b>Explicit value list</b> (second operand is a SqlNodeList) → squash the entire list to a single ?
+   *       without inspecting its elements. This holds regardless of what the list contains:
    *       <ul>
-   *         <li>Expressions: IN (col1 + 1, 2) → IN (col1 + ?, ?)</li>
-   *         <li>Function calls: IN (UPPER('a'), LOWER('b')) → IN (UPPER(?), LOWER(?))</li>
-   *         <li>Subquery: IN (SELECT ...) → visits the subquery normally</li>
+   *         <li>Literals: IN (1, 2, 3) → IN (?)</li>
+   *         <li>Expressions: IN (col1 + 1, 2) → IN (?)</li>
+   *         <li>Function calls: IN (UPPER('a'), LOWER('b')) → IN (?)</li>
+   *         <li>NULL: IN (1, NULL, 3) → IN (?)</li>
    *       </ul>
+   *       Skipping the per-element traversal is the point of this path: large machine-generated IN lists
+   *       (thousands of ids) collapse to a single parameter in O(1) instead of O(list size).
    *   </li>
-   *   <li><b>Case 3:</b> Contains NULL </li>
-   *       <ul>
-   *         <li>preserve NULL if _squashNullInList is false: IN (1, NULL, 3) → IN (1, NULL, 3)</li>
-   *         <li>squash NULL if _squashNullInList is true: IN (1, NULL, 3) → IN (?)</li>
-   *       </ul>
+   *   <li><b>Subquery</b> (second operand is a SqlSelect) → visit the subquery normally.
+   *       <br>Example: IN (SELECT ...) → IN (SELECT ... with literals replaced)</li>
    * </ul>
    * </p>
    */
@@ -287,38 +276,18 @@ public class QueryFingerprintVisitor extends SqlShuttle {
     SqlNode leftOperand = operands.get(0).accept(this);
 
     // Second operand can be:
-    // - SqlNodeList: contains literal values, expressions, or function calls (e.g., IN (1, 2, 3))
-    // - SqlSelect: a subquery (e.g., IN (SELECT ...))
+    // - SqlNodeList: an explicit value list, e.g. IN (1, 2, 3), IN (col + 1, UPPER('a'), NULL)
+    // - SqlSelect: a subquery, e.g. IN (SELECT ...)
     if (operands.size() > 1 && operands.get(1) instanceof SqlNodeList) {
       SqlNodeList valueList = (SqlNodeList) operands.get(1);
 
-      // Check if all values in the list are data literals (not preserved literals)
-      boolean allDataLiterals = true;
-      for (SqlNode node : valueList.getList()) {
-        if (!(node instanceof SqlLiteral)) {
-          allDataLiterals = false;
-          break;
-        }
-        SqlLiteral literal = (SqlLiteral) node;
-        boolean isNullAndSquashable = _squashNullInList && literal.getTypeName() == SqlTypeName.NULL;
-        if (shouldPreserveLiteral(literal) && !isNullAndSquashable) {
-          allDataLiterals = false;
-          break;
-        }
-      }
-
+      // Squash the entire value list to a single dynamic parameter without iterating its elements.
       SqlNodeList newValueList;
-      if (allDataLiterals && valueList.size() > 0) {
-        // Replace the entire list with a single dynamic parameter
+      if (valueList.size() > 0) {
         SqlDynamicParam singleParam = new SqlDynamicParam(_dynamicParamIndex++, inCall.getParserPosition());
         newValueList = new SqlNodeList(List.of(singleParam), valueList.getParserPosition());
       } else {
-        // Visit each value in the list normally
-        List<SqlNode> newValues = new ArrayList<>();
-        for (SqlNode value : valueList.getList()) {
-          newValues.add(value.accept(this));
-        }
-        newValueList = new SqlNodeList(newValues, valueList.getParserPosition());
+        newValueList = valueList;
       }
 
       // Create a new IN/NOT IN call with visited operands
@@ -328,10 +297,12 @@ public class QueryFingerprintVisitor extends SqlShuttle {
           newValueList);
     }
 
-    // Fallback: for subqueries or other non-SqlNodeList cases, visit all operands normally
-    List<SqlNode> newOperands = new ArrayList<>();
-    for (SqlNode operand : operands) {
-      newOperands.add(operand.accept(this));
+    // Fallback: for subqueries or other non-SqlNodeList cases, visit the remaining operands normally.
+    // Reuse the already-visited leftOperand (operand 0) instead of visiting it a second time.
+    List<SqlNode> newOperands = new ArrayList<>(operands.size());
+    newOperands.add(leftOperand);
+    for (int i = 1; i < operands.size(); i++) {
+      newOperands.add(operands.get(i).accept(this));
     }
     return inCall.getOperator().createCall(
         inCall.getParserPosition(),
