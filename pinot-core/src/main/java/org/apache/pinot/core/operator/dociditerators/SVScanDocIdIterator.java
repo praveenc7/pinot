@@ -177,7 +177,9 @@ public final class SVScanDocIdIterator implements ScanBasedDocIdIterator {
         case BIG_DECIMAL:
           return new BigDecimalMatcher();
         case STRING:
-          return new StringMatcher();
+          // Raw STRING + a byte-capable predicate (EQ/IN) -> match on the value's UTF-8 bytes via BytesMatcher (the
+          // same getBytes + applySV(byte[]) path a BYTES column uses); otherwise materialize the String.
+          return _predicateEvaluator.supportsApplySVBytes() ? new BytesMatcher() : new StringMatcher();
         case BYTES:
           return new BytesMatcher();
         default:
@@ -307,10 +309,17 @@ public final class SVScanDocIdIterator implements ScanBasedDocIdIterator {
     }
   }
 
+  // Used for two stored types (selected in getValueMatcher), both via getBytes + applySV(byte[]):
+  //   1) BYTES columns.
+  //   2) raw (non-dictionary) STRING columns when the predicate supports the byte path (EQ/IN today) -- a STRING
+  //      value's stored bytes are its UTF-8 encoding, so matching on them avoids per-row String materialization.
   private class BytesMatcher implements ValueMatcher {
 
     @Override
     public boolean doesValueMatch(int docId) {
+      // TODO: getBytes still allocates a byte[] per row (the value is copied out of the decompressed chunk). A
+      //  zero-copy reader accessor that returns a chunk-backed slice would remove this residual allocation, which is
+      //  the only per-row allocation left on the byte path.
       return _predicateEvaluator.applySV(_reader.getBytes(docId, _readerContext));
     }
   }

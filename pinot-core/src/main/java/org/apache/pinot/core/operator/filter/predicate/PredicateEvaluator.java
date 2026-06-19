@@ -279,4 +279,14 @@ public interface PredicateEvaluator {
    * @return Whether the entry matches the predicate
    */
   boolean applyMV(byte[][] values, int length);
+
+  /**
+   * Lets the SV scan pick the matcher for a raw (non-dictionary) STRING column: when {@code true}, it matches on the
+   * value's UTF-8 bytes via {@link #applySV(byte[])} (skipping per-row Java String materialization); when {@code false}
+   * it falls back to {@link #applySV(String)}. Only EQ/IN implement the byte path and override this to {@code true};
+   * predicates that implement {@code applySV(byte[])} as unsupported (RANGE, REGEXP, ...) must leave it {@code false}.
+   */
+  default boolean supportsApplySVBytes() {
+    return false;
+  }
 }

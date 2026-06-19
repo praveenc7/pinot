@@ -19,6 +19,7 @@
 package org.apache.pinot.core.operator.filter.predicate;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import org.apache.pinot.common.request.context.predicate.EqPredicate;
 import org.apache.pinot.common.request.context.predicate.Predicate;
@@ -387,10 +388,12 @@ public class EqualsPredicateEvaluatorFactory {
 
   private static final class StringRawValueBasedEqPredicateEvaluator extends EqRawPredicateEvaluator {
     final String _matchingValue;
+    final byte[] _matchingValueBytes;
 
     StringRawValueBasedEqPredicateEvaluator(EqPredicate eqPredicate, String matchingValue) {
       super(eqPredicate);
       _matchingValue = matchingValue;
+      _matchingValueBytes = matchingValue.getBytes(StandardCharsets.UTF_8);
     }
 
     @Override
@@ -411,6 +414,17 @@ public class EqualsPredicateEvaluatorFactory {
     @Override
     public boolean applySV(String value) {
       return _matchingValue.equals(value);
+    }
+
+    @Override
+    public boolean applySV(byte[] value) {
+      // Raw STRING column values are stored as UTF-8 bytes, so byte equality matches String equality.
+      return Arrays.equals(_matchingValueBytes, value);
+    }
+
+    @Override
+    public boolean supportsApplySVBytes() {
+      return true;
     }
   }
 

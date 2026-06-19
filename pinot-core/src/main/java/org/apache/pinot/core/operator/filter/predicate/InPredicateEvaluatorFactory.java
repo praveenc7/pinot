@@ -28,6 +28,7 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
@@ -417,10 +418,21 @@ public class InPredicateEvaluatorFactory {
 
   private static final class StringRawValueBasedInPredicateEvaluator extends InRawPredicateEvaluator {
     final Set<String> _matchingValues;
+    // Byte-path state (used for raw STRING column scans via applySV(byte[])): the matching values as UTF-8 bytes,
+    // plus the set of their distinct lengths so non-matching rows can be rejected on length without hashing.
+    final Set<ByteArray> _matchingValueBytes;
+    final IntSet _matchingValueLengths;
 
     StringRawValueBasedInPredicateEvaluator(InPredicate inPredicate, Set<String> matchingValues) {
       super(inPredicate);
       _matchingValues = matchingValues;
+      _matchingValueBytes = new ObjectOpenHashSet<>(HashUtil.getMinHashSetSize(matchingValues.size()));
+      _matchingValueLengths = new IntOpenHashSet();
+      for (String value : matchingValues) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        _matchingValueBytes.add(new ByteArray(bytes));
+        _matchingValueLengths.add(bytes.length);
+      }
     }
 
     @Override
@@ -436,6 +448,21 @@ public class InPredicateEvaluatorFactory {
     @Override
     public boolean applySV(String value) {
       return _matchingValues.contains(value);
+    }
+
+    @Override
+    public boolean applySV(byte[] value) {
+      // Raw STRING values are UTF-8 bytes. Reject by length first (cheap, no hashing), then do the byte-set
+      // membership check only for length-matching candidates.
+      if (!_matchingValueLengths.contains(value.length)) {
+        return false;
+      }
+      return _matchingValueBytes.contains(new ByteArray(value));
+    }
+
+    @Override
+    public boolean supportsApplySVBytes() {
+      return true;
     }
 
     @Override

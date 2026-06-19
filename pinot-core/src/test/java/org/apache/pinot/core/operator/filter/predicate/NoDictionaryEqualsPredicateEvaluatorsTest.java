@@ -19,6 +19,7 @@
 package org.apache.pinot.core.operator.filter.predicate;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.Random;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.RandomStringUtils;
@@ -322,6 +323,31 @@ public class NoDictionaryEqualsPredicateEvaluatorsTest {
           ArrayUtils.contains(randomBytesArray, stringValue));
       Assert.assertEquals(neqPredicateEvaluator.applyMV(randomBytesArray, NUM_MULTI_VALUES),
           !ArrayUtils.contains(randomBytesArray, stringValue));
+    }
+  }
+
+  /**
+   * The raw STRING EQ evaluator's byte path (applySV(byte[]), used by raw STRING column scans) must agree with the
+   * String path, including UTF-8 multibyte values, the empty string, and same-length non-matches.
+   */
+  @Test
+  public void testStringEqByteApplyMatchesStringApply() {
+    for (String matchingValue : new String[]{"urn:li:member:12345", "héllo-wörld", "日本語テスト", "", "ABCDEFG"}) {
+      EqPredicate eqPredicate = new EqPredicate(COLUMN_EXPRESSION, matchingValue);
+      PredicateEvaluator eval =
+          EqualsPredicateEvaluatorFactory.newRawValueBasedEvaluator(eqPredicate, FieldSpec.DataType.STRING);
+      Assert.assertTrue(eval.supportsApplySVBytes());
+
+      Assert.assertTrue(eval.applySV(matchingValue));
+      Assert.assertTrue(eval.applySV(matchingValue.getBytes(StandardCharsets.UTF_8)));
+
+      // Fuzz: the byte path must agree with the String path for arbitrary values (incl. same-length misses).
+      for (int i = 0; i < 1000; i++) {
+        String value = RandomStringUtils.randomAlphanumeric(_random.nextInt(MAX_STRING_LENGTH) + 1);
+        boolean expected = matchingValue.equals(value);
+        Assert.assertEquals(eval.applySV(value), expected);
+        Assert.assertEquals(eval.applySV(value.getBytes(StandardCharsets.UTF_8)), expected);
+      }
     }
   }
 }

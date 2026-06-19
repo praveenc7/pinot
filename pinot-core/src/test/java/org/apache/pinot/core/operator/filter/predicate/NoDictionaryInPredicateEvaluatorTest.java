@@ -27,6 +27,7 @@ import it.unimi.dsi.fastutil.ints.IntSet;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -281,6 +282,47 @@ public class NoDictionaryInPredicateEvaluatorTest {
 
     Assert.assertTrue(inPredicateEvaluator.applyMV(multiValues, NUM_MULTI_VALUES));
     Assert.assertFalse(notInPredicateEvaluator.applyMV(multiValues, NUM_MULTI_VALUES));
+  }
+
+  /**
+   * The raw STRING IN evaluator's byte path (applySV(byte[]), used by raw STRING column scans) must agree with the
+   * String path for every input — including UTF-8 multibyte values, the empty string, and non-members that share a
+   * length with a member (which exercise the length gate).
+   */
+  @Test
+  public void testStringInByteApplyMatchesStringApply() {
+    List<String> members =
+        List.of("urn:li:member:12345", "urn:li:member:6789", "héllo-wörld", "日本語テスト", "", "ABCDEFG");
+    InPredicate inPredicate = new InPredicate(COLUMN_EXPRESSION, new ArrayList<>(members));
+    PredicateEvaluator eval =
+        InPredicateEvaluatorFactory.newRawValueBasedEvaluator(inPredicate, FieldSpec.DataType.STRING);
+    Assert.assertTrue(eval.supportsApplySVBytes());
+
+    for (String value : members) {
+      Assert.assertTrue(eval.applySV(value));
+      Assert.assertTrue(eval.applySV(value.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    // Non-members; both paths must reject. Several share a length with a member to exercise the length gate.
+    List<String> nonMembers = List.of(
+        "urn:li:member:99999",    // same length as a member, absent
+        "héllo-wörle",            // multibyte, one char off
+        "ABCDEFH",                // same length as "ABCDEFG"
+        "x",
+        "urn:li:company:12345");  // different length
+    for (String value : nonMembers) {
+      Assert.assertFalse(eval.applySV(value));
+      Assert.assertFalse(eval.applySV(value.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    // Fuzz: the byte path and String path must always agree with set membership.
+    Set<String> memberSet = new HashSet<>(members);
+    for (int i = 0; i < 1000; i++) {
+      String value = RandomStringUtils.randomAlphanumeric(_random.nextInt(MAX_STRING_LENGTH) + 1);
+      boolean expected = memberSet.contains(value);
+      Assert.assertEquals(eval.applySV(value), expected);
+      Assert.assertEquals(eval.applySV(value.getBytes(StandardCharsets.UTF_8)), expected);
+    }
   }
 
   @Test
