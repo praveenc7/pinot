@@ -18,7 +18,6 @@
  */
 package org.apache.pinot.minion.taskfactory;
 
-import com.google.common.collect.ImmutableMap;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -80,7 +79,8 @@ public class TaskFactoryRegistry {
     for (String taskType : taskExecutorFactoryRegistry.getAllTaskTypes()) {
       PinotTaskExecutorFactory taskExecutorFactory = taskExecutorFactoryRegistry.getTaskExecutorFactory(taskType);
       MinionEventObserverFactory eventObserverFactory = eventObserverFactoryRegistry.getEventObserverFactory(taskType);
-      Map<String, String> attributes = ImmutableMap.of(MetricAttributeConstants.TASK_TYPE, taskType);
+      Map<String, String> attributes =
+          MetricAttributeConstants.attributes(MetricAttributeConstants.TASK_TYPE, taskType);
 
       LOGGER.info("Registering {} with task executor factory: {}, event observer factory: {}", taskType,
           taskExecutorFactory.getClass().getSimpleName(), eventObserverFactory.getClass().getSimpleName());

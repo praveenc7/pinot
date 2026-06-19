@@ -18,7 +18,6 @@
  */
 package org.apache.pinot.core.accounting;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import it.unimi.dsi.fastutil.longs.LongLongMutablePair;
 import java.util.HashMap;
@@ -161,7 +160,7 @@ public class WorkloadResourceAggregator implements ResourceAggregator {
                 + budgetStats._cpuRemaining + ", Memory: " + budgetStats._memoryRemaining;
         for (QueryExecutionContext executionContext : entry.getValue()) {
           _metrics.addMeteredValue(workloadName, _workloadBudgetExceededMeter, 1,
-              ImmutableMap.of(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
+              MetricAttributeConstants.attributes(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
           _metrics.addMeteredGlobalValue(_workloadBudgetExceededMeter, 1);
           executionContext.terminate(QueryErrorCode.WORKLOAD_BUDGET_EXCEEDED, errorMessage);
         }

@@ -18,7 +18,6 @@
  */
 package org.apache.pinot.controller.helix.core.minion;
 
-import com.google.common.collect.ImmutableMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -82,7 +81,7 @@ public class TaskMetricsEmitter extends BasePeriodicTask {
         taskTypeLastUpdateTime.forEach((taskType, lastUpdateTimeMs) ->
             _controllerMetrics.setOrUpdateTableGauge(tableNameWithType, taskType,
                 ControllerGauge.TIME_MS_SINCE_LAST_MINION_TASK_METADATA_UPDATE,
-                ImmutableMap.of(MetricAttributeConstants.TASK_TYPE, taskType),
+                MetricAttributeConstants.attributes(MetricAttributeConstants.TASK_TYPE, taskType),
                 () -> System.currentTimeMillis() - lastUpdateTimeMs)));
 
     // The call to get task types can take time if there are a lot of tasks.
@@ -109,7 +108,8 @@ public class TaskMetricsEmitter extends BasePeriodicTask {
           });
         }
         // Emit metrics for taskType.
-        Map<String, String> attributes = ImmutableMap.of(MetricAttributeConstants.TASK_TYPE, taskType);
+        Map<String, String> attributes =
+            MetricAttributeConstants.attributes(MetricAttributeConstants.TASK_TYPE, taskType);
         _controllerMetrics.setValueOfGlobalGauge(ControllerGauge.NUM_MINION_TASKS_IN_PROGRESS, taskType,
             numRunningTasks, attributes);
         _controllerMetrics.setValueOfGlobalGauge(ControllerGauge.NUM_MINION_SUBTASKS_RUNNING, taskType,

@@ -18,7 +18,6 @@
  */
 package org.apache.pinot.core.query.scheduler;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListenableFutureTask;
 import java.util.concurrent.atomic.LongAccumulator;
@@ -83,13 +82,13 @@ public class WorkloadScheduler extends QueryScheduler {
         : QueryOptionsUtils.getWorkloadName(queryRequest.getQueryContext().getQueryOptions());
     String tableName = queryRequest.getTableNameWithType();
     _serverMetrics.addMeteredValue(workloadName, ServerMeter.WORKLOAD_QUERIES, 1L,
-        ImmutableMap.of(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
+        MetricAttributeConstants.attributes(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
     if (!_workloadBudgetManager.canAdmitQuery(workloadName)) {
       // TODO: Explore queuing the query instead of rejecting it.
       LOGGER.warn("Workload budget exceeded for workload: {} query: {} table: {}", workloadName,
           queryRequest.getRequestId(), tableName);
       _serverMetrics.addMeteredValue(workloadName, ServerMeter.WORKLOAD_BUDGET_EXCEEDED, 1L,
-          ImmutableMap.of(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
+          MetricAttributeConstants.attributes(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
       _serverMetrics.addMeteredTableValue(tableName, ServerMeter.WORKLOAD_BUDGET_EXCEEDED, 1L);
       _serverMetrics.addMeteredGlobalValue(ServerMeter.WORKLOAD_BUDGET_EXCEEDED, 1L);
       return immediateErrorResponse(queryRequest, QueryErrorCode.WORKLOAD_BUDGET_EXCEEDED);

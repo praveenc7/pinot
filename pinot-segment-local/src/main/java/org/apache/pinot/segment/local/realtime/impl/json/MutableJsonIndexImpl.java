@@ -20,7 +20,6 @@ package org.apache.pinot.segment.local.realtime.impl.json;
 
 import com.google.common.base.Preconditions;
 import com.google.common.base.Utf8;
-import com.google.common.collect.ImmutableMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
@@ -759,7 +758,7 @@ public class MutableJsonIndexImpl implements MutableJsonIndex {
     try {
       String tableName = SegmentUtils.getTableNameFromSegmentName(_segmentName);
       _serverMetrics.addMeteredTableValue(tableName, _columnName, ServerMeter.MUTABLE_JSON_INDEX_MEMORY_USAGE,
-          _bytesSize, ImmutableMap.of(MetricAttributeConstants.COLUMN_NAME, _columnName));
+          _bytesSize, MetricAttributeConstants.attributes(MetricAttributeConstants.COLUMN_NAME, _columnName));
     } catch (Exception e) {
       LOGGER.warn(
           "Caught exception while updating mutable json index memory usage for segment: {}, column: {}, value: {}",

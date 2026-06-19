@@ -18,7 +18,6 @@
  */
 package org.apache.pinot.core.query.logger;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.RateLimiter;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -178,7 +177,8 @@ public class ServerQueryLogger {
     long schedulerWaitMs = timerContext.getPhaseDurationMs(ServerQueryPhase.SCHEDULER_WAIT);
     long totalTimeMs = timerContext.getPhaseDurationMs(ServerQueryPhase.TOTAL_QUERY_TIME);
     _serverMetrics.addTimedValue(workloadName, ServerTimer.WORKLOAD_TOTAL_QUERY_TIME_MS, totalTimeMs,
-        TimeUnit.MILLISECONDS, ImmutableMap.of(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
+        TimeUnit.MILLISECONDS,
+        MetricAttributeConstants.attributes(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
     // Please keep the format as name=value comma-separated with no spaces
     // Please add new entries at the end
     if (_queryLogRateLimiter.tryAcquire() || forceLog(schedulerWaitMs, numDocsScanned, numSegmentsPrunedInvalid)) {

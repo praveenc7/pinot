@@ -20,7 +20,6 @@ package org.apache.pinot.controller.helix.core.rebalance;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableMap;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -73,7 +72,7 @@ public class RebalanceChecker extends ControllerPeriodicTask<Void> {
     LOGGER.info("Processing {} tables in task: {}", numTables, _taskName);
     int numTablesProcessed = retryRebalanceTables(new HashSet<>(tableNamesWithType));
     _controllerMetrics.setValueOfGlobalGauge(ControllerGauge.PERIODIC_TASK_NUM_TABLES_PROCESSED, _taskName,
-        numTablesProcessed, ImmutableMap.of(MetricAttributeConstants.TASK_NAME, _taskName));
+        numTablesProcessed, MetricAttributeConstants.attributes(MetricAttributeConstants.TASK_NAME, _taskName));
     LOGGER.info("Finish processing {}/{} tables in task: {}", numTablesProcessed, numTables, _taskName);
   }
 

@@ -18,7 +18,6 @@
  */
 package org.apache.pinot.controller.helix.core.periodictask;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -126,7 +125,7 @@ public abstract class ControllerPeriodicTask<C> extends BasePeriodicTask {
     postprocess(context);
     _controllerMetrics
         .setValueOfGlobalGauge(ControllerGauge.PERIODIC_TASK_NUM_TABLES_PROCESSED, _taskName, numTablesProcessed,
-            ImmutableMap.of(MetricAttributeConstants.TASK_NAME, _taskName)
+            MetricAttributeConstants.attributes(MetricAttributeConstants.TASK_NAME, _taskName)
         );
     LOGGER.info("Finish processing {}/{} tables in task: {}", numTablesProcessed, numTables, _taskName);
   }

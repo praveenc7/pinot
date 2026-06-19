@@ -18,7 +18,6 @@
  */
 package org.apache.pinot.common.utils.helix;
 
-import com.google.common.collect.ImmutableMap;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.Map;
@@ -302,7 +301,8 @@ public class IdealStateGroupCommit {
         }
       });
       if (controllerMetrics != null) {
-        Map<String, String> attributes = ImmutableMap.of(MetricAttributeConstants.RESOURCE_NAME, resourceName);
+        Map<String, String> attributes =
+            MetricAttributeConstants.attributes(MetricAttributeConstants.RESOURCE_NAME, resourceName);
         controllerMetrics.addMeteredValue(resourceName, ControllerMeter.IDEAL_STATE_UPDATE_RETRY, retries, attributes);
         controllerMetrics.addTimedValue(resourceName, ControllerTimer.IDEAL_STATE_UPDATE_TIME_MS,
             System.currentTimeMillis() - startTimeMs, TimeUnit.MILLISECONDS, attributes);
@@ -314,7 +314,7 @@ public class IdealStateGroupCommit {
       if (controllerMetrics != null) {
         controllerMetrics.addMeteredValue(
             resourceName, ControllerMeter.IDEAL_STATE_UPDATE_FAILURE, 1L,
-            ImmutableMap.of(MetricAttributeConstants.RESOURCE_NAME, resourceName)
+            MetricAttributeConstants.attributes(MetricAttributeConstants.RESOURCE_NAME, resourceName)
         );
       }
       throw new RuntimeException("Caught exception while updating ideal state for resource: " + resourceName, e);

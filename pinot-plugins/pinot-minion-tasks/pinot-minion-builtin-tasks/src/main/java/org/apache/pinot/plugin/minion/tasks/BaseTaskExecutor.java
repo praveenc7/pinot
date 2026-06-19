@@ -19,7 +19,6 @@
 package org.apache.pinot.plugin.minion.tasks;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableMap;
 import java.io.File;
 import java.net.URI;
 import java.util.Collections;
@@ -111,7 +110,7 @@ public abstract class BaseTaskExecutor implements PinotTaskExecutor {
     _minionMetrics.addMeteredGlobalValue(meter, unitCount);
     _minionMetrics.addMeteredTableValue(tableName, meter, unitCount);
     _minionMetrics.addMeteredTableValue(tableName, taskType, meter, unitCount,
-        ImmutableMap.of(MetricAttributeConstants.TASK_TYPE, taskType));
+        MetricAttributeConstants.attributes(MetricAttributeConstants.TASK_TYPE, taskType));
   }
 
   protected File downloadSegmentToLocalAndUntar(String tableNameWithType, String segmentName, String deepstoreURL,

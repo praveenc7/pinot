@@ -148,7 +148,7 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
         phase.getQueryPhaseName(),
         duration,
         timeUnit,
-        ImmutableMap.of(MetricAttributeConstants.TABLE_NAME, tableName)
+        MetricAttributeConstants.attributes(MetricAttributeConstants.TABLE_NAME, tableName)
     );
   }
 
@@ -170,7 +170,7 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
         timer.getTimerName(),
         duration,
         timeUnit,
-        ImmutableMap.of(MetricAttributeConstants.TABLE_NAME, tableName)
+        MetricAttributeConstants.attributes(MetricAttributeConstants.TABLE_NAME, tableName)
     );
   }
 
@@ -185,15 +185,9 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
   public void addTimedTableTaskValue(final String tableName, final String taskType, final T timer, final long duration,
       final TimeUnit timeUnit) {
     final String fullTimerName = _metricPrefix + getTableName(tableName) + "." + taskType + "." + timer.getTimerName();
-    addValueToTimer(fullTimerName,
-        timer.getTimerName(),
-        duration,
-        timeUnit,
-        ImmutableMap.of(
-            MetricAttributeConstants.TABLE_NAME, tableName,
-            MetricAttributeConstants.TASK_TYPE, taskType
-        )
-    );
+    addValueToTimer(fullTimerName, timer.getTimerName(), duration, timeUnit,
+        MetricAttributeConstants.attributes(MetricAttributeConstants.TABLE_NAME, tableName,
+            MetricAttributeConstants.TASK_TYPE, taskType));
   }
 
   /**
@@ -331,7 +325,8 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
    */
   public PinotMeter addMeteredTableValue(final String tableName, final M meter, final long unitCount,
       PinotMeter reusedMeter) {
-    Map<String, String> attributes = ImmutableMap.of(MetricAttributeConstants.TABLE_NAME, tableName);
+    Map<String, String> attributes =
+        MetricAttributeConstants.attributes(MetricAttributeConstants.TABLE_NAME, tableName);
     return addValueToMeter(getTableFullMeterName(tableName, meter), meter.getMeterName(),
         meter.getUnit(), unitCount, reusedMeter, attributes);
   }
@@ -428,7 +423,8 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
   @Deprecated
   public void addValueToTableGauge(final String tableName, final G gauge, final long unitCount) {
     final String fullGaugeName = composeTableGaugeName(tableName, gauge);
-    Map<String, String> attributes = ImmutableMap.of(MetricAttributeConstants.TABLE_NAME, tableName);
+    Map<String, String> attributes =
+        MetricAttributeConstants.attributes(MetricAttributeConstants.TABLE_NAME, tableName);
     AtomicLong gaugeValue = _gaugeValues.get(fullGaugeName);
     if (gaugeValue == null) {
       synchronized (_gaugeValues) {
@@ -454,7 +450,8 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
    */
   public void setValueOfTableGauge(final String tableName, final G gauge, final long value) {
     final String fullGaugeName = composeTableGaugeName(tableName, gauge);
-    Map<String, String> attributes = ImmutableMap.of(MetricAttributeConstants.TABLE_NAME, tableName);
+    Map<String, String> attributes =
+        MetricAttributeConstants.attributes(MetricAttributeConstants.TABLE_NAME, tableName);
     setValueOfGauge(value, fullGaugeName, gauge.getGaugeName(), attributes);
   }
 
@@ -467,9 +464,8 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
    * @param value The value to set the gauge to
    */
   public void setValueOfPartitionGauge(final String tableName, final int partitionId, final G gauge, final long value) {
-    Map<String, String> attributes = ImmutableMap.of(
-        MetricAttributeConstants.STREAM_PARTITION_ID, String.valueOf(partitionId)
-    );
+    Map<String, String> attributes =
+        MetricAttributeConstants.attributes(MetricAttributeConstants.STREAM_PARTITION_ID, String.valueOf(partitionId));
     setValueOfTableGauge(tableName, String.valueOf(partitionId), gauge, value, attributes);
   }
 
@@ -610,7 +606,8 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
   @Deprecated
   public void addCallbackTableGaugeIfNeeded(final String tableName, final G gauge, final Callable<Long> valueCallback) {
     final String fullGaugeName = composeTableGaugeName(tableName, gauge);
-    Map<String, String> attributes = ImmutableMap.of(MetricAttributeConstants.TABLE_NAME, tableName);
+    Map<String, String> attributes =
+        MetricAttributeConstants.attributes(MetricAttributeConstants.TABLE_NAME, tableName);
     addCallbackGaugeIfNeeded(fullGaugeName, gauge.getGaugeName(), attributes, valueCallback);
   }
 
@@ -624,10 +621,8 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
    */
   public void setOrUpdatePartitionGauge(final String tableName, final int partitionId, final G gauge,
       final Supplier<Long> valueSupplier) {
-    Map<String, String> attributes = ImmutableMap.of(
-        MetricAttributeConstants.TABLE_NAME, tableName,
-        MetricAttributeConstants.STREAM_PARTITION_ID, String.valueOf(partitionId)
-    );
+    Map<String, String> attributes = MetricAttributeConstants.attributes(MetricAttributeConstants.TABLE_NAME, tableName,
+        MetricAttributeConstants.STREAM_PARTITION_ID, String.valueOf(partitionId));
     final String fullGaugeName = composeTableGaugeName(tableName, String.valueOf(partitionId), gauge);
     setOrUpdateGauge(fullGaugeName, gauge.getGaugeName(), attributes, valueSupplier::get);
   }
@@ -766,7 +761,8 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
    */
   public void setOrUpdateTableGauge(final String tableName, final G gauge, final long value) {
     String fullGaugeName = composeTableGaugeName(tableName, gauge);
-    Map<String, String> attributes = ImmutableMap.of(MetricAttributeConstants.TABLE_NAME, tableName);
+    Map<String, String> attributes =
+        MetricAttributeConstants.attributes(MetricAttributeConstants.TABLE_NAME, tableName);
     setOrUpdateGauge(fullGaugeName, gauge.getGaugeName(), attributes, () -> value);
   }
 
@@ -782,7 +778,7 @@ public abstract class AbstractMetrics<QP extends AbstractMetrics.QueryPhase, M e
       final Supplier<Long> valueSupplier) {
     String fullGaugeName = composeTableGaugeName(tableName, gauge);
     setOrUpdateGauge(fullGaugeName, gauge.getGaugeName(),
-        ImmutableMap.of(MetricAttributeConstants.TABLE_NAME, tableName), valueSupplier::get);
+        MetricAttributeConstants.attributes(MetricAttributeConstants.TABLE_NAME, tableName), valueSupplier::get);
   }
 
   /**

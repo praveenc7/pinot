@@ -19,7 +19,6 @@
 package org.apache.pinot.broker.routing.instanceselector;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import java.time.Clock;
 import java.util.HashMap;
 import java.util.List;
@@ -121,7 +120,7 @@ public class BalancedInstanceSelector extends BaseInstanceSelector {
       String replicaGroupTag = BrokerMetrics.getTagForPreferredGroup(queryOptions);
       String replicaGroupId = String.valueOf(entry.getKey());
       List<String> tags = ImmutableList.of(replicaGroupTag, replicaGroupId);
-      Map<String, String> attributes = ImmutableMap.of(
+      Map<String, String> attributes = MetricAttributeConstants.attributes(
           MetricAttributeConstants.REPLICA_GROUP_ID, replicaGroupId,
           MetricAttributeConstants.REPLICA_GROUP_TAG, replicaGroupTag
       );

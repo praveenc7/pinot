@@ -1688,7 +1688,7 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
     } else {
       _clientId = _tableNameWithType + "-" + streamTopic + "-" + _streamPartitionId;
     }
-    _metricAttributes = Map.of(
+    _metricAttributes = MetricAttributeConstants.attributes(
         MetricAttributeConstants.TABLE_NAME, _tableNameWithType,
         MetricAttributeConstants.STREAM_TOPIC_NAME, streamTopic,
         MetricAttributeConstants.STREAM_PARTITION_ID, String.valueOf(_streamPartitionId),

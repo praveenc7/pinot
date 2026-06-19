@@ -18,6 +18,10 @@
  */
 package org.apache.pinot.common.metrics;
 
+import java.util.HashMap;
+import java.util.Map;
+
+
 public class MetricAttributeConstants {
 
   private MetricAttributeConstants() {
@@ -40,4 +44,40 @@ public class MetricAttributeConstants {
   public static final String REPLICA_GROUP_ID = "ReplicaGroupId";
   public static final String PINOT_METRIC_NAME = "PinotMetricName";
   public static final String WORKLOAD_NAME = "WorkloadName";
+
+  // Dimensional-label attribute maps must be built with a null-tolerant Map (HashMap), NOT ImmutableMap:
+  // Guava's ImmutableMap forbids null values and throws "null value in entry" at construction, which would
+  // mask the caller's real error. A null label value is fine here -- the metric reporters replace it (the
+  // OpenTelemetry reporter substitutes "-"). Use these helpers everywhere a label map is constructed.
+  public static Map<String, String> attributes(String key, String value) {
+    Map<String, String> attributes = new HashMap<>();
+    attributes.put(key, value);
+    return attributes;
+  }
+
+  public static Map<String, String> attributes(String key1, String value1, String key2, String value2) {
+    Map<String, String> attributes = new HashMap<>();
+    attributes.put(key1, value1);
+    attributes.put(key2, value2);
+    return attributes;
+  }
+
+  public static Map<String, String> attributes(String key1, String value1, String key2, String value2, String key3,
+      String value3) {
+    Map<String, String> attributes = new HashMap<>();
+    attributes.put(key1, value1);
+    attributes.put(key2, value2);
+    attributes.put(key3, value3);
+    return attributes;
+  }
+
+  public static Map<String, String> attributes(String key1, String value1, String key2, String value2, String key3,
+      String value3, String key4, String value4) {
+    Map<String, String> attributes = new HashMap<>();
+    attributes.put(key1, value1);
+    attributes.put(key2, value2);
+    attributes.put(key3, value3);
+    attributes.put(key4, value4);
+    return attributes;
+  }
 }

@@ -350,7 +350,7 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
     }
     String workloadName = QueryOptionsUtils.getWorkloadName(sqlNodeAndOptions.getOptions());
     _brokerMetrics.addMeteredValue(workloadName, BrokerMeter.WORKLOAD_QUERIES, 1,
-        ImmutableMap.of(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
+        MetricAttributeConstants.attributes(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
 
     // NOTE: Timeout hasn't been resolved at this point, so we don't set deadline in the execution context here.
     //       Timeout is currently handled by processBrokerRequest().
@@ -875,14 +875,15 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
       _brokerMetrics.addTimedValue(BrokerTimer.QUERY_TOTAL_TIME_MS, totalTimeMs, TimeUnit.MILLISECONDS);
     }
     _brokerMetrics.addTimedValue(workloadName, BrokerTimer.WORKLOAD_TOTAL_QUERY_TIME_MS, totalTimeMs,
-        TimeUnit.MILLISECONDS, ImmutableMap.of(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
+        TimeUnit.MILLISECONDS,
+        MetricAttributeConstants.attributes(MetricAttributeConstants.WORKLOAD_NAME, workloadName));
 
     for (int group : brokerResponse.getReplicaGroups()) {
       String replicaGroupTag = BrokerMetrics.getTagForPreferredGroup(sqlNodeAndOptions.getOptions());
       String replicaGroupId = String.valueOf(group);
 
       List<String> tags = ImmutableList.of(replicaGroupTag, replicaGroupId);
-      Map<String, String> attributes = ImmutableMap.of(
+      Map<String, String> attributes = MetricAttributeConstants.attributes(
           MetricAttributeConstants.REPLICA_GROUP_TAG, replicaGroupTag,
           MetricAttributeConstants.REPLICA_GROUP_ID, replicaGroupId
       );

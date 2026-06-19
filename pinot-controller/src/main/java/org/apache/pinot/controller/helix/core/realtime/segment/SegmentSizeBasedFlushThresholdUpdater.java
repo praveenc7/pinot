@@ -18,7 +18,6 @@
  */
 package org.apache.pinot.controller.helix.core.realtime.segment;
 
-import com.google.common.collect.ImmutableMap;
 import org.apache.pinot.common.metadata.segment.SegmentZKMetadata;
 import org.apache.pinot.common.metrics.ControllerGauge;
 import org.apache.pinot.common.metrics.ControllerMetrics;
@@ -54,7 +53,7 @@ public class SegmentSizeBasedFlushThresholdUpdater implements FlushThresholdUpda
     _controllerMetrics.setOrUpdateTableGauge(_realtimeTableName, ControllerGauge.COMMITTING_SEGMENT_SIZE, segmentSize);
     _controllerMetrics.setOrUpdateTableGauge(_realtimeTableName, _topicName,
         ControllerGauge.COMMITTING_SEGMENT_SIZE_WITH_TOPIC,
-        ImmutableMap.of(MetricAttributeConstants.STREAM_TOPIC_NAME, _topicName),
+        MetricAttributeConstants.attributes(MetricAttributeConstants.STREAM_TOPIC_NAME, _topicName),
         segmentSize);
 
     _flushThresholdComputer.onSegmentCommit(committingSegmentDescriptor, committingSegmentZKMetadata);
@@ -69,7 +68,7 @@ public class SegmentSizeBasedFlushThresholdUpdater implements FlushThresholdUpda
     _controllerMetrics.setOrUpdateTableGauge(_realtimeTableName, ControllerGauge.NUM_ROWS_THRESHOLD, threshold);
     _controllerMetrics.setOrUpdateTableGauge(_realtimeTableName, _topicName,
         ControllerGauge.NUM_ROWS_THRESHOLD_WITH_TOPIC,
-        ImmutableMap.of(MetricAttributeConstants.STREAM_TOPIC_NAME, _topicName),
+        MetricAttributeConstants.attributes(MetricAttributeConstants.STREAM_TOPIC_NAME, _topicName),
         threshold);
   }
 }
