@@ -375,9 +375,6 @@ public abstract class BaseBrokerStarter implements ServiceStartable {
     _threadAccountant = ThreadAccountantUtils.createAccountant(schedulerConfig, _instanceId,
         org.apache.pinot.spi.config.instance.InstanceType.BROKER);
     _threadAccountant.startWatcherTask();
-    // Get all workload budgets this instance should support
-    QueryWorkloadConfigUtils.getAndUpdateWorkloadBudgets(_instanceId, _spectatorHelixManager,
-        status -> _brokerMetrics.setValueOfGlobalGauge(BrokerGauge.WORKLOAD_CONFIG_FETCH_STATUS, status));
 
     // Create Broker request handler.
     String brokerId = _brokerConf.getProperty(Broker.CONFIG_OF_BROKER_ID, getDefaultBrokerId());
@@ -523,6 +520,12 @@ public abstract class BaseBrokerStarter implements ServiceStartable {
             new BrokerUserDefinedMessageHandlerFactory(_routingManager, _queryQuotaManager));
     _participantHelixManager.connect();
     updateInstanceConfigAndBrokerResourceIfNeeded();
+    // Get all workload budgets this instance should support. This must run only after the participant Helix manager
+    // has connected and this broker's InstanceConfig has been registered/updated above. The controller derives an
+    // instance's workloads from its InstanceConfig tags, so fetching earlier (right after the spectator connects)
+    // races registration and returns 404 on a broker's first join to the cluster.
+    QueryWorkloadConfigUtils.getAndUpdateWorkloadBudgets(_instanceId, _spectatorHelixManager,
+        status -> _brokerMetrics.setValueOfGlobalGauge(BrokerGauge.WORKLOAD_CONFIG_FETCH_STATUS, status));
     _brokerMetrics.addCallbackGauge(Helix.INSTANCE_CONNECTED_METRIC_NAME,
         () -> _participantHelixManager.isConnected() ? 1L : 0L);
     _participantHelixManager.addPreConnectCallback(
