@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -77,18 +78,27 @@ public interface StreamMetadataProvider extends Closeable {
     int partitionCount = fetchPartitionCount(timeoutMillis);
     List<PartitionGroupMetadata> newPartitionGroupMetadataList = new ArrayList<>(partitionCount);
 
-    // Add a PartitionGroupMetadata into the list, foreach partition already present in current.
+    // Add a PartitionGroupMetadata into the list, foreach partition already present in current, and track which
+    // partition group ids are already present.
     // Setting endOffset (exclusive) as the startOffset for new partition group.
     // If partition group is still in progress, this value will be null
+    Set<Integer> existingPartitionGroupIds = new HashSet<>();
     for (PartitionGroupConsumptionStatus currentPartitionGroupConsumptionStatus : partitionGroupConsumptionStatuses) {
+      int partitionGroupId = currentPartitionGroupConsumptionStatus.getStreamPartitionGroupId();
       newPartitionGroupMetadataList.add(
-          new PartitionGroupMetadata(currentPartitionGroupConsumptionStatus.getStreamPartitionGroupId(),
-              currentPartitionGroupConsumptionStatus.getEndOffset()));
+          new PartitionGroupMetadata(partitionGroupId, currentPartitionGroupConsumptionStatus.getEndOffset()));
+      existingPartitionGroupIds.add(partitionGroupId);
     }
-    // Add PartitionGroupMetadata for new partitions
+    // Add PartitionGroupMetadata for every partition in [0, partitionCount) that is not already present.
+    // Iterate over the full partition range (rather than only indices >= the current count) so that partitions
+    // missing from the middle of the range - e.g. one whose segments were all removed from the ideal state - are
+    // re-detected, not just partitions newly appended at the tail.
     // Use offset criteria from stream config
     StreamConsumerFactory streamConsumerFactory = StreamConsumerFactoryProvider.create(streamConfig);
-    for (int i = partitionGroupConsumptionStatuses.size(); i < partitionCount; i++) {
+    for (int i = 0; i < partitionCount; i++) {
+      if (existingPartitionGroupIds.contains(i)) {
+        continue;
+      }
       try (StreamMetadataProvider partitionMetadataProvider = streamConsumerFactory.createPartitionMetadataProvider(
           StreamConsumerFactory.getUniqueClientId(clientId), i)) {
         StreamPartitionMsgOffset streamPartitionMsgOffset =

@@ -68,6 +68,7 @@ import org.apache.pinot.controller.helix.core.assignment.segment.SegmentAssignme
 import org.apache.pinot.controller.helix.core.realtime.segment.CommittingSegmentDescriptor;
 import org.apache.pinot.core.data.manager.realtime.SegmentCompletionUtils;
 import org.apache.pinot.core.realtime.impl.fakestream.FakeStreamConfigUtils;
+import org.apache.pinot.core.realtime.impl.fakestream.FakeStreamMetadataProvider;
 import org.apache.pinot.segment.spi.creator.SegmentVersion;
 import org.apache.pinot.segment.spi.index.metadata.SegmentMetadataImpl;
 import org.apache.pinot.spi.config.table.SegmentsValidationAndRetentionConfig;
@@ -80,6 +81,7 @@ import org.apache.pinot.spi.stream.LongMsgOffset;
 import org.apache.pinot.spi.stream.PartitionGroupConsumptionStatus;
 import org.apache.pinot.spi.stream.PartitionGroupMetadata;
 import org.apache.pinot.spi.stream.StreamConfig;
+import org.apache.pinot.spi.stream.StreamMetadataProvider;
 import org.apache.pinot.spi.utils.CommonConstants;
 import org.apache.pinot.spi.utils.CommonConstants.Helix;
 import org.apache.pinot.spi.utils.CommonConstants.Helix.Instance;
@@ -454,6 +456,63 @@ public class PinotLLCRealtimeSegmentManagerTest {
       assertEquals(segmentZKMetadata.getStartOffset(), PARTITION_OFFSET.toString());
       assertEquals(segmentZKMetadata.getCreationTime(), CURRENT_TIME_MS);
     }
+  }
+
+  /**
+   * Regression test: a partition missing from the MIDDLE of the partition range (e.g. its segments were all removed
+   * from the ideal state) must be recreated as a CONSUMING segment by ensureAllPartitionsConsuming. This exercises the
+   * real StreamMetadataProvider#computePartitionGroupMetadata detection, whose previous index-based logic
+   * ("for i = statusList.size(); i &lt; partitionCount") only detected partitions appended at the tail and silently
+   * skipped middle holes.
+   */
+  @Test
+  public void testEnsureAllPartitionsConsumingRecreatesMissingMiddlePartition()
+      throws Exception {
+    int numPartitions = 4;
+    int holePartitionId = 2;
+
+    // Set up a table with all 4 partitions CONSUMING.
+    FakePinotLLCRealtimeSegmentManager segmentManager =
+        new FakePinotLLCRealtimeSegmentManager(mock(PinotHelixResourceManager.class));
+    setUpNewTable(segmentManager, 2, 5, numPartitions);
+    // Point the stream config at all 4 partitions so the real detection sees the full partition range.
+    segmentManager._tableConfig = new TableConfigBuilder(TableType.REALTIME).setTableName(RAW_TABLE_NAME)
+        .setNumReplicas(segmentManager._numReplicas)
+        .setStreamConfigs(FakeStreamConfigUtils.getDefaultLowLevelStreamConfigs(numPartitions).getStreamConfigsMap())
+        .build();
+    segmentManager._streamConfigs = IngestionConfigUtils.getStreamConfigs(segmentManager._tableConfig);
+
+    // Drop the CONSUMING segment AND its ZK metadata for a middle partition, leaving a hole with no footprint.
+    Map<String, Map<String, String>> instanceStatesMap = segmentManager._idealState.getRecord().getMapFields();
+    String holeSegment = new LLCSegmentName(RAW_TABLE_NAME, holePartitionId, 0, CURRENT_TIME_MS).getSegmentName();
+    removeNewConsumingSegment(instanceStatesMap, holeSegment, null);
+    assertNotNull(segmentManager._segmentZKMetadataMap.remove(holeSegment));
+    assertFalse(hasConsumingSegment(instanceStatesMap, holePartitionId));
+
+    // Detect partitions the way production does: status list from the ideal state (now missing the hole), fed through
+    // the real StreamMetadataProvider.computePartitionGroupMetadata over the full partition count.
+    List<PartitionGroupConsumptionStatus> currentStatus = segmentManager.getPartitionGroupConsumptionStatusList(
+        segmentManager._idealState, segmentManager._streamConfigs);
+    StreamConfig streamConfig = segmentManager._streamConfigs.get(0);
+    try (StreamMetadataProvider streamMetadataProvider = new FakeStreamMetadataProvider(streamConfig)) {
+      segmentManager._partitionGroupMetadataList =
+          streamMetadataProvider.computePartitionGroupMetadata("client", streamConfig, currentStatus, 10_000);
+    }
+
+    // Run the validation repair flow.
+    segmentManager._exceededMaxSegmentCompletionTime = true;
+    segmentManager.ensureAllPartitionsConsuming();
+
+    // The hole must be repaired with a fresh CONSUMING segment. Before the fix, the detected partition list omitted the
+    // hole, so ensureAllPartitionsConsuming never recreated it.
+    assertTrue(hasConsumingSegment(instanceStatesMap, holePartitionId),
+        "Missing middle partition " + holePartitionId + " should be recreated as CONSUMING");
+  }
+
+  private static boolean hasConsumingSegment(Map<String, Map<String, String>> instanceStatesMap, int partitionId) {
+    return instanceStatesMap.entrySet().stream().anyMatch(
+        entry -> new LLCSegmentName(entry.getKey()).getPartitionGroupId() == partitionId && entry.getValue()
+            .containsValue(SegmentStateModel.CONSUMING));
   }
 
   private Map<String, Map<String, String>> cloneInstanceStatesMap(Map<String, Map<String, String>> instanceStatesMap) {
