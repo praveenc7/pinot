@@ -24,6 +24,7 @@ import java.util.List;
 import javax.annotation.Nullable;
 import org.apache.pinot.common.request.Expression;
 import org.apache.pinot.common.request.PinotQuery;
+import org.apache.pinot.core.query.optimizer.filter.DistributivityFilterOptimizer;
 import org.apache.pinot.core.query.optimizer.filter.FilterOptimizer;
 import org.apache.pinot.core.query.optimizer.filter.FlattenAndOrFilterOptimizer;
 import org.apache.pinot.core.query.optimizer.filter.IdenticalPredicateFilterOptimizer;
@@ -43,10 +44,16 @@ public class QueryOptimizer {
   // - MergeEqInFilterOptimizer, MergeRangeFilterOptimizer, and TextMatchFilterOptimizer each rely on
   //   FlattenAndOrFilterOptimizer to flatten the AND/OR predicate so that the children are on the same level to
   //   be merged
+  // - DistributivityFilterOptimizer factors a conjunct common to all branches of an OR out of the OR
+  //   (e.g. (a=1 AND b=2) OR (a=1 AND b=3) -> a=1 AND (b=2 OR b=3)). It runs after the first
+  //   FlattenAndOrFilterOptimizer (so the OR branches are on the same level), and is followed by a second
+  //   FlattenAndOrFilterOptimizer pass that flattens the AND it introduces before MergeEqInFilterOptimizer
+  //   collapses the residual OR into an IN predicate.
   // - TimePredicateFilterOptimizer and MergeRangeFilterOptimizer relies on NumericalFilterOptimizer to convert the
   //   values to the proper format so that they can be properly parsed
   private static final List<FilterOptimizer> FILTER_OPTIMIZERS =
       Arrays.asList(new FlattenAndOrFilterOptimizer(), new IdenticalPredicateFilterOptimizer(),
+          new DistributivityFilterOptimizer(), new FlattenAndOrFilterOptimizer(),
           new MergeEqInFilterOptimizer(), new NumericalFilterOptimizer(), new TimePredicateFilterOptimizer(),
           new MergeRangeFilterOptimizer(), new TextMatchFilterOptimizer());
 
