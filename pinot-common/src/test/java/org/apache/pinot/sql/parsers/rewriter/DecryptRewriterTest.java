@@ -493,4 +493,20 @@ public class DecryptRewriterTest {
       _decryptRewriter.deregisterTable(mockTableConfig);
     }
   }
+
+  @Test
+  public void testDeregisterTableWithNullTableConfig() {
+    // Reproduces the broker ONLINE -> DROPPED path where the table config fetched from the property store is null
+    // because the table is being dropped. Deregistration must be a no-op rather than throwing an NPE.
+    _decryptRewriter.deregisterTable(null);
+  }
+
+  @Test
+  public void testDeregisterTableWithNullTableName() {
+    // A non-null config with a null table name must also be handled gracefully (extractRawTableName would return null
+    // and ConcurrentHashMap.remove(null) would otherwise throw).
+    TableConfig mockTableConfig = mock(TableConfig.class);
+    when(mockTableConfig.getTableName()).thenReturn(null);
+    _decryptRewriter.deregisterTable(mockTableConfig);
+  }
 }

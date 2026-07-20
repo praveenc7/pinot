@@ -64,6 +64,12 @@ public class DecryptRewriter implements TableQueryRewriter {
 
   @Override
   public void deregisterTable(TableConfig tableConfig) {
+    // The broker invokes this during an ONLINE -> DROPPED state transition, where the table config fetched from the
+    // property store may already be gone (null) because the table is being dropped. Guard against a null config (and a
+    // null table name) so deregistration is a no-op instead of throwing an NPE and failing the state transition.
+    if (tableConfig == null || tableConfig.getTableName() == null) {
+      return;
+    }
     String tableName = TableNameBuilder.extractRawTableName(tableConfig.getTableName());
     TABLE_2_EAR_INFO.remove(tableName);
   }
