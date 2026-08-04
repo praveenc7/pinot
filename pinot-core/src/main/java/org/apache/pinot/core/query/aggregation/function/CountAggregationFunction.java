@@ -175,6 +175,47 @@ public class CountAggregationFunction extends NullableSingleInputAggregationFunc
   }
 
   @Override
+  public boolean supportsFlatGroupByMV() {
+    return true;
+  }
+
+  @Override
+  public void aggregateGroupByMVFlat(int length, int[] groupKeys, int[] groupKeyOffsets,
+      GroupByResultHolder groupByResultHolder, Map<ExpressionContext, BlockValSet> blockValSetMap) {
+    if (blockValSetMap.isEmpty()) {
+      for (int i = 0; i < length; i++) {
+        int endOffset = groupKeyOffsets[i + 1];
+        for (int j = groupKeyOffsets[i]; j < endOffset; j++) {
+          int groupKey = groupKeys[j];
+          groupByResultHolder.setValueForKey(groupKey, groupByResultHolder.getDoubleResult(groupKey) + 1);
+        }
+      }
+    } else if (_nullHandlingEnabled) {
+      assert blockValSetMap.size() == 1;
+      BlockValSet blockValSet = blockValSetMap.values().iterator().next();
+      forEachNotNull(length, blockValSet, (from, to) -> {
+        for (int i = from; i < to; i++) {
+          int endOffset = groupKeyOffsets[i + 1];
+          for (int j = groupKeyOffsets[i]; j < endOffset; j++) {
+            int groupKey = groupKeys[j];
+            groupByResultHolder.setValueForKey(groupKey, groupByResultHolder.getDoubleResult(groupKey) + 1);
+          }
+        }
+      });
+    } else {
+      long[] valueArray = blockValSetMap.get(STAR_TREE_COUNT_STAR_EXPRESSION).getLongValuesSV();
+      for (int i = 0; i < length; i++) {
+        long value = valueArray[i];
+        int endOffset = groupKeyOffsets[i + 1];
+        for (int j = groupKeyOffsets[i]; j < endOffset; j++) {
+          int groupKey = groupKeys[j];
+          groupByResultHolder.setValueForKey(groupKey, groupByResultHolder.getDoubleResult(groupKey) + value);
+        }
+      }
+    }
+  }
+
+  @Override
   public Long extractAggregationResult(AggregationResultHolder aggregationResultHolder) {
     return (long) aggregationResultHolder.getDoubleResult();
   }

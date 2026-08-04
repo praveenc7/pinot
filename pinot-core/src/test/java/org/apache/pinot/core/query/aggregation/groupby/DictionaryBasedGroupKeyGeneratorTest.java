@@ -31,6 +31,7 @@ import java.util.Set;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.pinot.common.request.context.ExpressionContext;
+import org.apache.pinot.core.common.MvIntArrayBuffer;
 import org.apache.pinot.core.operator.BaseProjectOperator;
 import org.apache.pinot.core.operator.blocks.ValueBlock;
 import org.apache.pinot.core.plan.DocIdSetPlanNode;
@@ -59,6 +60,7 @@ import org.testng.annotations.Test;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertSame;
 import static org.testng.Assert.assertTrue;
 
 
@@ -82,6 +84,7 @@ public class DictionaryBasedGroupKeyGeneratorTest {
 
   private BaseProjectOperator<?> _projectOperator;
   private ValueBlock _valueBlock;
+  private IndexSegment _indexSegment;
 
   @BeforeClass
   private void setup()
@@ -136,6 +139,7 @@ public class DictionaryBasedGroupKeyGeneratorTest {
     driver.init(config, new GenericRowRecordReader(rows));
     driver.build();
     IndexSegment indexSegment = ImmutableSegmentLoader.load(new File(INDEX_DIR_PATH, SEGMENT_NAME), ReadMode.heap);
+    _indexSegment = indexSegment;
 
     // Generate a random query to filter out 2 unique rows
     int docId1 = _random.nextInt(50);
@@ -376,6 +380,183 @@ public class DictionaryBasedGroupKeyGeneratorTest {
       assertEquals(MV_GROUP_KEY_BUFFER[i + 1], MV_GROUP_KEY_BUFFER[1], _errorMessage);
     }
     testGetGroupKeys(dictionaryBasedGroupKeyGenerator.getGroupKeys(), numGroupsLimit);
+  }
+
+  /**
+   * Group-by on a single multi-value column over many blocks. With a single multi-value group-by column whose
+   * cardinality fits the array based holder, the generated group ids are the dictionary ids themselves, so they can be
+   * compared directly against the dictionary ids of each block.
+   *
+   * <p>Running over several blocks with the same generator covers the reuse of the per-document dictionary id arrays
+   * across blocks.
+   */
+  @Test
+  public void testMultiValueAcrossBlocks() {
+    ExpressionContext[] expressions = getExpressions(new String[]{"m1"});
+    BaseProjectOperator<?> projectOperator = createProjectOperator(expressions, 64);
+    DictionaryBasedGroupKeyGenerator dictionaryBasedGroupKeyGenerator =
+        new DictionaryBasedGroupKeyGenerator(projectOperator, expressions,
+            Server.DEFAULT_QUERY_EXECUTOR_NUM_GROUPS_LIMIT,
+            Server.DEFAULT_QUERY_EXECUTOR_MAX_INITIAL_RESULT_HOLDER_CAPACITY, null);
+    int[][] groupKeyBuffer = new int[DocIdSetPlanNode.MAX_DOC_PER_CALL][];
+
+    int numBlocks = 0;
+    ValueBlock valueBlock;
+    while ((valueBlock = projectOperator.nextBlock()) != null) {
+      numBlocks++;
+      int numDocs = valueBlock.getNumDocs();
+      int[][] dictIds = valueBlock.getBlockValueSet(expressions[0]).getDictionaryIdsMV();
+      int[][] expectedGroupKeys = new int[numDocs][];
+      for (int i = 0; i < numDocs; i++) {
+        expectedGroupKeys[i] = dictIds[i].clone();
+      }
+      dictionaryBasedGroupKeyGenerator.generateKeysForBlock(valueBlock, groupKeyBuffer);
+      for (int i = 0; i < numDocs; i++) {
+        assertEquals(groupKeyBuffer[i], expectedGroupKeys[i], _errorMessage);
+      }
+    }
+    assertTrue(numBlocks > 1, _errorMessage);
+  }
+
+  @Test(dataProvider = "flatGroupKeyThresholds")
+  public void testFlatMultiValueAcrossBlocks(int arrayBasedThreshold) {
+    ExpressionContext[] expressions = getExpressions(new String[]{"m1"});
+    BaseProjectOperator<?> projectOperator = createProjectOperator(expressions, 64);
+    DictionaryBasedGroupKeyGenerator groupKeyGenerator =
+        new DictionaryBasedGroupKeyGenerator(projectOperator, expressions,
+            Server.DEFAULT_QUERY_EXECUTOR_NUM_GROUPS_LIMIT, arrayBasedThreshold, null);
+    assertTrue(groupKeyGenerator.supportsFlatGroupKeys());
+
+    Map<Integer, Integer> expectedMappedGroupIds = new HashMap<>();
+    Set<Integer> expectedGroupIds = new HashSet<>();
+    MvIntArrayBuffer previousBuffer = null;
+    int numBlocks = 0;
+    ValueBlock valueBlock;
+    while ((valueBlock = projectOperator.nextBlock()) != null) {
+      numBlocks++;
+      int numDocs = valueBlock.getNumDocs();
+      int[][] dictIds = valueBlock.getBlockValueSet(expressions[0]).getDictionaryIdsMV();
+      MvIntArrayBuffer groupKeys = groupKeyGenerator.generateFlatKeysForBlock(valueBlock);
+      if (previousBuffer != null) {
+        assertSame(groupKeys, previousBuffer, _errorMessage);
+      }
+      previousBuffer = groupKeys;
+      assertEquals(groupKeys.getNumDocs(), numDocs, _errorMessage);
+
+      int[] values = groupKeys.getValues();
+      int[] offsets = groupKeys.getOffsets();
+      for (int i = 0; i < numDocs; i++) {
+        assertEquals(offsets[i + 1] - offsets[i], dictIds[i].length, _errorMessage);
+        for (int j = 0; j < dictIds[i].length; j++) {
+          int rawKey = dictIds[i][j];
+          int expectedGroupId;
+          if (arrayBasedThreshold == 0) {
+            Integer mappedGroupId = expectedMappedGroupIds.get(rawKey);
+            if (mappedGroupId == null) {
+              mappedGroupId = expectedMappedGroupIds.size();
+              expectedMappedGroupIds.put(rawKey, mappedGroupId);
+            }
+            expectedGroupId = mappedGroupId;
+          } else {
+            expectedGroupId = rawKey;
+          }
+          assertEquals(values[offsets[i] + j], expectedGroupId, _errorMessage);
+          expectedGroupIds.add(expectedGroupId);
+        }
+      }
+    }
+    assertTrue(numBlocks > 1, _errorMessage);
+    assertEquals(groupKeyGenerator.getNumKeys(), expectedGroupIds.size(), _errorMessage);
+  }
+
+  @DataProvider(name = "flatGroupKeyThresholds")
+  public Object[][] flatGroupKeyThresholds() {
+    return new Object[][]{{0}, {Integer.MAX_VALUE}};
+  }
+
+  @Test
+  public void testFlatExecutorCapabilityGate() {
+    assertTrue(createGroupByExecutor("SELECT m1, SUM(s1) FROM testTable GROUP BY m1")._useFlatMVGroupKeys);
+    assertTrue(createGroupByExecutor("SELECT m1, COUNT(*) FROM testTable GROUP BY m1")._useFlatMVGroupKeys);
+    assertTrue(
+        createGroupByExecutor("SELECT m1, SUM(s1), COUNT(*) FROM testTable GROUP BY m1")._useFlatMVGroupKeys);
+    assertFalse(createGroupByExecutor("SELECT m1, MAX(s1) FROM testTable GROUP BY m1")._useFlatMVGroupKeys);
+    assertFalse(
+        createGroupByExecutor("SELECT m1, SUM(s1), MAX(s2) FROM testTable GROUP BY m1")._useFlatMVGroupKeys);
+    assertFalse(createGroupByExecutor("SELECT m1, SUMMV(m2) FROM testTable GROUP BY m1")._useFlatMVGroupKeys);
+    assertFalse(createGroupByExecutor("SELECT m1, COUNTMV(m2) FROM testTable GROUP BY m1")._useFlatMVGroupKeys);
+    assertFalse(createGroupByExecutor("SELECT m1, m2, SUM(s1) FROM testTable GROUP BY m1, m2")._useFlatMVGroupKeys);
+  }
+
+  /**
+   * Group-by on two multi-value columns over many blocks, comparing the group ids against the ones produced by a
+   * generator that processes a single block at a time.
+   */
+  @Test
+  public void testMultiValueMultiColumnAcrossBlocks() {
+    ExpressionContext[] expressions = getExpressions(new String[]{"m1", "m2", "s1"});
+    BaseProjectOperator<?> projectOperator = createProjectOperator(expressions, 64);
+    DictionaryBasedGroupKeyGenerator dictionaryBasedGroupKeyGenerator =
+        new DictionaryBasedGroupKeyGenerator(projectOperator, expressions,
+            Server.DEFAULT_QUERY_EXECUTOR_NUM_GROUPS_LIMIT,
+            Server.DEFAULT_QUERY_EXECUTOR_MAX_INITIAL_RESULT_HOLDER_CAPACITY, null);
+    int[][] groupKeyBuffer = new int[DocIdSetPlanNode.MAX_DOC_PER_CALL][];
+
+    // Same group-by key must always map to the same group id, and each document must produce the cross product of the
+    // dictionary ids of its group-by columns
+    Map<List<Integer>, Integer> groupIdByRawKey = new HashMap<>();
+    int numBlocks = 0;
+    ValueBlock valueBlock;
+    while ((valueBlock = projectOperator.nextBlock()) != null) {
+      numBlocks++;
+      int numDocs = valueBlock.getNumDocs();
+      int[][] m1DictIds = valueBlock.getBlockValueSet(expressions[0]).getDictionaryIdsMV();
+      int[][] m2DictIds = valueBlock.getBlockValueSet(expressions[1]).getDictionaryIdsMV();
+      int[] s1DictIds = valueBlock.getBlockValueSet(expressions[2]).getDictionaryIdsSV();
+      List<List<Integer>> expectedRawKeys = new ArrayList<>(numDocs);
+      for (int i = 0; i < numDocs; i++) {
+        List<Integer> rawKeys = new ArrayList<>();
+        for (int m2DictId : m2DictIds[i]) {
+          for (int m1DictId : m1DictIds[i]) {
+            rawKeys.add(m1DictId);
+            rawKeys.add(m2DictId);
+            rawKeys.add(s1DictIds[i]);
+          }
+        }
+        expectedRawKeys.add(rawKeys);
+      }
+
+      dictionaryBasedGroupKeyGenerator.generateKeysForBlock(valueBlock, groupKeyBuffer);
+
+      for (int i = 0; i < numDocs; i++) {
+        List<Integer> rawKeys = expectedRawKeys.get(i);
+        int numGroupKeys = rawKeys.size() / 3;
+        assertEquals(groupKeyBuffer[i].length, numGroupKeys, _errorMessage);
+        for (int j = 0; j < numGroupKeys; j++) {
+          List<Integer> rawKey = rawKeys.subList(j * 3, j * 3 + 3);
+          Integer expectedGroupId = groupIdByRawKey.putIfAbsent(rawKey, groupKeyBuffer[i][j]);
+          if (expectedGroupId != null) {
+            assertEquals(groupKeyBuffer[i][j], expectedGroupId.intValue(), _errorMessage);
+          }
+        }
+      }
+    }
+    assertTrue(numBlocks > 1, _errorMessage);
+    assertEquals(dictionaryBasedGroupKeyGenerator.getNumKeys(), groupIdByRawKey.size(), _errorMessage);
+  }
+
+  private BaseProjectOperator<?> createProjectOperator(ExpressionContext[] expressions, int maxDocsPerCall) {
+    QueryContext queryContext = QueryContextConverterUtils.getQueryContext("SELECT COUNT(*) FROM testTable");
+    ProjectPlanNode projectPlanNode =
+        new ProjectPlanNode(new SegmentContext(_indexSegment), queryContext, Arrays.asList(expressions),
+            maxDocsPerCall);
+    return projectPlanNode.run();
+  }
+
+  private DefaultGroupByExecutor createGroupByExecutor(String query) {
+    QueryContext queryContext = QueryContextConverterUtils.getQueryContext(query);
+    ExpressionContext[] expressions = queryContext.getGroupByExpressions().toArray(new ExpressionContext[0]);
+    return new DefaultGroupByExecutor(queryContext, expressions, createProjectOperator(expressions, 64));
   }
 
   private static ExpressionContext[] getExpressions(String[] columns) {

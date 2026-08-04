@@ -75,7 +75,11 @@ public class StarTreeGroupByExecutor extends DefaultGroupByExecutor {
     GroupByResultHolder groupByResultHolder = _groupByResultHolders[functionIndex];
     Map<ExpressionContext, BlockValSet> blockValSetMap =
         AggregationFunctionUtils.getBlockValSetMap(_aggregationFunctionColumnPairs[functionIndex], valueBlock);
-    if (_hasMVGroupByExpression) {
+    if (_useFlatMVGroupKeys) {
+      aggregationFunction.aggregateGroupByMVFlat(length, _flatMVGroupKeys.getValues(),
+          _flatMVGroupKeys.getOffsets(),
+          groupByResultHolder, blockValSetMap);
+    } else if (_hasMVGroupByExpression) {
       aggregationFunction.aggregateGroupByMV(length, _mvGroupKeys, groupByResultHolder, blockValSetMap);
     } else {
       aggregationFunction.aggregateGroupBySV(length, _svGroupKeys, groupByResultHolder, blockValSetMap);

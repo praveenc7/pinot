@@ -214,6 +214,13 @@ public class DataFetcher implements AutoCloseable {
   }
 
   /**
+   * Fetch the dictionary ids for a multi-valued column into a flat reusable buffer.
+   */
+  public void fetchDictIds(String column, int[] inDocIds, int length, MvIntArrayBuffer outDictIds) {
+    _columnValueReaderMap.get(column).readDictIdsMV(inDocIds, length, outDictIds);
+  }
+
+  /**
    * Fetch the int values for a multi-valued column.
    *
    * @param column Column name
@@ -482,6 +489,16 @@ public class DataFetcher implements AutoCloseable {
       for (int i = 0; i < length; i++) {
         int numValues = _reader.getDictIdMV(docIds[i], _reusableMVDictIds, readerContext);
         dictIdsBuffer[i] = Arrays.copyOfRange(_reusableMVDictIds, 0, numValues);
+      }
+    }
+
+    void readDictIdsMV(int[] docIds, int length, MvIntArrayBuffer dictIdsBuffer) {
+      Tracing.activeRecording().setInputDataType(_storedType, _singleValue);
+      ForwardIndexReaderContext readerContext = getReaderContext();
+      dictIdsBuffer.startFill(length);
+      for (int i = 0; i < length; i++) {
+        int numValues = _reader.getDictIdMV(docIds[i], _reusableMVDictIds, readerContext);
+        dictIdsBuffer.append(_reusableMVDictIds, numValues);
       }
     }
 

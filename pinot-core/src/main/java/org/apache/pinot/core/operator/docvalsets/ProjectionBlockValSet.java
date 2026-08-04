@@ -22,6 +22,7 @@ import java.math.BigDecimal;
 import javax.annotation.Nullable;
 import org.apache.pinot.core.common.BlockValSet;
 import org.apache.pinot.core.common.DataBlockCache;
+import org.apache.pinot.core.common.MvIntArrayBuffer;
 import org.apache.pinot.core.operator.ProjectionOperator;
 import org.apache.pinot.segment.spi.datasource.DataSource;
 import org.apache.pinot.segment.spi.index.reader.Dictionary;
@@ -191,6 +192,14 @@ public class ProjectionBlockValSet implements BlockValSet {
     try (InvocationScope scope = Tracing.getTracer().createScope(ProjectionBlockValSet.class)) {
       recordReadValues(scope, DataType.INT, false);
       return _dataBlockCache.getDictIdsForMVColumn(_column);
+    }
+  }
+
+  @Override
+  public void getDictionaryIdsMV(int numDocs, MvIntArrayBuffer buffer) {
+    try (InvocationScope scope = Tracing.getTracer().createScope(ProjectionBlockValSet.class)) {
+      recordReadValues(scope, DataType.INT, false);
+      _dataBlockCache.getDictIdsForMVColumn(_column, buffer);
     }
   }
 

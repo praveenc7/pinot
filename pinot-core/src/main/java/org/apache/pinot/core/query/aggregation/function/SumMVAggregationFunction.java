@@ -39,6 +39,11 @@ public class SumMVAggregationFunction extends SumAggregationFunction {
   }
 
   @Override
+  public boolean supportsFlatGroupByMV() {
+    return false;
+  }
+
+  @Override
   public void aggregate(int length, AggregationResultHolder aggregationResultHolder,
       Map<ExpressionContext, BlockValSet> blockValSetMap) {
     BlockValSet blockValSet = blockValSetMap.get(_expression);

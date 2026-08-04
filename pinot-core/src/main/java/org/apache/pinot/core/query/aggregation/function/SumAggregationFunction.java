@@ -205,6 +205,41 @@ public class SumAggregationFunction extends NullableSingleInputAggregationFuncti
   }
 
   @Override
+  public boolean supportsFlatGroupByMV() {
+    return true;
+  }
+
+  @Override
+  public void aggregateGroupByMVFlat(int length, int[] groupKeys, int[] groupKeyOffsets,
+      GroupByResultHolder groupByResultHolder, Map<ExpressionContext, BlockValSet> blockValSetMap) {
+    BlockValSet blockValSet = blockValSetMap.get(_expression);
+    double[] valueArray = blockValSet.getDoubleValuesSV();
+
+    if (_nullHandlingEnabled) {
+      forEachNotNull(length, blockValSet, (from, to) -> {
+        for (int i = from; i < to; i++) {
+          double value = valueArray[i];
+          int endOffset = groupKeyOffsets[i + 1];
+          for (int j = groupKeyOffsets[i]; j < endOffset; j++) {
+            int groupKey = groupKeys[j];
+            Double result = groupByResultHolder.getResult(groupKey);
+            groupByResultHolder.setValueForKey(groupKey, result == null ? value : result + value);
+          }
+        }
+      });
+    } else {
+      for (int i = 0; i < length; i++) {
+        double value = valueArray[i];
+        int endOffset = groupKeyOffsets[i + 1];
+        for (int j = groupKeyOffsets[i]; j < endOffset; j++) {
+          int groupKey = groupKeys[j];
+          groupByResultHolder.setValueForKey(groupKey, groupByResultHolder.getDoubleResult(groupKey) + value);
+        }
+      }
+    }
+  }
+
+  @Override
   public Double extractAggregationResult(AggregationResultHolder aggregationResultHolder) {
     if (_nullHandlingEnabled) {
       return aggregationResultHolder.getResult();

@@ -19,6 +19,7 @@
 package org.apache.pinot.core.query.aggregation.groupby;
 
 import java.util.Iterator;
+import org.apache.pinot.core.common.MvIntArrayBuffer;
 import org.apache.pinot.core.operator.blocks.ValueBlock;
 
 
@@ -55,6 +56,23 @@ public interface GroupKeyGenerator {
    * @param groupKeys  Buffer to return the results
    */
   void generateKeysForBlock(ValueBlock valueBlock, int[][] groupKeys);
+
+  /**
+   * Returns whether this generator can produce flat multi-value group keys.
+   */
+  default boolean supportsFlatGroupKeys() {
+    return false;
+  }
+
+  /**
+   * Generates flat multi-value group keys for the given block.
+   *
+   * <p>The values for document {@code i} are stored in
+   * {@code buffer.values[buffer.offsets[i] .. buffer.offsets[i + 1])}.
+   */
+  default MvIntArrayBuffer generateFlatKeysForBlock(ValueBlock valueBlock) {
+    throw new UnsupportedOperationException("Flat group keys are not supported");
+  }
 
   /**
    * Get the current upper bound of the group key. All group keys already generated should be less than this value. This

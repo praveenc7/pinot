@@ -33,6 +33,7 @@ import javax.annotation.Nullable;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.pinot.common.request.context.ExpressionContext;
 import org.apache.pinot.core.common.BlockValSet;
+import org.apache.pinot.core.common.MvIntArrayBuffer;
 import org.apache.pinot.core.operator.BaseProjectOperator;
 import org.apache.pinot.core.operator.ColumnContext;
 import org.apache.pinot.core.operator.blocks.ValueBlock;
@@ -90,6 +91,7 @@ public class DictionaryBasedGroupKeyGenerator implements GroupKeyGenerator {
   private final int[] _cardinalities;
   private final boolean[] _isSingleValueColumn;
   private final Dictionary[] _dictionaries;
+  private final boolean _supportsFlatGroupKeys;
 
   // The first dimension is the index of group-by column
   // Reusable buffer for single-value column dictionary ids
@@ -98,6 +100,11 @@ public class DictionaryBasedGroupKeyGenerator implements GroupKeyGenerator {
   private final int[][][] _multiValueDictIds;
 
   private final Object[][] _internedDictionaryValues;
+
+  // Scratch buffer holding the expanded raw keys of the document being processed
+  private int[] _intRawKeys = new int[1];
+  // Reusable flat buffer for the single multi-value expression fast path
+  private final MvIntArrayBuffer _flatGroupKeys = new MvIntArrayBuffer();
 
   private final int _globalGroupIdUpperBound;
   private final RawKeyHolder _rawKeyHolder;
@@ -119,6 +126,7 @@ public class DictionaryBasedGroupKeyGenerator implements GroupKeyGenerator {
     Map<ExpressionContext, Integer> cardinalityMap = new HashMap<>(_numGroupByExpressions);
     long cardinalityProduct = 1L;
     boolean longOverflow = false;
+    boolean supportsFlatGroupKeys = _numGroupByExpressions == 1;
     for (int i = 0; i < _numGroupByExpressions; i++) {
       ExpressionContext groupByExpression = groupByExpressions[i];
       ColumnContext columnContext = projectOperator.getResultColumnContext(groupByExpression);
@@ -138,7 +146,9 @@ public class DictionaryBasedGroupKeyGenerator implements GroupKeyGenerator {
         }
       }
       _isSingleValueColumn[i] = columnContext.isSingleValue();
+      supportsFlatGroupKeys &= !_isSingleValueColumn[i] && columnContext.getDataSource() != null;
     }
+    _supportsFlatGroupKeys = supportsFlatGroupKeys;
     if (groupByExpressionSizesFromPredicates != null) {
        Pair<Boolean, Long> optimizedCardinality = getOptimizedGroupByCardinality(groupByExpressionSizesFromPredicates,
            cardinalityMap);
@@ -231,6 +241,22 @@ public class DictionaryBasedGroupKeyGenerator implements GroupKeyGenerator {
   }
 
   @Override
+  public boolean supportsFlatGroupKeys() {
+    return _supportsFlatGroupKeys;
+  }
+
+  @Override
+  public MvIntArrayBuffer generateFlatKeysForBlock(ValueBlock valueBlock) {
+    if (!supportsFlatGroupKeys()) {
+      throw new UnsupportedOperationException("Flat group keys require exactly one multi-value expression");
+    }
+    int numDocs = valueBlock.getNumDocs();
+    valueBlock.getBlockValueSet(_groupByExpressions[0]).getDictionaryIdsMV(numDocs, _flatGroupKeys);
+    _rawKeyHolder.processFlatMultiValue(_flatGroupKeys.getValues(), _flatGroupKeys.getNumValues());
+    return _flatGroupKeys;
+  }
+
+  @Override
   public int getCurrentGroupKeyUpperBound() {
     return _rawKeyHolder.getGroupIdUpperBound();
   }
@@ -262,6 +288,13 @@ public class DictionaryBasedGroupKeyGenerator implements GroupKeyGenerator {
      * @param outGroupIds Buffer for group id results
      */
     void processMultiValue(int numDocs, int[][] outGroupIds);
+
+    /**
+     * Replaces the raw keys in a flat single-expression buffer with group ids.
+     */
+    default void processFlatMultiValue(int[] outGroupIds, int numGroupIds) {
+      throw new UnsupportedOperationException("Flat group keys are not supported by this holder");
+    }
 
     /**
      * Get the upper bound of group id (exclusive) inside the holder.
@@ -368,6 +401,17 @@ public class DictionaryBasedGroupKeyGenerator implements GroupKeyGenerator {
     }
 
     @Override
+    public void processFlatMultiValue(int[] outGroupIds, int numGroupIds) {
+      for (int i = 0; i < numGroupIds; i++) {
+        int groupId = outGroupIds[i];
+        if (!_flags[groupId]) {
+          _numKeys++;
+          _flags[groupId] = true;
+        }
+      }
+    }
+
+    @Override
     public int getGroupIdUpperBound() {
       return _globalGroupIdUpperBound;
     }
@@ -458,6 +502,13 @@ public class DictionaryBasedGroupKeyGenerator implements GroupKeyGenerator {
     }
 
     @Override
+    public void processFlatMultiValue(int[] outGroupIds, int numGroupIds) {
+      for (int i = 0; i < numGroupIds; i++) {
+        outGroupIds[i] = _groupIdMap.getGroupId(outGroupIds[i], _globalGroupIdUpperBound);
+      }
+    }
+
+    @Override
     public int getGroupIdUpperBound() {
       return _groupIdMap.size();
     }
@@ -502,73 +553,88 @@ public class DictionaryBasedGroupKeyGenerator implements GroupKeyGenerator {
    */
   @SuppressWarnings("Duplicates")
   private int[] getIntRawKeys(int index) {
-    int[] rawKeys = null;
-
-    // Specialize single multi-value group-by column case
+    // Specialize single multi-value group-by column case: the dictionary ids are already the raw keys, and the holder
+    // rewrites them in place with the group ids
     if (_numGroupByExpressions == 1) {
-      rawKeys = _multiValueDictIds[0][index];
-    } else {
-      // Before having to transform to array, use single value raw key for better performance
-      int rawKey = 0;
+      return _multiValueDictIds[0][index];
+    }
 
-      for (int i = _numGroupByExpressions - 1; i >= 0; i--) {
-        int cardinality = _cardinalities[i];
-        if (_isSingleValueColumn[i]) {
-          int dictId = _singleValueDictIds[i][index];
-          if (rawKeys == null) {
+    // Expand the cross product into the scratch buffer, so that the intermediate results of the expansion do not
+    // allocate, then hand out a recycled array of exactly the required length
+    int numRawKeys = 0;
+    // Before having to expand into the scratch buffer, use a single value raw key for better performance
+    int rawKey = 0;
+
+    for (int i = _numGroupByExpressions - 1; i >= 0; i--) {
+      int cardinality = _cardinalities[i];
+      if (_isSingleValueColumn[i]) {
+        int dictId = _singleValueDictIds[i][index];
+        if (numRawKeys == 0) {
+          rawKey = rawKey * cardinality + dictId;
+        } else {
+          int[] rawKeys = _intRawKeys;
+          for (int j = 0; j < numRawKeys; j++) {
+            rawKeys[j] = rawKeys[j] * cardinality + dictId;
+          }
+        }
+      } else {
+        int[] multiValueDictIds = _multiValueDictIds[i][index];
+        int numValues = multiValueDictIds.length;
+
+        // Specialize multi-value column with only one value inside
+        if (numValues == 1) {
+          int dictId = multiValueDictIds[0];
+          if (numRawKeys == 0) {
             rawKey = rawKey * cardinality + dictId;
           } else {
-            int length = rawKeys.length;
-            for (int j = 0; j < length; j++) {
+            int[] rawKeys = _intRawKeys;
+            for (int j = 0; j < numRawKeys; j++) {
               rawKeys[j] = rawKeys[j] * cardinality + dictId;
             }
           }
         } else {
-          int[] multiValueDictIds = _multiValueDictIds[i][index];
-          int numValues = multiValueDictIds.length;
-
-          // Specialize multi-value column with only one value inside
-          if (numValues == 1) {
-            int dictId = multiValueDictIds[0];
-            if (rawKeys == null) {
-              rawKey = rawKey * cardinality + dictId;
-            } else {
-              int length = rawKeys.length;
-              for (int j = 0; j < length; j++) {
-                rawKeys[j] = rawKeys[j] * cardinality + dictId;
-              }
+          if (numRawKeys == 0) {
+            int[] rawKeys = ensureIntRawKeyCapacity(numValues, 0);
+            for (int j = 0; j < numValues; j++) {
+              rawKeys[j] = rawKey * cardinality + multiValueDictIds[j];
             }
+            numRawKeys = numValues;
           } else {
-            if (rawKeys == null) {
-              rawKeys = new int[numValues];
-              for (int j = 0; j < numValues; j++) {
-                int dictId = multiValueDictIds[j];
-                rawKeys[j] = rawKey * cardinality + dictId;
+            int currentLength = numRawKeys;
+            int newLength = currentLength * numValues;
+            int[] rawKeys = ensureIntRawKeyCapacity(newLength, currentLength);
+            // Expand in place from the back, so that the source range [0, currentLength) is only overwritten by the
+            // last (j == 0) iteration, where the copy is a no-op
+            for (int j = numValues - 1; j >= 0; j--) {
+              int startOffset = j * currentLength;
+              System.arraycopy(rawKeys, 0, rawKeys, startOffset, currentLength);
+              int dictId = multiValueDictIds[j];
+              int endOffset = startOffset + currentLength;
+              for (int k = startOffset; k < endOffset; k++) {
+                rawKeys[k] = rawKeys[k] * cardinality + dictId;
               }
-            } else {
-              int currentLength = rawKeys.length;
-              int newLength = currentLength * numValues;
-              int[] newRawKeys = new int[newLength];
-              for (int j = 0; j < numValues; j++) {
-                int startOffset = j * currentLength;
-                System.arraycopy(rawKeys, 0, newRawKeys, startOffset, currentLength);
-                int dictId = multiValueDictIds[j];
-                int endOffset = startOffset + currentLength;
-                for (int k = startOffset; k < endOffset; k++) {
-                  newRawKeys[k] = newRawKeys[k] * cardinality + dictId;
-                }
-              }
-              rawKeys = newRawKeys;
             }
+            numRawKeys = newLength;
           }
         }
       }
-
-      if (rawKeys == null) {
-        rawKeys = new int[]{rawKey};
-      }
     }
 
+    if (numRawKeys == 0) {
+      ensureIntRawKeyCapacity(1, 0)[0] = rawKey;
+      numRawKeys = 1;
+    }
+    return Arrays.copyOf(_intRawKeys, numRawKeys);
+  }
+
+  private int[] ensureIntRawKeyCapacity(int capacity, int numValuesToPreserve) {
+    int[] rawKeys = _intRawKeys;
+    if (rawKeys.length < capacity) {
+      int[] newRawKeys = new int[capacity];
+      System.arraycopy(rawKeys, 0, newRawKeys, 0, numValuesToPreserve);
+      rawKeys = newRawKeys;
+      _intRawKeys = rawKeys;
+    }
     return rawKeys;
   }
 

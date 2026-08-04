@@ -286,6 +286,13 @@ public class DataBlockCache implements AutoCloseable {
   }
 
   /**
+   * Fills a caller-owned flat buffer with the dictionary ids for a multi-valued column.
+   */
+  public void getDictIdsForMVColumn(String column, MvIntArrayBuffer dictIds) {
+    _dataFetcher.fetchDictIds(column, _docIds, _length, dictIds);
+  }
+
+  /**
    * Get the int values for a multi-valued column.
    *
    * @param column Column name

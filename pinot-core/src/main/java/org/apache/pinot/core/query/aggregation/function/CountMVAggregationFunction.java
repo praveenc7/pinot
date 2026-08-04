@@ -40,6 +40,11 @@ public class CountMVAggregationFunction extends CountAggregationFunction {
   }
 
   @Override
+  public boolean supportsFlatGroupByMV() {
+    return false;
+  }
+
+  @Override
   public String getResultColumnName() {
     return AggregationFunctionType.COUNTMV.getName().toLowerCase() + "(" + _expression + ")";
   }

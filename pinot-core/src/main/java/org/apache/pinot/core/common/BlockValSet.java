@@ -137,6 +137,16 @@ public interface BlockValSet {
   int[][] getDictionaryIdsMV();
 
   /**
+   * Fills the given buffer with the dictionary ids for a multi-valued column.
+   *
+   * <p>The default implementation flattens {@link #getDictionaryIdsMV()}. Projection-backed implementations override
+   * this method to read directly into the flat buffer without allocating one array per document.
+   */
+  default void getDictionaryIdsMV(int numDocs, MvIntArrayBuffer buffer) {
+    buffer.fill(getDictionaryIdsMV(), numDocs);
+  }
+
+  /**
    * Returns the int values for a multi-valued column.
    *
    * @return Array of int values

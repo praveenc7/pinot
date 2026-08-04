@@ -91,6 +91,24 @@ public interface AggregationFunction<IntermediateResult, FinalResult extends Com
       Map<ExpressionContext, BlockValSet> blockValSetMap);
 
   /**
+   * Returns whether this function can aggregate flat multi-value group keys.
+   */
+  default boolean supportsFlatGroupByMV() {
+    return false;
+  }
+
+  /**
+   * Performs aggregation on flat multi-value group keys.
+   *
+   * <p>The group keys for document {@code i} are
+   * {@code groupKeys[groupKeyOffsets[i] .. groupKeyOffsets[i + 1])}.
+   */
+  default void aggregateGroupByMVFlat(int length, int[] groupKeys, int[] groupKeyOffsets,
+      GroupByResultHolder groupByResultHolder, Map<ExpressionContext, BlockValSet> blockValSetMap) {
+    throw new UnsupportedOperationException("Flat multi-value group keys are not supported by: " + getType());
+  }
+
+  /**
    * Extracts the intermediate result from the aggregation result holder (aggregation only).
    */
   @Nullable

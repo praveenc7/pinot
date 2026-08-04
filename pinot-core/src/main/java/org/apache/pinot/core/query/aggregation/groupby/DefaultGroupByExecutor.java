@@ -29,6 +29,7 @@ import org.apache.pinot.common.request.context.FilterContext;
 import org.apache.pinot.common.request.context.predicate.InPredicate;
 import org.apache.pinot.common.request.context.predicate.Predicate;
 import org.apache.pinot.core.common.BlockValSet;
+import org.apache.pinot.core.common.MvIntArrayBuffer;
 import org.apache.pinot.core.data.table.IntermediateRecord;
 import org.apache.pinot.core.data.table.TableResizer;
 import org.apache.pinot.core.operator.BaseProjectOperator;
@@ -62,8 +63,10 @@ public class DefaultGroupByExecutor implements GroupByExecutor {
   protected final GroupKeyGenerator _groupKeyGenerator;
   protected final GroupByResultHolder[] _groupByResultHolders;
   protected final boolean _hasMVGroupByExpression;
+  protected final boolean _useFlatMVGroupKeys;
   protected final int[] _svGroupKeys;
   protected final int[][] _mvGroupKeys;
+  protected MvIntArrayBuffer _flatMVGroupKeys;
 
   public DefaultGroupByExecutor(QueryContext queryContext, ExpressionContext[] groupByExpressions,
       BaseProjectOperator<?> projectOperator) {
@@ -127,10 +130,21 @@ public class DefaultGroupByExecutor implements GroupByExecutor {
       _groupByResultHolders[i] = _aggregationFunctions[i].createGroupByResultHolder(initialCapacity, maxNumResults);
     }
 
+    boolean useFlatMVGroupKeys = _hasMVGroupByExpression && _groupKeyGenerator.supportsFlatGroupKeys();
+    if (useFlatMVGroupKeys) {
+      for (AggregationFunction aggregationFunction : _aggregationFunctions) {
+        if (!aggregationFunction.supportsFlatGroupByMV()) {
+          useFlatMVGroupKeys = false;
+          break;
+        }
+      }
+    }
+    _useFlatMVGroupKeys = useFlatMVGroupKeys;
+
     // Initialize map from document Id to group key
     if (_hasMVGroupByExpression) {
       _svGroupKeys = null;
-      _mvGroupKeys = THREAD_LOCAL_MV_GROUP_KEYS.get();
+      _mvGroupKeys = _useFlatMVGroupKeys ? null : THREAD_LOCAL_MV_GROUP_KEYS.get();
     } else {
       _svGroupKeys = THREAD_LOCAL_SV_GROUP_KEYS.get();
       _mvGroupKeys = null;
@@ -189,7 +203,9 @@ public class DefaultGroupByExecutor implements GroupByExecutor {
   public void process(ValueBlock valueBlock) {
     // Generate group keys
     // NOTE: groupKeyGenerator will limit the number of groups. Once reaching limit, no new group will be generated
-    if (_hasMVGroupByExpression) {
+    if (_useFlatMVGroupKeys) {
+      _flatMVGroupKeys = _groupKeyGenerator.generateFlatKeysForBlock(valueBlock);
+    } else if (_hasMVGroupByExpression) {
       _groupKeyGenerator.generateKeysForBlock(valueBlock, _mvGroupKeys);
     } else {
       _groupKeyGenerator.generateKeysForBlock(valueBlock, _svGroupKeys);
@@ -210,7 +226,10 @@ public class DefaultGroupByExecutor implements GroupByExecutor {
     Map<ExpressionContext, BlockValSet> blockValSetMap =
         AggregationFunctionUtils.getBlockValSetMap(aggregationFunction, valueBlock);
     GroupByResultHolder groupByResultHolder = _groupByResultHolders[functionIndex];
-    if (_hasMVGroupByExpression) {
+    if (_useFlatMVGroupKeys) {
+      aggregationFunction.aggregateGroupByMVFlat(length, _flatMVGroupKeys.getValues(), _flatMVGroupKeys.getOffsets(),
+          groupByResultHolder, blockValSetMap);
+    } else if (_hasMVGroupByExpression) {
       aggregationFunction.aggregateGroupByMV(length, _mvGroupKeys, groupByResultHolder, blockValSetMap);
     } else {
       aggregationFunction.aggregateGroupBySV(length, _svGroupKeys, groupByResultHolder, blockValSetMap);
