@@ -583,6 +583,7 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
     PinotMeter realtimeBytesIngestedMeter = null;
     PinotMeter realtimeBytesDroppedMeter = null;
     PinotMeter realtimeRowsConsumedMeter = null;
+    PinotMeter realtimeRowsConsumedGlobalMeter = null;
     PinotMeter realtimeRowsDroppedMeter = null;
     PinotMeter realtimeIncompleteRowsConsumedMeter = null;
     PinotMeter realtimeRowsSanitizedMeter = null;
@@ -688,7 +689,9 @@ public class RealtimeSegmentDataManager extends SegmentDataManager {
             realtimeRowsConsumedMeter =
                 _serverMetrics.addMeteredTableValue(_clientId, ServerMeter.REALTIME_ROWS_CONSUMED, 1,
                     realtimeRowsConsumedMeter);
-            _serverMetrics.addMeteredGlobalValue(ServerMeter.REALTIME_ROWS_CONSUMED, 1L);
+            realtimeRowsConsumedGlobalMeter =
+                _serverMetrics.addMeteredGlobalValue(ServerMeter.REALTIME_ROWS_CONSUMED, 1L,
+                    realtimeRowsConsumedGlobalMeter);
 
             int recordSerializedValueLength = _lastRowMetadata.getRecordSerializedSize();
             realtimeBytesIngestedMeter =
