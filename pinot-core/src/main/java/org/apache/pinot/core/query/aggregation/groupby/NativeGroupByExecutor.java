@@ -85,14 +85,6 @@ public class NativeGroupByExecutor implements GroupByExecutor {
 
   private static final Cleaner CLEANER = Cleaner.create();
 
-  /**
-   * When {@code -Dpinot.native.groupby.profile=true}, the executor accumulates per-phase wall time
-   * (key probe / agg apply / result drain) and logs a breakdown when the segment result is
-   * materialized. Off by default — gated so the production path has no timing overhead. Used to
-   * attribute where the segment-operator time goes (the §22.9 lever-0 attribution).
-   */
-  private static final boolean PROFILE = Boolean.getBoolean("pinot.native.groupby.profile");
-
   private final AggregationFunction[] _aggregationFunctions;
   private final ExpressionContext[] _keyExpressions;
   private final Dictionary[] _keyDictionaries;
@@ -111,16 +103,6 @@ public class NativeGroupByExecutor implements GroupByExecutor {
   private boolean _materialized;
   private NativeGroupKeyGenerator _groupKeyGenerator;
   private GroupByResultHolder[] _groupByResultHolders;
-
-  // Profiling accumulators (ns); only written when PROFILE.
-  private long _nsKeyProbe;
-  private long _nsAggApply;
-  private long _nsDrain;
-  private long _rowsProcessed;
-  private int _blocks;
-  // Tier chosen by the native ladder for this segment: 0=T1 bit-packed-direct, 1=T0 radix-direct,
-  // 2=T2 bit-packed-hash, -1=single-column / invalid. Captured before the handle is released.
-  private int _tier = -1;
 
   public NativeGroupByExecutor(QueryContext queryContext, ExpressionContext[] groupByExpressions,
       BaseProjectOperator<?> projectOperator) {
@@ -176,11 +158,6 @@ public class NativeGroupByExecutor implements GroupByExecutor {
     }
     _cleanup = new HandleCleanup(_nativeHandle);
     CLEANER.register(this, _cleanup);
-    if (PROFILE) {
-      // Single-column drivers report their underlying tier tag (bit-packed / hash); label them "single"
-      // for an honest profile line since they take the no-pack single-column fast path.
-      _tier = _numKeyColumns == 1 ? -1 : PinotNativeGroupBy.tierTag(_nativeHandle);
-    }
   }
 
   private static int valueFamily(DataType storedType) {
@@ -251,7 +228,6 @@ public class NativeGroupByExecutor implements GroupByExecutor {
   @Override
   public void process(ValueBlock valueBlock) {
     int length = valueBlock.getNumDocs();
-    long t0 = PROFILE ? System.nanoTime() : 0L;
     // Gather the key columns' dict-ids column-major into `flat` and feed one
     // block. Single-column skips the copy (the block's dict-id array is already
     // the column); the native side packs multi-column keys and picks the tier.
@@ -270,7 +246,6 @@ public class NativeGroupByExecutor implements GroupByExecutor {
       flat = _multiKeyScratch;
     }
     PinotNativeGroupBy.processBlockKeys(_nativeHandle, flat, _numKeyColumns, length);
-    long t1 = PROFILE ? System.nanoTime() : 0L;
 
     for (int i = 0; i < _aggregationFunctions.length; i++) {
       if (_applyFamily[i] == FAMILY_COUNT) {
@@ -295,12 +270,6 @@ public class NativeGroupByExecutor implements GroupByExecutor {
           throw new IllegalStateException("Unexpected value family: " + _applyFamily[i]);
       }
     }
-    if (PROFILE) {
-      _nsKeyProbe += t1 - t0;
-      _nsAggApply += System.nanoTime() - t1;
-      _rowsProcessed += length;
-      _blocks++;
-    }
   }
 
   /**
@@ -311,7 +280,6 @@ public class NativeGroupByExecutor implements GroupByExecutor {
     if (_materialized) {
       return;
     }
-    long tDrain0 = PROFILE ? System.nanoTime() : 0L;
     int numGroups = PinotNativeGroupBy.numGroups(_nativeHandle);
 
     int numAggregations = _aggregationFunctions.length;
@@ -328,32 +296,6 @@ public class NativeGroupByExecutor implements GroupByExecutor {
     _groupByResultHolders = holders;
     _materialized = true;
     releaseNative();
-    if (PROFILE) {
-      _nsDrain = System.nanoTime() - tDrain0;
-      double probeMs = _nsKeyProbe / 1e6;
-      double aggMs = _nsAggApply / 1e6;
-      double drainMs = _nsDrain / 1e6;
-      double total = probeMs + aggMs + drainMs;
-      System.out.printf(
-          "[native-groupby profile] tier=%s groups=%d rows=%d blocks=%d | keyProbe=%.2fms (%.0f%%) "
-              + "aggApply=%.2fms (%.0f%%) drain=%.2fms (%.0f%%) | segTotal=%.2fms%n",
-          tierName(_tier), numGroups, _rowsProcessed, _blocks,
-          probeMs, 100 * probeMs / total, aggMs, 100 * aggMs / total,
-          drainMs, 100 * drainMs / total, total);
-    }
-  }
-
-  private static String tierName(int tier) {
-    switch (tier) {
-      case 0:
-        return "T1-bitpacked-direct";
-      case 1:
-        return "T0-radix-direct";
-      case 2:
-        return "T2-bitpacked-hash";
-      default:
-        return "single";
-    }
   }
 
   /**

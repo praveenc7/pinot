@@ -159,9 +159,8 @@ public class NativeGroupBySweepTest extends BaseQueriesTest {
   public void setUp() {
     // This is a manual performance benchmark (a full default run is ~18 min locally and ~60+ min on a
     // slow CI runner), NOT a correctness unit test — running it in the standard suite blows past the
-    // surefire fork timeout. Skip by default; opt in with -Dsweep.run=true (same pattern as
-    // NativeGroupByProfileTest's -Dpinot.native.groupby.profile.run). Row parity is already asserted by
-    // NativeGroupByQueriesTest / NativeGroupByCombineQueriesTest, which DO run in CI.
+    // surefire fork timeout. Skip by default; opt in with -Dsweep.run=true. Row parity is already
+    // asserted by NativeGroupByQueriesTest / NativeGroupByCombineQueriesTest, which DO run in CI.
     if (!Boolean.getBoolean("sweep.run")) {
       throw new SkipException("perf sweep disabled; pass -Dsweep.run=true to run NativeGroupBySweepTest");
     }
