@@ -58,3 +58,6 @@ kubernetes/helm/**/Chart.lock
 #Develocity
 .mvn/.gradle-enterprise/
 .mvn/.develocity/
+
+#local design discussion notes (not for upstream)
+design-discussions/

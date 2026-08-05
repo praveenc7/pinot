@@ -44,6 +44,7 @@ import org.apache.pinot.core.data.table.Record;
 import org.apache.pinot.core.data.table.Table;
 import org.apache.pinot.core.query.aggregation.function.AggregationFunction;
 import org.apache.pinot.core.query.aggregation.groupby.AggregationGroupByResult;
+import org.apache.pinot.core.query.aggregation.groupby.NativeSegmentResult;
 import org.apache.pinot.core.query.request.context.QueryContext;
 import org.apache.pinot.spi.query.QueryThreadContext;
 import org.apache.pinot.spi.utils.ByteArray;
@@ -57,6 +58,9 @@ import org.roaringbitmap.RoaringBitmap;
 public class GroupByResultsBlock extends BaseResultsBlock {
   private final DataSchema _dataSchema;
   private final AggregationGroupByResult _aggregationGroupByResult;
+  // Native combine fast path (boundary-1): set instead of _aggregationGroupByResult when the segment ran
+  // the native GROUP BY executor and the native combine is enabled. Null on every non-native path.
+  private final NativeSegmentResult _nativeSegmentResult;
   private final Collection<IntermediateRecord> _intermediateRecords;
   private final Table _table;
   private final QueryContext _queryContext;
@@ -73,6 +77,20 @@ public class GroupByResultsBlock extends BaseResultsBlock {
                              QueryContext queryContext) {
     _dataSchema = dataSchema;
     _aggregationGroupByResult = aggregationGroupByResult;
+    _nativeSegmentResult = null;
+    _intermediateRecords = null;
+    _table = null;
+    _queryContext = queryContext;
+  }
+
+  /**
+   * For native segment level group-by results fed to the native combine (boundary-1 fast path).
+   */
+  public GroupByResultsBlock(DataSchema dataSchema, NativeSegmentResult nativeSegmentResult,
+                             QueryContext queryContext) {
+    _dataSchema = dataSchema;
+    _aggregationGroupByResult = null;
+    _nativeSegmentResult = nativeSegmentResult;
     _intermediateRecords = null;
     _table = null;
     _queryContext = queryContext;
@@ -85,6 +103,7 @@ public class GroupByResultsBlock extends BaseResultsBlock {
                              QueryContext queryContext) {
     _dataSchema = dataSchema;
     _aggregationGroupByResult = null;
+    _nativeSegmentResult = null;
     _intermediateRecords = intermediateRecords;
     _table = null;
     _queryContext = queryContext;
@@ -96,6 +115,7 @@ public class GroupByResultsBlock extends BaseResultsBlock {
   public GroupByResultsBlock(Table table, QueryContext queryContext) {
     _dataSchema = table.getDataSchema();
     _aggregationGroupByResult = null;
+    _nativeSegmentResult = null;
     _intermediateRecords = null;
     _table = table;
     _queryContext = queryContext;
@@ -107,6 +127,7 @@ public class GroupByResultsBlock extends BaseResultsBlock {
   public GroupByResultsBlock(DataSchema dataSchema, QueryContext queryContext) {
     _dataSchema = dataSchema;
     _aggregationGroupByResult = null;
+    _nativeSegmentResult = null;
     _intermediateRecords = null;
     _table = null;
     _queryContext = queryContext;
@@ -114,6 +135,11 @@ public class GroupByResultsBlock extends BaseResultsBlock {
 
   public AggregationGroupByResult getAggregationGroupByResult() {
     return _aggregationGroupByResult;
+  }
+
+  /** Native combine fast-path payload; null unless the segment ran the native executor under native combine. */
+  public NativeSegmentResult getNativeSegmentResult() {
+    return _nativeSegmentResult;
   }
 
   public Collection<IntermediateRecord> getIntermediateRecords() {

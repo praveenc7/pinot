@@ -37,10 +37,14 @@ import org.apache.pinot.core.operator.ExecutionStatistics;
 import org.apache.pinot.core.operator.ExplainAttributeBuilder;
 import org.apache.pinot.core.operator.blocks.ValueBlock;
 import org.apache.pinot.core.operator.blocks.results.GroupByResultsBlock;
+import org.apache.pinot.core.operator.combine.NativeGroupByCombineRouter;
 import org.apache.pinot.core.query.aggregation.function.AggregationFunction;
 import org.apache.pinot.core.query.aggregation.function.AggregationFunctionUtils.AggregationInfo;
 import org.apache.pinot.core.query.aggregation.groupby.DefaultGroupByExecutor;
 import org.apache.pinot.core.query.aggregation.groupby.GroupByExecutor;
+import org.apache.pinot.core.query.aggregation.groupby.NativeGroupByExecutor;
+import org.apache.pinot.core.query.aggregation.groupby.NativeGroupByRouter;
+import org.apache.pinot.core.query.aggregation.groupby.NativeSegmentResult;
 import org.apache.pinot.core.query.request.context.QueryContext;
 import org.apache.pinot.core.startree.executor.StarTreeGroupByExecutor;
 import org.apache.pinot.core.util.GroupByUtils;
@@ -108,6 +112,8 @@ public class GroupByOperator extends BaseOperator<GroupByResultsBlock> {
     GroupByExecutor groupByExecutor;
     if (_useStarTree) {
       groupByExecutor = new StarTreeGroupByExecutor(_queryContext, _groupByExpressions, _projectOperator);
+    } else if (NativeGroupByRouter.shouldAccelerate(_queryContext, _groupByExpressions, _projectOperator)) {
+      groupByExecutor = new NativeGroupByExecutor(_queryContext, _groupByExpressions, _projectOperator);
     } else {
       groupByExecutor = new DefaultGroupByExecutor(_queryContext, _groupByExpressions, _projectOperator);
     }
@@ -150,7 +156,15 @@ public class GroupByOperator extends BaseOperator<GroupByResultsBlock> {
       }
     }
 
-    GroupByResultsBlock resultsBlock = new GroupByResultsBlock(_dataSchema, groupByExecutor.getResult(), _queryContext);
+    GroupByResultsBlock resultsBlock;
+    if (groupByExecutor instanceof NativeGroupByExecutor && NativeGroupByCombineRouter.isEnabled()) {
+      // Boundary-1 fast path: hand primitive columnar arrays to the native combine (no boxed
+      // AggregationGroupByResult / GroupByResultHolder / per-group Object[] key iterator).
+      NativeSegmentResult nativeResult = ((NativeGroupByExecutor) groupByExecutor).buildNativeSegmentResult();
+      resultsBlock = new GroupByResultsBlock(_dataSchema, nativeResult, _queryContext);
+    } else {
+      resultsBlock = new GroupByResultsBlock(_dataSchema, groupByExecutor.getResult(), _queryContext);
+    }
     resultsBlock.setNumGroupsLimitReached(numGroupsLimitReached);
     resultsBlock.setNumGroupsWarningLimitReached(numGroupsWarningLimitReached);
     return resultsBlock;

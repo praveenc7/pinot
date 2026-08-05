@@ -1,0 +1,58 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+[workspace]
+resolver = "2"
+members = [
+    "ffi",
+    "kernels",
+    "groupby",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/apache/pinot"
+
+# Workspace-wide lint configuration. Default clippy is enabled (each crate opts in
+# via `[lints] workspace = true`); the entries below are the few lints we
+# deliberately allow, each with a reason. Tightening these + adding the `pedantic`
+# / `perf` groups is a follow-up (PR #208 review, I14).
+[workspace.lints.clippy]
+# The hex seed constants are intentional wordplay (0xc0ffee_dead_5eed = "coffee dead
+# seed", etc.); regrouping their digits into equal-size groups would destroy that.
+unusual_byte_groupings = "allow"
+# Several doc-comment bullet continuations are intentionally aligned under the bullet
+# text for readability; clippy's preferred indentation would misalign them.
+doc_overindented_list_items = "allow"
+# `for i in 0..n { a[i] }` -> iterator rewrites in the pack/merge/serialize hot loops
+# are deferred to the loop-idiom cleanup follow-up (PR #208 review, I6/I7/I8) so they
+# can be benchmarked as a batch. Re-enable (remove this allow) in that PR.
+needless_range_loop = "allow"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+# NOTE: do NOT set `panic = "abort"` here. This crate is a cdylib loaded into the
+# JVM, and every JNI entry point in the ffi crate wraps its body in
+# `panic::catch_unwind` to convert a Rust panic into a Java-side sentinel/exception.
+# `catch_unwind` only intercepts panics under the default `unwind` strategy; with
+# `panic = "abort"` a panic calls abort() (SIGABRT) and takes down the whole Java
+# process, defeating that firewall. Keep the default unwind strategy.
+debug = 1

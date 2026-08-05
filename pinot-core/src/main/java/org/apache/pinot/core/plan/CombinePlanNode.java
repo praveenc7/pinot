@@ -30,6 +30,8 @@ import org.apache.pinot.core.operator.combine.BaseCombineOperator;
 import org.apache.pinot.core.operator.combine.DistinctCombineOperator;
 import org.apache.pinot.core.operator.combine.GroupByCombineOperator;
 import org.apache.pinot.core.operator.combine.MinMaxValueBasedSelectionOrderByCombineOperator;
+import org.apache.pinot.core.operator.combine.NativeGroupByCombineOperator;
+import org.apache.pinot.core.operator.combine.NativeGroupByCombineRouter;
 import org.apache.pinot.core.operator.combine.SelectionOnlyCombineOperator;
 import org.apache.pinot.core.operator.combine.SelectionOrderByCombineOperator;
 import org.apache.pinot.core.operator.streaming.StreamingSelectionOnlyCombineOperator;
@@ -132,6 +134,9 @@ public class CombinePlanNode implements PlanNode {
         if (_queryContext.getGroupByExpressions() == null) {
           // Aggregation only
           return new AggregationCombineOperator(operators, _queryContext, _executorService);
+        } else if (NativeGroupByCombineRouter.shouldAccelerate(_queryContext)) {
+          // Aggregation group-by — native (Rust/JNI) combine
+          return new NativeGroupByCombineOperator(operators, _queryContext, _executorService);
         } else {
           // Aggregation group-by
           return new GroupByCombineOperator(operators, _queryContext, _executorService);
