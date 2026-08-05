@@ -38,32 +38,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Skip scheduled runs when HEAD already has a release/* tag (i.e. we
-      # successfully published this exact commit on a prior run). Manual
-      # workflow_dispatch always proceeds.
-      - name: Check if rebuild is needed
-        id: rebuild_check
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_EVENT_NAME}" != "schedule" ]]; then
-            echo "Trigger is ${GITHUB_EVENT_NAME}; proceeding with build."
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git fetch --tags --quiet origin || true
-          EXISTING=$(git tag --points-at HEAD --list 'release/*' | head -n1)
-          if [[ -n "${EXISTING}" ]]; then
-            echo "HEAD already published as ${EXISTING}; skipping."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No release/* tag on HEAD; proceeding with build."
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Set up JDK 11
-        if: steps.rebuild_check.outputs.skip != 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -73,7 +48,6 @@ jobs:
       # Compute a unique release version: <base>-li-<run>
       - name: Compute & set version
         id: version
-        if: steps.rebuild_check.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -111,7 +85,6 @@ jobs:
           mvn -B -q -Pli-publish versions:commit
 
       - name: Build the repo
-        if: steps.rebuild_check.outputs.skip != 'true'
         run: |
           mvn -B -T1C clean install \
             -DskipTests \
@@ -124,7 +97,6 @@ jobs:
             -Djdk.version=11
 
       - name: Deploy to Artifactory
-        if: steps.rebuild_check.outputs.skip != 'true'
         run: |
           mvn -B deploy \
             -DskipTests \
@@ -140,7 +112,7 @@ jobs:
             -DaltDeploymentRepository=central::default::https://linkedin.jfrog.io/artifactory/pinot
 
       - name: Create git tag for release
-        if: success() && steps.rebuild_check.outputs.skip != 'true'
+        if: success()
         run: |
           TAG="release/${{ steps.version.outputs.release_version }}"
           echo "Creating tag: ${TAG}"
@@ -148,7 +120,7 @@ jobs:
           git push origin "${TAG}"
 
       - name: Print pinot-lnkd-deps tree
-        if: success() && steps.rebuild_check.outputs.skip != 'true'
+        if: success()
         run: |
           echo "Dependency tree for pinot-lnkd-deps:"
           mvn -B dependency:tree -pl pinot-lnkd-deps -Pli-publish -s ci.settings.xml || true
