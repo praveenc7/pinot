@@ -114,4 +114,65 @@ public class ExponentialMovingAverageTest {
       assertEquals(average.getAverage(), currAvg);
     }
   }
+
+  /**
+   * decayIfStale must move the average towards the supplied target rather than towards zero, and must converge to
+   * the target rather than overshoot it. This is the primitive the adaptive server selector's latency baseline is
+   * built on.
+   */
+  @Test
+  public void testDecayIfStaleMovesTowardsTarget() {
+    ExponentialMovingAverage ema = new ExponentialMovingAverage(0.5, 1000, 0, 100.0, _executorService, () -> 10.0);
+    // An average that has never been updated is not eligible to decay, so record the initial value as an
+    // observation first.
+    ema.compute(100.0);
+    long now = System.currentTimeMillis();
+
+    // Not stale yet: the decay window has not elapsed since the update.
+    ema.decayIfStale(now);
+    assertEquals(ema.getAverage(), 100.0);
+
+    // Stale: each call halves the distance to the target.
+    ema.decayIfStale(now + 2000);
+    assertEquals(ema.getAverage(), 55.0, 1e-9);
+
+    for (int i = 2; i < 60; i++) {
+      ema.decayIfStale(now + 2000L * i);
+    }
+    assertEquals(ema.getAverage(), 10.0, 1e-6, "The average must converge to the target, not to zero.");
+  }
+
+  /**
+   * A non-finite or negative decay target must be skipped rather than poisoning the average. NaN in particular
+   * would propagate into the routing score and corrupt server ranking.
+   */
+  @Test
+  public void testDecayIfStaleSkipsInvalidTargets() {
+    long now = System.currentTimeMillis();
+    for (double target : new double[]{Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -1.0}) {
+      ExponentialMovingAverage ema =
+          new ExponentialMovingAverage(0.5, 1000, 0, 100.0, _executorService, () -> target);
+      ema.compute(100.0);
+      ema.decayIfStale(now + 5000);
+      assertEquals(ema.getAverage(), 100.0, "Target " + target + " must have been skipped.");
+    }
+  }
+
+  /**
+   * computeAndReportIfApplied must report false for samples the warm-up period discards, so that callers can tell a
+   * genuine measurement apart from one that left the average holding its initialization value.
+   */
+  @Test
+  public void testComputeReportsWhetherSampleWasApplied()
+      throws Exception {
+    ExponentialMovingAverage warmingUp = new ExponentialMovingAverage(0.5, -1, 30_000, 1.0, _executorService);
+    assertTrue(!warmingUp.computeAndReportIfApplied(500.0), "A warm-up sample must not be reported as applied.");
+    assertEquals(warmingUp.getAverage(), 1.0, "A warm-up sample must not move the average.");
+
+    ExponentialMovingAverage warm = new ExponentialMovingAverage(0.5, -1, 0, 1.0, _executorService);
+    // The warm-up window is measured from construction, so ensure it has strictly elapsed.
+    Thread.sleep(5);
+    assertTrue(warm.computeAndReportIfApplied(500.0), "A post warm-up sample must be reported as applied.");
+    assertEquals(warm.getAverage(), 250.5, 1e-9);
+  }
 }

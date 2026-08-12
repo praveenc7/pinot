@@ -844,6 +844,17 @@ public class CommonConstants {
       public static final String CONFIG_OF_STATS_MANAGER_THREADPOOL_SIZE =
           CONFIG_PREFIX + ".stats.manager.threadpool.size";
       public static final int DEFAULT_STATS_MANAGER_THREADPOOL_SIZE = 2;
+
+      // Parameters related to the latency decay floor.
+      //
+      // By default the latency EMA auto-decays towards zero. Since the hybrid score multiplies the queue term by the
+      // latency EMA, a latency EMA of zero forces the score to zero regardless of how many requests are in flight,
+      // which removes all backpressure. A server that has been out of routing long enough for its latency EMA to
+      // decay (for example while queriesDisabled is set) therefore becomes an unbounded traffic magnet the moment it
+      // returns. When this is enabled, the latency EMA instead decays towards a fleet-wide baseline so that the queue
+      // term remains meaningful and the returning server sheds traffic once it accumulates in-flight requests.
+      public static final String CONFIG_OF_LATENCY_DECAY_FLOOR_ENABLED = CONFIG_PREFIX + ".latency.decay.floor.enabled";
+      public static final boolean DEFAULT_LATENCY_DECAY_FLOOR_ENABLED = false;
     }
 
     public static class Grpc {

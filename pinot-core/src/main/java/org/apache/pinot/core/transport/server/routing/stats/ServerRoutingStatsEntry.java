@@ -22,6 +22,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.DoubleSupplier;
 import org.apache.pinot.common.utils.ExponentialMovingAverage;
 
 
@@ -41,21 +42,33 @@ public class ServerRoutingStatsEntry {
   // Fields related to latency
   private final ExponentialMovingAverage _latencyMsEMA;
 
+  // Timestamp of the last latency update originating from an actual server response. Deliberately NOT updated by
+  // the auto-decay path, so it can be used to tell whether the latency EMA reflects a real measurement or merely
+  // the value it has been decayed towards. Used to filter entries when computing the fleet-wide decay floor.
+  private volatile long _lastRealLatencyUpdateMs;
+
   // Hybrid score exponent.
   private final int _hybridScoreExponent;
 
   public ServerRoutingStatsEntry(String serverInstanceId, double alphaEMA, long autoDecayWindowMsEMA,
-      long warmupDurationMsEMA, double avgInitializationValEMA, int scoreExponent,
-      ScheduledExecutorService periodicTaskExecutor) {
+      long warmupDurationMsEMA, double avgInitializationValEMA, double latencyInitializationValEMA, int scoreExponent,
+      ScheduledExecutorService periodicTaskExecutor, DoubleSupplier latencyDecayTargetSupplier) {
     _serverInstanceId = serverInstanceId;
     _serverLock = new ReentrantReadWriteLock();
 
+    // The in-flight request count decays towards zero: a server that is receiving no queries genuinely has no
+    // outstanding requests.
     _inFlighRequestsEMA =
         new ExponentialMovingAverage(alphaEMA, autoDecayWindowMsEMA, warmupDurationMsEMA, avgInitializationValEMA,
             periodicTaskExecutor);
+    // Latency decays towards the supplied floor rather than zero. Decaying latency to zero asserts that a server
+    // with no recent traffic is infinitely fast. Seeded with the current fleet-wide baseline (when available) rather
+    // than avgInitializationVal, so that a server this broker has not queried yet is priced like a healthy idle peer
+    // instead of like a fast one. Without this, every entry created after a broker restart would be a traffic magnet
+    // until its first real response arrived.
     _latencyMsEMA =
-        new ExponentialMovingAverage(alphaEMA, autoDecayWindowMsEMA, warmupDurationMsEMA, avgInitializationValEMA,
-            periodicTaskExecutor);
+        new ExponentialMovingAverage(alphaEMA, autoDecayWindowMsEMA, warmupDurationMsEMA, latencyInitializationValEMA,
+            periodicTaskExecutor, latencyDecayTargetSupplier);
 
     _hybridScoreExponent = scoreExponent;
   }
@@ -82,9 +95,28 @@ public class ServerRoutingStatsEntry {
     return _latencyMsEMA.getAverage();
   }
 
+  @JsonIgnore
+  public long getLastRealLatencyUpdateMs() {
+    return _lastRealLatencyUpdateMs;
+  }
+
   @JsonProperty("hybridScore")
   public double computeHybridScore() {
-    double estimatedQSize = _numInFlightRequests + _inFlighRequestsEMA.getAverage();
+    // _numInFlightRequests can go negative when a response update is processed before its corresponding submission
+    // update, since both run as independent tasks on the stats executor. Only the response path decrements it, so
+    // the in-flight EMA is not lowered to match, and on an idle server that EMA has decayed towards zero: the sum
+    // can therefore be negative. Raised to an odd exponent that yields a negative score, which sorts ahead of every
+    // healthy server.
+    //
+    // Note this is a pre-existing bug, not one introduced here, and it is live rather than latent: decay drives the
+    // latency EMA towards zero geometrically but it stays strictly positive for a long time, so today's product is
+    // already a real negative number rather than a harmless -0.0. Decaying to a baseline only makes it larger in
+    // magnitude. The counter never decays, so the bad score persists until a compensating submission arrives.
+    // Because of this the clamp is deliberately not gated on the feature flag. The clamp is applied to the score input
+    // rather than to the counter itself: the transient is self-correcting, so the counter must stay free to
+    // compensate. Guarding the decrement instead would discard the response and leak a permanent phantom in-flight
+    // request, starving a healthy server.
+    double estimatedQSize = Math.max(0.0, _numInFlightRequests + _inFlighRequestsEMA.getAverage());
     return Math.pow(estimatedQSize, _hybridScoreExponent) * _latencyMsEMA.getAverage();
   }
 
@@ -98,6 +130,11 @@ public class ServerRoutingStatsEntry {
   }
 
   public void updateLatency(double latencyMs) {
-    _latencyMsEMA.compute(latencyMs);
+    // The timestamp is recorded only when the sample is actually folded into the average. During the warm-up period
+    // compute() discards the value, so marking it as a real observation would advertise an EMA that still holds the
+    // initialization value as a genuine latency measurement, letting it set the fleet-wide baseline.
+    if (_latencyMsEMA.computeAndReportIfApplied(latencyMs)) {
+      _lastRealLatencyUpdateMs = System.currentTimeMillis();
+    }
   }
 }
