@@ -36,6 +36,7 @@ public class Murmur3PartitionFunction implements PartitionFunction {
   private final int _numPartitions;
   private final int _seed;
   private final boolean _useX64;
+  private final String _partitionFunctionKey;
 
   /**
    * Constructor for the class.
@@ -65,6 +66,7 @@ public class Murmur3PartitionFunction implements PartitionFunction {
     }
     _seed = seed;
     _useX64 = useX64;
+    _partitionFunctionKey = NAME + "_" + _numPartitions + "_" + _seed + "_" + (_useX64 ? "x64" : "x86");
   }
 
   @Override
@@ -92,6 +94,6 @@ public class Murmur3PartitionFunction implements PartitionFunction {
 
   @Override
   public String getPartitionFunctionKey() {
-    return NAME + "_" + _numPartitions + "_" + _seed + "_" + (_useX64 ? "x64" : "x86");
+    return _partitionFunctionKey;
   }
 }

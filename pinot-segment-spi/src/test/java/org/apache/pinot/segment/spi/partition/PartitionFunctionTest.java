@@ -28,6 +28,7 @@ import org.testng.annotations.Test;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertSame;
 import static org.testng.Assert.assertTrue;
 
 
@@ -415,6 +416,31 @@ public class PartitionFunctionTest {
     PartitionFunction murmur3DifferentSeed =
         PartitionFunctionFactory.getPartitionFunction("Murmur3", 25, differentSeedConfig);
     assertTrue(!murmur3Function.getPartitionFunctionKey().equals(murmur3DifferentSeed.getPartitionFunctionKey()));
+  }
+
+  @Test
+  public void testPartitionFunctionKeyIsPrecomputed() {
+    // The key is computed once and called per-segment on the broker's hot pruning path. Verify each implementation
+    // returns the same cached instance on repeated calls rather than rebuilding the string every time.
+    Map<String, String> murmur3Config = new HashMap<>();
+    murmur3Config.put("seed", "42");
+    murmur3Config.put("variant", "x64_32");
+    Map<String, String> boundedConfig = new HashMap<>();
+    boundedConfig.put("columnValues", "a|b|c");
+    boundedConfig.put("columnValuesDelimiter", "|");
+
+    PartitionFunction[] functions = {
+        PartitionFunctionFactory.getPartitionFunction("Modulo", 10, null),
+        PartitionFunctionFactory.getPartitionFunction("HashCode", 20, null),
+        PartitionFunctionFactory.getPartitionFunction("Murmur", 15, null),
+        PartitionFunctionFactory.getPartitionFunction("Murmur3", 25, murmur3Config),
+        PartitionFunctionFactory.getPartitionFunction("ByteArray", 12, null),
+        PartitionFunctionFactory.getPartitionFunction("BoundedColumnValue", 4, boundedConfig)
+    };
+    for (PartitionFunction function : functions) {
+      assertSame(function.getPartitionFunctionKey(), function.getPartitionFunctionKey(),
+          function.getName() + " should return the same precomputed key instance on every call");
+    }
   }
 
   private void testBasicProperties(PartitionFunction partitionFunction, String functionName, int numPartitions) {

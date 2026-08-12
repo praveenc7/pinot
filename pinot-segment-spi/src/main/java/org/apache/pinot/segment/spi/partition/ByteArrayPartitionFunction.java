@@ -31,6 +31,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 public class ByteArrayPartitionFunction implements PartitionFunction {
   private static final String NAME = "ByteArray";
   private final int _numPartitions;
+  private final String _partitionFunctionKey;
 
   /**
    * Constructor for the class.
@@ -39,6 +40,7 @@ public class ByteArrayPartitionFunction implements PartitionFunction {
   public ByteArrayPartitionFunction(int numPartitions) {
     Preconditions.checkArgument(numPartitions > 0, "Number of partitions must be > 0, specified", numPartitions);
     _numPartitions = numPartitions;
+    _partitionFunctionKey = NAME + "_" + _numPartitions;
   }
 
   @Override
@@ -54,6 +56,11 @@ public class ByteArrayPartitionFunction implements PartitionFunction {
   @Override
   public int getNumPartitions() {
     return _numPartitions;
+  }
+
+  @Override
+  public String getPartitionFunctionKey() {
+    return _partitionFunctionKey;
   }
 
   // Keep it for backward-compatibility, use getName() instead

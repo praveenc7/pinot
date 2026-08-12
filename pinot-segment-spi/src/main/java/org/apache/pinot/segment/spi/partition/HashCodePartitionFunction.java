@@ -30,10 +30,12 @@ import com.google.common.base.Preconditions;
 public class HashCodePartitionFunction implements PartitionFunction {
   private static final String NAME = "HashCode";
   private final int _numPartitions;
+  private final String _partitionFunctionKey;
 
   public HashCodePartitionFunction(int numPartitions) {
     Preconditions.checkArgument(numPartitions > 0, "Number of partitions must be > 0, specified", numPartitions);
     _numPartitions = numPartitions;
+    _partitionFunctionKey = NAME + "_" + _numPartitions;
   }
 
   @Override
@@ -49,6 +51,11 @@ public class HashCodePartitionFunction implements PartitionFunction {
   @Override
   public int getNumPartitions() {
     return _numPartitions;
+  }
+
+  @Override
+  public String getPartitionFunctionKey() {
+    return _partitionFunctionKey;
   }
 
   // Keep it for backward-compatibility, use getName() instead

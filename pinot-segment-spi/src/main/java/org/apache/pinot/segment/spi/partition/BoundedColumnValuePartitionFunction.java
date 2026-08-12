@@ -47,6 +47,7 @@ public class BoundedColumnValuePartitionFunction implements PartitionFunction {
   private final int _numPartitions;
   private final Map<String, String> _functionConfig;
   private final String[] _values;
+  private final String _partitionFunctionKey;
 
   public BoundedColumnValuePartitionFunction(int numPartitions, Map<String, String> functionConfig) {
     Preconditions.checkArgument(functionConfig != null && functionConfig.size() > 0,
@@ -59,6 +60,8 @@ public class BoundedColumnValuePartitionFunction implements PartitionFunction {
     Preconditions.checkState(numPartitions == _values.length + 1,
         "'numPartitions' must just be one greater than number of column values configured");
     _numPartitions = numPartitions;
+    _partitionFunctionKey = NAME + "_" + _numPartitions + "_" + _functionConfig.get(COLUMN_VALUES)
+        + "_" + _functionConfig.get(COLUMN_VALUES_DELIMITER);
   }
 
   @Override
@@ -98,7 +101,6 @@ public class BoundedColumnValuePartitionFunction implements PartitionFunction {
 
   @Override
   public String getPartitionFunctionKey() {
-    return NAME + "_" + _numPartitions + "_" + _functionConfig.get(COLUMN_VALUES)
-        + "_" + _functionConfig.get(COLUMN_VALUES_DELIMITER);
+    return _partitionFunctionKey;
   }
 }

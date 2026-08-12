@@ -31,6 +31,7 @@ import com.google.common.base.Preconditions;
 public class ModuloPartitionFunction implements PartitionFunction {
   private static final String NAME = "Modulo";
   private final int _numPartitions;
+  private final String _partitionFunctionKey;
 
   /**
    * Constructor for the class.
@@ -39,6 +40,7 @@ public class ModuloPartitionFunction implements PartitionFunction {
   public ModuloPartitionFunction(int numPartitions) {
     Preconditions.checkArgument(numPartitions > 0, "Number of partitions must be > 0, specified", numPartitions);
     _numPartitions = numPartitions;
+    _partitionFunctionKey = NAME + "_" + _numPartitions;
   }
 
   /**
@@ -61,6 +63,11 @@ public class ModuloPartitionFunction implements PartitionFunction {
   @Override
   public int getNumPartitions() {
     return _numPartitions;
+  }
+
+  @Override
+  public String getPartitionFunctionKey() {
+    return _partitionFunctionKey;
   }
 
   // Keep it for backward-compatibility, use getName() instead

@@ -30,6 +30,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 public class MurmurPartitionFunction implements PartitionFunction {
   private static final String NAME = "Murmur";
   private final int _numPartitions;
+  private final String _partitionFunctionKey;
 
   /**
    * Constructor for the class.
@@ -38,6 +39,7 @@ public class MurmurPartitionFunction implements PartitionFunction {
   public MurmurPartitionFunction(int numPartitions) {
     Preconditions.checkArgument(numPartitions > 0, "Number of partitions must be > 0");
     _numPartitions = numPartitions;
+    _partitionFunctionKey = NAME + "_" + _numPartitions;
   }
 
   @Override
@@ -53,6 +55,11 @@ public class MurmurPartitionFunction implements PartitionFunction {
   @Override
   public int getNumPartitions() {
     return _numPartitions;
+  }
+
+  @Override
+  public String getPartitionFunctionKey() {
+    return _partitionFunctionKey;
   }
 
   // Keep it for backward-compatibility, use getName() instead
