@@ -30,6 +30,8 @@ import org.apache.pinot.common.restlet.resources.SegmentSizeInfo;
 import org.apache.pinot.common.restlet.resources.TableSizeInfo;
 import org.apache.pinot.controller.util.CompletionServiceHelper;
 import org.apache.pinot.spi.utils.JsonUtils;
+import org.apache.pinot.spi.utils.retry.RetryPolicies;
+import org.apache.pinot.spi.utils.retry.RetryPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,6 +53,12 @@ public class ServerTableSizeReader {
 
   public Map<String, List<SegmentSizeInfo>> getSegmentSizeInfoFromServers(BiMap<String, String> serverEndPoints,
       String tableNameWithType, int timeoutMs) {
+    return getSegmentSizeInfoFromServers(serverEndPoints, tableNameWithType, timeoutMs,
+        RetryPolicies.noDelayRetryPolicy(1));
+  }
+
+  public Map<String, List<SegmentSizeInfo>> getSegmentSizeInfoFromServers(BiMap<String, String> serverEndPoints,
+      String tableNameWithType, int timeoutMs, RetryPolicy retryPolicy) {
     int numServers = serverEndPoints.size();
     LOGGER.info("Reading segment sizes from {} servers for table: {} with timeout: {}ms", numServers, tableNameWithType,
         timeoutMs);
@@ -64,7 +72,7 @@ public class ServerTableSizeReader {
 
     // Helper service to run a httpget call to the server
     CompletionServiceHelper completionServiceHelper =
-        new CompletionServiceHelper(_executor, _connectionManager, endpointsToServers);
+        new CompletionServiceHelper(_executor, _connectionManager, endpointsToServers, retryPolicy);
     CompletionServiceHelper.CompletionServiceResponse serviceResponse =
         completionServiceHelper.doMultiGetRequest(serverUrls, tableNameWithType, false, timeoutMs,
             "get segment size info from servers");

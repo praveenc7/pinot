@@ -34,9 +34,11 @@ import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.metrics.PinotMetricUtils;
 import org.apache.pinot.spi.utils.builder.TableConfigBuilder;
 import org.apache.pinot.spi.utils.builder.TableNameBuilder;
+import org.apache.pinot.spi.utils.retry.RetryPolicies;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.Test;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -101,21 +103,26 @@ public class StorageQuotaCheckerTest {
     when(pinotHelixResourceManager.getNumReplicas(eq(tableConfig))).thenReturn(NUM_REPLICAS);
     _storageQuotaChecker =
         new StorageQuotaChecker(_tableSizeReader, controllerMetrics, mock(LeadControllerManager.class),
-            pinotHelixResourceManager, _controllerConf);
+            pinotHelixResourceManager, _controllerConf, RetryPolicies.noDelayRetryPolicy(3));
 
+    // No storage quota configured, should not be flagged as exceeded
     tableConfig.setQuotaConfig(new QuotaConfig(null, null));
     assertFalse(_storageQuotaChecker.isTableStorageQuotaExceeded(tableConfig));
 
-    tableConfig.setQuotaConfig(new QuotaConfig("2.8K", null));
+    // Per-replica storage quota of 2K
+    tableConfig.setQuotaConfig(new QuotaConfig("2K", null));
 
-    // Within quota but with missing segments, should pass without updating metrics
-    mockTableSizeResult(REALTIME_TABLE_NAME, 4 * 1024, 1);
+    // Reported per-replica size within quota, should not be flagged as exceeded
+    mockTableSizeResult(REALTIME_TABLE_NAME, 1024, 0);
     assertFalse(_storageQuotaChecker.isTableStorageQuotaExceeded(tableConfig));
 
-
-    // Exceed quota and with missing segments, should fail without updating metrics
-    mockTableSizeResult(REALTIME_TABLE_NAME, 8 * 1024, 1);
+    // Reported per-replica size exceeds quota, should be flagged as exceeded
+    mockTableSizeResult(REALTIME_TABLE_NAME, 4 * 1024, 0);
     assertTrue(_storageQuotaChecker.isTableStorageQuotaExceeded(tableConfig));
+
+    // Missing size reports from all servers, should bypass the check (not flagged as exceeded)
+    mockTableSizeResult(REALTIME_TABLE_NAME, TableSizeReader.DEFAULT_SIZE_WHEN_MISSING_OR_ERROR, 0);
+    assertFalse(_storageQuotaChecker.isTableStorageQuotaExceeded(tableConfig));
   }
 
   @Test
@@ -152,37 +159,39 @@ public class StorageQuotaCheckerTest {
         MetricValueUtils.tableGaugeExists(controllerMetrics, OFFLINE_TABLE_NAME,
             ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE));
 
-    // Within quota but with missing segments, should pass without updating metrics
+    // Per-replica size within quota but with missing segments, should pass without updating metrics
+    mockTableSizeResult(OFFLINE_TABLE_NAME, 1024, 1);
+    assertTrue(isSegmentWithinQuota(tableConfig));
+    assertFalse(
+        MetricValueUtils.tableGaugeExists(controllerMetrics, OFFLINE_TABLE_NAME,
+            ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE));
+
+
+    // Per-replica size exceeds quota (with missing segments), should fail without updating metrics
     mockTableSizeResult(OFFLINE_TABLE_NAME, 4 * 1024, 1);
-    assertTrue(isSegmentWithinQuota(tableConfig));
-    assertFalse(
-        MetricValueUtils.tableGaugeExists(controllerMetrics, OFFLINE_TABLE_NAME,
-            ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE));
-
-
-    // Exceed quota and with missing segments, should fail without updating metrics
-    mockTableSizeResult(OFFLINE_TABLE_NAME, 8 * 1024, 1);
     assertFalse(isSegmentWithinQuota(tableConfig));
     assertFalse(
         MetricValueUtils.tableGaugeExists(controllerMetrics, OFFLINE_TABLE_NAME,
             ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE));
 
-    // Within quota without missing segments, should pass and update metrics
-    mockTableSizeResult(OFFLINE_TABLE_NAME, 3 * 1024, 0);
+    // Within quota without missing segments (per-replica size + incoming segment <= per-replica quota), should pass
+    // and update metrics
+    mockTableSizeResult(OFFLINE_TABLE_NAME, 1024, 0);
     assertTrue(isSegmentWithinQuota(tableConfig));
     assertEquals(
         MetricValueUtils.getTableGaugeValue(controllerMetrics, OFFLINE_TABLE_NAME,
-            ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE), 3 * 1024);
+            ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE), NUM_REPLICAS * 1024);
 
-    // Exceed quota without missing segments, should fail and update metrics
-    mockTableSizeResult(OFFLINE_TABLE_NAME, 4 * 1024, 0);
+    // Exceed quota without missing segments (per-replica size + incoming segment > per-replica quota), should fail and
+    // update metrics
+    mockTableSizeResult(OFFLINE_TABLE_NAME, 2 * 1024, 0);
     assertFalse(isSegmentWithinQuota(tableConfig));
     assertEquals(
         MetricValueUtils.getTableGaugeValue(controllerMetrics, OFFLINE_TABLE_NAME,
-            ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE), 4 * 1024);
+            ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE), NUM_REPLICAS * 2 * 1024);
 
     // Exceed quota but refreshing segment with equal or smaller size, should pass and update metrics
-    mockTableSizeResult(OFFLINE_TABLE_NAME, 4 * 1024, 0);
+    mockTableSizeResult(OFFLINE_TABLE_NAME, 2 * 1024, 0);
     SegmentZKMetadata segmentZKMetadata = new SegmentZKMetadata(SEGMENT_NAME);
     segmentZKMetadata.setSizeInBytes(SEGMENT_SIZE_IN_BYTES);
     when(pinotHelixResourceManager.getSegmentZKMetadata(
@@ -191,7 +200,7 @@ public class StorageQuotaCheckerTest {
     assertTrue(isSegmentWithinQuota(tableConfig));
     assertEquals(
         MetricValueUtils.getTableGaugeValue(controllerMetrics, OFFLINE_TABLE_NAME,
-            ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE), 4 * 1024);
+            ControllerGauge.OFFLINE_TABLE_ESTIMATED_SIZE), NUM_REPLICAS * 2 * 1024);
   }
 
   private boolean isSegmentWithinQuota(TableConfig tableConfig)
@@ -201,12 +210,17 @@ public class StorageQuotaCheckerTest {
         ._isSegmentWithinQuota;
   }
 
-  public void mockTableSizeResult(String tableName, long tableSizeInBytes, int numMissingSegments)
+  public void mockTableSizeResult(String tableName, long perReplicaSizeInBytes, int numMissingSegments)
       throws InvalidConfigException {
     TableSizeReader.TableSubTypeSizeDetails tableSizeResult = new TableSizeReader.TableSubTypeSizeDetails();
-    tableSizeResult._estimatedSizeInBytes = tableSizeInBytes;
+    boolean missingAllSegments = perReplicaSizeInBytes == TableSizeReader.DEFAULT_SIZE_WHEN_MISSING_OR_ERROR;
+    tableSizeResult._reportedSizePerReplicaInBytes = perReplicaSizeInBytes;
+    tableSizeResult._estimatedSizeInBytes =
+        missingAllSegments ? TableSizeReader.DEFAULT_SIZE_WHEN_MISSING_OR_ERROR : perReplicaSizeInBytes * NUM_REPLICAS;
     tableSizeResult._segments = Collections.emptyMap();
     tableSizeResult._missingSegments = numMissingSegments;
     when(_tableSizeReader.getTableSubtypeSize(tableName, 1000, true)).thenReturn(tableSizeResult);
+    // The RealtimeSegmentValidationManager (table-level) flow reads sizes via the retry-policy overload.
+    when(_tableSizeReader.getTableSubtypeSize(eq(tableName), eq(1000), eq(true), any())).thenReturn(tableSizeResult);
   }
 }

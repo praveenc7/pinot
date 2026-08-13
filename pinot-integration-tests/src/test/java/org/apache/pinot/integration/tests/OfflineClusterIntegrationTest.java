@@ -193,7 +193,7 @@ public class OfflineClusterIntegrationTest extends BaseClusterIntegrationTestSet
 
   // Store the table size. Table size is platform dependent because of the native library used by the ChunkCompressor.
   // Once this value is set, assert that table size always gets back to this value after removing the added indices.
-  private long _tableSize;
+  protected long _tableSize;
 
   protected int getNumBrokers() {
     return NUM_BROKERS;

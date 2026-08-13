@@ -108,6 +108,8 @@ public enum ControllerGauge implements AbstractMetrics.Gauge {
   // Table quota based on setting in table config
   TABLE_QUOTA("TableQuotaBasedOnTableConfig", false),
 
+  TABLE_QUOTA_PER_REPLICA("TableQuotaPerReplicaBasedOnTableConfig", false),
+
   // Table storage quota utilization
   TABLE_STORAGE_QUOTA_UTILIZATION("TableStorageQuotaUtilization", false),
 

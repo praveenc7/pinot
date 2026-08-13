@@ -32,6 +32,8 @@ import org.apache.hc.client5.http.io.HttpClientConnectionManager;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.pinot.common.http.MultiHttpRequest;
 import org.apache.pinot.common.http.MultiHttpRequestResponse;
+import org.apache.pinot.spi.utils.retry.RetryPolicies;
+import org.apache.pinot.spi.utils.retry.RetryPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,12 +51,24 @@ public class CompletionServiceHelper {
   private final Executor _executor;
   private final HttpClientConnectionManager _httpConnectionManager;
   private final BiMap<String, String> _endpointsToServers;
+  private final RetryPolicy _retryPolicy;
 
   public CompletionServiceHelper(Executor executor, HttpClientConnectionManager httpConnectionManager,
       BiMap<String, String> endpointsToServers) {
+    this(executor, httpConnectionManager, endpointsToServers, RetryPolicies.noDelayRetryPolicy(1));
+  }
+
+  /**
+   * @param retryPolicy retry policy applied independently to each endpoint request, so only failed endpoints are
+   *                    retried rather than the whole operation. Use {@link RetryPolicies#noDelayRetryPolicy(int)}
+   *                    with a single attempt to disable retries.
+   */
+  public CompletionServiceHelper(Executor executor, HttpClientConnectionManager httpConnectionManager,
+      BiMap<String, String> endpointsToServers, RetryPolicy retryPolicy) {
     _executor = executor;
     _httpConnectionManager = httpConnectionManager;
     _endpointsToServers = endpointsToServers;
+    _retryPolicy = retryPolicy;
   }
 
   public CompletionServiceResponse doMultiGetRequest(List<String> serverURLs, String tableNameWithType,
@@ -82,7 +96,8 @@ public class CompletionServiceHelper {
       @Nullable String useCase) {
     // TODO: use some service other than completion service so that we know which server encounters the error
     CompletionService<MultiHttpRequestResponse> completionService =
-        new MultiHttpRequest(_executor, _httpConnectionManager).executeGet(serverURLs, requestHeaders, timeoutMs);
+        new MultiHttpRequest(_executor, _httpConnectionManager, _retryPolicy).executeGet(serverURLs, requestHeaders,
+            timeoutMs);
 
     return collectResponse(tableNameWithType, serverURLs.size(), completionService, multiRequestPerServer, useCase);
   }
@@ -107,8 +122,8 @@ public class CompletionServiceHelper {
       int timeoutMs, @Nullable String useCase) {
 
     CompletionService<MultiHttpRequestResponse> completionService =
-        new MultiHttpRequest(_executor, _httpConnectionManager).executePost(serverURLsAndRequestBodies, requestHeaders,
-            timeoutMs);
+        new MultiHttpRequest(_executor, _httpConnectionManager, _retryPolicy).executePost(serverURLsAndRequestBodies,
+            requestHeaders, timeoutMs);
 
     return collectResponse(tableNameWithType, serverURLsAndRequestBodies.size(), completionService,
         multiRequestPerServer, useCase);

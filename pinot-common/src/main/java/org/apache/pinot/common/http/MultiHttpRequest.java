@@ -27,6 +27,7 @@ import java.util.concurrent.CompletionService;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 import org.apache.commons.lang3.tuple.Pair;
@@ -42,6 +43,9 @@ import org.apache.hc.client5.http.io.HttpClientConnectionManager;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.apache.hc.core5.util.Timeout;
+import org.apache.pinot.spi.utils.retry.AttemptFailureException;
+import org.apache.pinot.spi.utils.retry.RetryPolicies;
+import org.apache.pinot.spi.utils.retry.RetryPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,14 +59,28 @@ public class MultiHttpRequest {
 
   private final Executor _executor;
   private final HttpClientConnectionManager _connectionManager;
+  private final RetryPolicy _retryPolicy;
 
   /**
    * @param executor executor service to use for making parallel requests
    * @param connectionManager http connection manager to use.
    */
   public MultiHttpRequest(Executor executor, HttpClientConnectionManager connectionManager) {
+    this(executor, connectionManager, RetryPolicies.noDelayRetryPolicy(1));
+  }
+
+  /**
+   * @param executor executor service to use for making parallel requests
+   * @param connectionManager http connection manager to use.
+   * @param retryPolicy retry policy applied independently to each endpoint request. This retries only the failed
+   *                    endpoints, unlike retrying the whole operation which would re-issue requests to endpoints that
+   *                    already responded successfully. Use {@link RetryPolicies#noDelayRetryPolicy(int)} with a single
+   *                    attempt to disable retries.
+   */
+  public MultiHttpRequest(Executor executor, HttpClientConnectionManager connectionManager, RetryPolicy retryPolicy) {
     _executor = executor;
     _connectionManager = connectionManager;
+    _retryPolicy = retryPolicy;
   }
 
   /**
@@ -121,28 +139,48 @@ public class MultiHttpRequest {
       completionService.submit(() -> {
         String url = pair.getLeft();
         String body = pair.getRight();
-        HttpUriRequestBase httpMethod = httpRequestBaseSupplier.apply(url);
-        // If the http method is POST, set the request body
-        if (httpMethod instanceof HttpPost) {
-          ((HttpPost) httpMethod).setEntity(new StringEntity(body));
-        }
-        if (requestHeaders != null) {
-          requestHeaders.forEach(((HttpUriRequestBase) httpMethod)::setHeader);
-        }
-        CloseableHttpResponse response = null;
+        // The retry policy is applied per endpoint so that only this endpoint's request is retried on failure,
+        // rather than re-issuing requests to endpoints that already responded successfully.
+        AtomicReference<MultiHttpRequestResponse> responseHolder = new AtomicReference<>();
+        AtomicReference<IOException> lastException = new AtomicReference<>();
         try {
-          response = client.execute(httpMethod);
-          httpMethod.setAbsoluteRequestUri(true);
-          return new MultiHttpRequestResponse(URI.create(httpMethod.getRequestUri()), response);
-        } catch (IOException ex) {
-          if (response != null) {
-            String error = EntityUtils.toString(response.getEntity());
-            LOGGER.warn("Caught '{}' while executing: {} on URL: {}", error, httpMethodName, url);
-          } else {
-            // Log only exception type and message instead of the whole stack trace
-            LOGGER.warn("Caught '{}' while executing: {} on URL: {}", ex, httpMethodName, url);
+          _retryPolicy.attempt(() -> {
+            HttpUriRequestBase httpMethod = httpRequestBaseSupplier.apply(url);
+            // If the http method is POST, set the request body
+            if (httpMethod instanceof HttpPost) {
+              ((HttpPost) httpMethod).setEntity(new StringEntity(body));
+            }
+            if (requestHeaders != null) {
+              requestHeaders.forEach(httpMethod::setHeader);
+            }
+            CloseableHttpResponse response = null;
+            try {
+              response = client.execute(httpMethod);
+              httpMethod.setAbsoluteRequestUri(true);
+              responseHolder.set(new MultiHttpRequestResponse(URI.create(httpMethod.getRequestUri()), response));
+              return true;
+            } catch (IOException ex) {
+              lastException.set(ex);
+              if (response != null) {
+                String error = EntityUtils.toString(response.getEntity());
+                LOGGER.warn("Caught '{}' while executing: {} on URL: {}", error, httpMethodName, url);
+              } else {
+                // Log only exception type and message instead of the whole stack trace
+                LOGGER.warn("Caught '{}' while executing: {} on URL: {}", ex, httpMethodName, url);
+              }
+              return false;
+            }
+          });
+          return responseHolder.get();
+        } catch (AttemptFailureException retryException) {
+          // All retry attempts for this endpoint failed. Rethrow the original IO exception (if any) so callers can
+          // reason about the failure (e.g. distinguish socket timeouts); otherwise surface the retry failure.
+          IOException ioException = lastException.get();
+          if (ioException != null) {
+            throw ioException;
           }
-          throw ex;
+          throw new IOException(
+              "Failed to execute " + httpMethodName + " on URL: " + url + " after retries", retryException);
         }
       });
     }

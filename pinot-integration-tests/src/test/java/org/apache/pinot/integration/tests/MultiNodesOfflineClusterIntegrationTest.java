@@ -193,6 +193,17 @@ public class MultiNodesOfflineClusterIntegrationTest extends OfflineClusterInteg
           throw new RuntimeException(e);
         }
       }, 10_000L, "Failed to include the restarted server into the routing. Other tests may be affected");
+
+      // Wait for the table-size read path to recover as well. Query routing can recover before the restarted
+      // server finishes re-registering its segments for the size endpoint, which would otherwise make the
+      // @AfterMethod table-size assertion observe a transient failure (-1) or a partial size.
+      TestUtils.waitForCondition((aVoid) -> {
+        try {
+          return getTableSize(getTableName()) == _tableSize;
+        } catch (Exception e) {
+          throw new RuntimeException(e);
+        }
+      }, 10_000L, "Failed to recover the table size read after restarting the server. Other tests may be affected");
     }
   }
 

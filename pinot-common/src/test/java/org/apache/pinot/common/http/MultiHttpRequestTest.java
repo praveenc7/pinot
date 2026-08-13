@@ -32,9 +32,11 @@ import java.util.List;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.pinot.spi.utils.retry.RetryPolicies;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testng.Assert;
@@ -79,14 +81,18 @@ public class MultiHttpRequestTest {
 
   private final List<HttpServer> _servers = new ArrayList<>();
   private final int _portStart = 14000;
+  // Tracks the number of remaining transient failures the flaky server should produce before responding successfully.
+  private final AtomicInteger _flakyServerFailuresRemaining = new AtomicInteger(0);
 
   @BeforeTest
   public void setUpTest()
       throws IOException {
+    _flakyServerFailuresRemaining.set(0);
     startServer(_portStart, createHandler(SUCCESS_CODE, SUCCESS_MSG, 0));
     startServer(_portStart + 1, createHandler(ERROR_CODE, ERROR_MSG, 0));
     startServer(_portStart + 2, createHandler(SUCCESS_CODE, TIMEOUT_MSG, TIMEOUT_MS));
     startServer(_portStart + 3, createPostHandler(SUCCESS_CODE, SUCCESS_MSG, 0));
+    startServer(_portStart + 4, createFlakyHandler(_flakyServerFailuresRemaining, SUCCESS_CODE, SUCCESS_MSG));
   }
 
   @AfterTest
@@ -139,6 +145,25 @@ public class MultiHttpRequestTest {
           responseBody.write(ERROR_MSG.getBytes());
           responseBody.close();
         }
+      }
+    };
+  }
+
+  private HttpHandler createFlakyHandler(final AtomicInteger failuresRemaining, final int status, final String msg) {
+    return new HttpHandler() {
+      @Override
+      public void handle(HttpExchange httpExchange)
+          throws IOException {
+        if (failuresRemaining.getAndDecrement() > 0) {
+          // Abruptly close the connection without sending any response to simulate a transient failure. This surfaces
+          // as an IOException (e.g. NoHttpResponseException) on the client side, which triggers a per-endpoint retry.
+          httpExchange.close();
+          return;
+        }
+        httpExchange.sendResponseHeaders(status, msg.length());
+        OutputStream responseBody = httpExchange.getResponseBody();
+        responseBody.write(msg.getBytes());
+        responseBody.close();
       }
     };
   }
@@ -202,6 +227,39 @@ public class MultiHttpRequestTest {
     Assert.assertEquals(result.getSuccess(), 3);
     Assert.assertEquals(result.getErrors(), 1);
     Assert.assertEquals(result.getTimeouts(), 1);
+  }
+
+  @Test
+  public void testPerEndpointRetrySucceedsOnFlakyServer() {
+    // The flaky server fails twice before succeeding, so a retry policy with 3 attempts should ultimately succeed.
+    _flakyServerFailuresRemaining.set(2);
+    List<String> urls = List.of("http://localhost:" + (_portStart + 4) + URI_PATH);
+
+    MultiHttpRequest mget = new MultiHttpRequest(Executors.newCachedThreadPool(),
+        new PoolingHttpClientConnectionManager(), RetryPolicies.noDelayRetryPolicy(3));
+
+    CompletionService<MultiHttpRequestResponse> completionService = mget.executeGet(urls, null, 1000);
+    TestResult result = collectResult(completionService, urls.size());
+    Assert.assertEquals(result.getSuccess(), 1);
+    Assert.assertEquals(result.getErrors(), 0);
+    Assert.assertEquals(result.getTimeouts(), 0);
+  }
+
+  @Test
+  public void testWithoutRetryFailsOnFlakyServer() {
+    // Without retry (default single attempt), the first transient failure from the flaky server is surfaced as an
+    // error.
+    _flakyServerFailuresRemaining.set(2);
+    List<String> urls = List.of("http://localhost:" + (_portStart + 4) + URI_PATH);
+
+    MultiHttpRequest mget =
+        new MultiHttpRequest(Executors.newCachedThreadPool(), new PoolingHttpClientConnectionManager());
+
+    CompletionService<MultiHttpRequestResponse> completionService = mget.executeGet(urls, null, 1000);
+    TestResult result = collectResult(completionService, urls.size());
+    Assert.assertEquals(result.getSuccess(), 0);
+    Assert.assertEquals(result.getErrors(), 1);
+    Assert.assertEquals(result.getTimeouts(), 0);
   }
 
   private TestResult collectResult(CompletionService<MultiHttpRequestResponse> completionService, int size) {

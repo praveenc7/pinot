@@ -42,6 +42,8 @@ import org.apache.pinot.controller.api.resources.ServerTableSizeReader;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.utils.builder.TableNameBuilder;
+import org.apache.pinot.spi.utils.retry.RetryPolicies;
+import org.apache.pinot.spi.utils.retry.RetryPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,12 +54,15 @@ import org.slf4j.LoggerFactory;
 public class TableSizeReader {
   private static final Logger LOGGER = LoggerFactory.getLogger(TableSizeReader.class);
   public static final long DEFAULT_SIZE_WHEN_MISSING_OR_ERROR = -1L;
+  private static final int TABLE_SIZE_READ_MAX_ATTEMPTS = 3;
+  private static final long TABLE_SIZE_READ_RETRY_INITIAL_DELAY_MS = 1000L;
 
   private final Executor _executor;
   private final HttpClientConnectionManager _connectionManager;
   private final PinotHelixResourceManager _helixResourceManager;
   private final ControllerMetrics _controllerMetrics;
   private final LeadControllerManager _leadControllerManager;
+  private final RetryPolicy _tableSizeReadRetryPolicy;
 
   public TableSizeReader(Executor executor, HttpClientConnectionManager connectionManager,
       ControllerMetrics controllerMetrics, PinotHelixResourceManager helixResourceManager,
@@ -67,6 +72,8 @@ public class TableSizeReader {
     _controllerMetrics = controllerMetrics;
     _helixResourceManager = helixResourceManager;
     _leadControllerManager = leadControllerManager;
+    _tableSizeReadRetryPolicy = RetryPolicies
+        .fixedDelayRetryPolicy(TABLE_SIZE_READ_MAX_ATTEMPTS, TABLE_SIZE_READ_RETRY_INITIAL_DELAY_MS);
   }
 
   /**
@@ -247,6 +254,13 @@ public class TableSizeReader {
   public TableSubTypeSizeDetails getTableSubtypeSize(String tableNameWithType, int timeoutMs,
       boolean includeReplacedSegments)
       throws InvalidConfigException {
+    return getTableSubtypeSize(tableNameWithType, timeoutMs, includeReplacedSegments,
+        _tableSizeReadRetryPolicy);
+  }
+
+  public TableSubTypeSizeDetails getTableSubtypeSize(String tableNameWithType, int timeoutMs,
+      boolean includeReplacedSegments, RetryPolicy retryPolicy)
+      throws InvalidConfigException {
     Map<String, List<String>> serverToSegmentsMap = _helixResourceManager.getServerToSegmentsMap(tableNameWithType,
         null, includeReplacedSegments);
     ServerTableSizeReader serverTableSizeReader = new ServerTableSizeReader(_executor, _connectionManager);
@@ -256,7 +270,7 @@ public class TableSizeReader {
     BiMap<String, String> endpoints =
         _helixResourceManager.getDataInstanceAdminEndpoints(serverToSegmentsMap.keySet(), true);
     Map<String, List<SegmentSizeInfo>> serverToSegmentSizeInfoListMap =
-        serverTableSizeReader.getSegmentSizeInfoFromServers(endpoints, tableNameWithType, timeoutMs);
+        serverTableSizeReader.getSegmentSizeInfoFromServers(endpoints, tableNameWithType, timeoutMs, retryPolicy);
 
     TableSubTypeSizeDetails subTypeSizeDetails = new TableSubTypeSizeDetails();
     Map<String, SegmentSizeDetails> segmentToSizeDetailsMap = subTypeSizeDetails._segments;
