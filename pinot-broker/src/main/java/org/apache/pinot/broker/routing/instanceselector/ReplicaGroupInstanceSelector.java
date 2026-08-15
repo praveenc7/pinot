@@ -21,9 +21,12 @@ package org.apache.pinot.broker.routing.instanceselector;
 import com.google.common.collect.ImmutableList;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import javax.annotation.Nullable;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.helix.store.zk.ZkHelixPropertyStore;
@@ -92,6 +95,66 @@ public class ReplicaGroupInstanceSelector extends BaseInstanceSelector {
       // Adaptive Server Selection is NOT enabled.
       return selectServersUsingRoundRobin(segments, requestId, segmentStates, ctx);
     }
+  }
+
+  @Override
+  protected Map<String, List<String>> getAlternateInstances(List<String> segments, int requestId,
+      SegmentStates segmentStates, Map<String, String> queryOptions,
+      Pair<Map<String, String>, Map<String, String>> segmentToInstanceMap) {
+    Set<String> allOnlineInstances = new HashSet<>();
+    for (String segment : segments) {
+      List<SegmentInstanceCandidate> candidates = segmentStates.getCandidates(segment);
+      if (candidates != null) {
+        for (SegmentInstanceCandidate candidate : candidates) {
+          if (candidate.isOnline()) {
+            allOnlineInstances.add(candidate.getInstance());
+          }
+        }
+      }
+    }
+    if (allOnlineInstances.isEmpty()) {
+      return Collections.emptyMap();
+    }
+
+    List<String> orderedInstances;
+    if (_adaptiveServerSelector != null) {
+      orderedInstances = new ArrayList<>(allOnlineInstances.size());
+      for (Pair<String, Double> ranking
+          : _adaptiveServerSelector.fetchServerRankingsWithScores(new ArrayList<>(allOnlineInstances))) {
+        orderedInstances.add(ranking.getLeft());
+      }
+    } else {
+      orderedInstances = new ArrayList<>(allOnlineInstances);
+      Collections.sort(orderedInstances);
+      Collections.rotate(orderedInstances, -Math.floorMod(requestId, orderedInstances.size()));
+    }
+
+    Map<String, Integer> instanceRankMap = new HashMap<>(HashUtil.getHashMapCapacity(orderedInstances.size()));
+    for (int i = 0; i < orderedInstances.size(); i++) {
+      instanceRankMap.put(orderedInstances.get(i), i);
+    }
+
+    Map<String, List<String>> segmentToAlternateInstancesMap =
+        new HashMap<>(HashUtil.getHashMapCapacity(segments.size()));
+    for (String segment : segments) {
+      List<SegmentInstanceCandidate> candidates = segmentStates.getCandidates(segment);
+      if (candidates == null) {
+        continue;
+      }
+      List<String> onlineInstances = new ArrayList<>(candidates.size());
+      for (SegmentInstanceCandidate candidate : candidates) {
+        if (candidate.isOnline()) {
+          onlineInstances.add(candidate.getInstance());
+        }
+      }
+      onlineInstances.sort((left, right) ->
+          Integer.compare(instanceRankMap.getOrDefault(left, Integer.MAX_VALUE),
+              instanceRankMap.getOrDefault(right, Integer.MAX_VALUE)));
+      if (!onlineInstances.isEmpty()) {
+        segmentToAlternateInstancesMap.put(segment, onlineInstances);
+      }
+    }
+    return segmentToAlternateInstancesMap;
   }
 
   private Pair<Map<String, String>, Map<String, String>> selectServersUsingRoundRobin(List<String> segments,

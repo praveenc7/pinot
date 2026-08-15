@@ -22,8 +22,10 @@ import com.google.common.collect.Maps;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import javax.annotation.concurrent.ThreadSafe;
+import org.apache.hc.client5.http.io.HttpClientConnectionManager;
 import org.apache.pinot.broker.broker.AccessControlFactory;
 import org.apache.pinot.broker.queryquota.QueryQuotaManager;
 import org.apache.pinot.common.config.NettyConfig;
@@ -34,12 +36,14 @@ import org.apache.pinot.common.failuredetector.FailureDetector;
 import org.apache.pinot.common.metrics.BrokerMeter;
 import org.apache.pinot.common.metrics.BrokerQueryPhase;
 import org.apache.pinot.common.request.BrokerRequest;
+import org.apache.pinot.common.request.PinotQuery;
 import org.apache.pinot.common.response.broker.BrokerResponseNative;
 import org.apache.pinot.common.response.broker.QueryProcessingException;
 import org.apache.pinot.common.utils.config.QueryOptionsUtils;
 import org.apache.pinot.core.query.reduce.BrokerReduceService;
 import org.apache.pinot.core.routing.RoutingManager;
 import org.apache.pinot.core.transport.AsyncQueryResponse;
+import org.apache.pinot.core.transport.HedgingConfig;
 import org.apache.pinot.core.transport.QueryResponse;
 import org.apache.pinot.core.transport.QueryRouter;
 import org.apache.pinot.core.transport.ServerInstance;
@@ -68,6 +72,7 @@ public class SingleConnectionBrokerRequestHandler extends BaseSingleStageBrokerR
   private final BrokerReduceService _brokerReduceService;
   private final QueryRouter _queryRouter;
   private final FailureDetector _failureDetector;
+  private final HedgingConfig _hedgingConfig;
 
   public SingleConnectionBrokerRequestHandler(PinotConfiguration config, String brokerId,
       BrokerRequestIdGenerator requestIdGenerator, RoutingManager routingManager,
@@ -79,9 +84,11 @@ public class SingleConnectionBrokerRequestHandler extends BaseSingleStageBrokerR
     _brokerReduceService = new BrokerReduceService(_config);
     int sendRequestMaxAttempts = config.getProperty(CommonConstants.Broker.CONFIG_OF_BROKER_SEND_REQUEST_MAX_ATTEMPTS,
         CommonConstants.Broker.DEFAULT_BROKER_SEND_REQUEST_MAX_ATTEMPTS);
-    _queryRouter = new QueryRouter(_brokerId, nettyConfig, tlsConfig, serverRoutingStatsManager, threadAccountant,
-        sendRequestMaxAttempts);
+    _hedgingConfig = HedgingConfig.fromConfig(config);
     _failureDetector = failureDetector;
+    _queryRouter = new QueryRouter(_brokerId, nettyConfig, tlsConfig, serverRoutingStatsManager, threadAccountant,
+        sendRequestMaxAttempts, _hedgingConfig,
+        serverRoutingInstance -> _failureDetector.markServerUnhealthy(serverRoutingInstance.getInstanceId()));
     _failureDetector.registerUnhealthyServerRetrier(this::retryUnhealthyServer);
   }
 
@@ -95,6 +102,14 @@ public class SingleConnectionBrokerRequestHandler extends BaseSingleStageBrokerR
     super.shutDown();
     _queryRouter.shutDown();
     _brokerReduceService.shutDown();
+  }
+
+  @Override
+  protected boolean handleCancel(long queryId, int timeoutMs, Executor executor, HttpClientConnectionManager connMgr,
+      Map<String, Integer> serverResponses)
+      throws Exception {
+    _queryRouter.cancelHedging(queryId);
+    return super.handleCancel(queryId, timeoutMs, executor, connMgr, serverResponses);
   }
 
   @Override
@@ -120,13 +135,15 @@ public class SingleConnectionBrokerRequestHandler extends BaseSingleStageBrokerR
           ? BrokerMeter.SECONDARY_WORKLOAD_BROKER_RESPONSES_WITH_TIMEOUTS : BrokerMeter.BROKER_RESPONSES_WITH_TIMEOUTS;
       _brokerMetrics.addMeteredTableValue(rawTableName, meter, 1);
     }
-    if (asyncQueryResponse.getFailedServer() != null) {
+    if (asyncQueryResponse.getStatus() == QueryResponse.Status.FAILED
+        && asyncQueryResponse.getFailedServer() != null) {
       _failureDetector.markServerUnhealthy(asyncQueryResponse.getFailedServer().getInstanceId());
     }
     _brokerMetrics.addPhaseTiming(rawTableName, BrokerQueryPhase.SCATTER_GATHER,
         System.nanoTime() - scatterGatherStartTimeNs);
     // TODO Use scatterGatherStats as serverStats
     serverStats.setServerStats(asyncQueryResponse.getServerStats());
+    serverStats.setHedgeStats(asyncQueryResponse.getHedgeStats());
 
     int numServersQueried = finalResponses.size();
     long totalResponseSize = 0;
@@ -177,6 +194,11 @@ public class SingleConnectionBrokerRequestHandler extends BaseSingleStageBrokerR
     _brokerMetrics.addMeteredTableValue(rawTableName, BrokerMeter.TOTAL_SERVER_RESPONSE_SIZE, totalResponseSize);
 
     return brokerResponse;
+  }
+
+  @Override
+  protected boolean shouldIncludeAlternateRoutes(TableRouteInfo routeInfo, PinotQuery pinotQuery) {
+    return _hedgingConfig.isEnabled() && QueryRouter.isEligibleForHedging(routeInfo, pinotQuery);
   }
 
   /**

@@ -18,6 +18,7 @@
  */
 package org.apache.pinot.broker.routing.instanceselector;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -77,18 +78,34 @@ public interface InstanceSelector {
   SelectionResult select(BrokerRequest brokerRequest, List<String> segments, long requestId);
 
   /**
+   * Selects instances and optionally includes ordered online alternate candidates for each segment.
+   */
+  default SelectionResult select(BrokerRequest brokerRequest, List<String> segments, long requestId,
+      boolean includeAlternateCandidates) {
+    return select(brokerRequest, segments, requestId);
+  }
+
+  /**
    * Returns the enabled server instances currently serving the table.
    */
   Set<String> getServingInstances();
 
   class SelectionResult {
     private final Pair<Map<String, String>, Map<String, String>/*optional segments*/> _segmentToInstanceMap;
+    private final Map<String, List<String>> _segmentToAlternateInstancesMap;
     private final List<String> _unavailableSegments;
     private int _numPrunedSegments;
 
     public SelectionResult(Pair<Map<String, String>, Map<String, String>> segmentToInstanceMap,
         List<String> unavailableSegments, int numPrunedSegments) {
+      this(segmentToInstanceMap, Collections.emptyMap(), unavailableSegments, numPrunedSegments);
+    }
+
+    public SelectionResult(Pair<Map<String, String>, Map<String, String>> segmentToInstanceMap,
+        Map<String, List<String>> segmentToAlternateInstancesMap, List<String> unavailableSegments,
+        int numPrunedSegments) {
       _segmentToInstanceMap = segmentToInstanceMap;
+      _segmentToAlternateInstancesMap = segmentToAlternateInstancesMap;
       _unavailableSegments = unavailableSegments;
       _numPrunedSegments = numPrunedSegments;
     }
@@ -106,6 +123,13 @@ public interface InstanceSelector {
      */
     public Map<String, String> getOptionalSegmentToInstanceMap() {
       return _segmentToInstanceMap.getRight();
+    }
+
+    /**
+     * Returns ordered online candidates for each segment. The selected instance can be present in the list.
+     */
+    public Map<String, List<String>> getSegmentToAlternateInstancesMap() {
+      return _segmentToAlternateInstancesMap;
     }
 
     /**

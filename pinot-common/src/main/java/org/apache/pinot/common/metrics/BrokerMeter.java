@@ -121,6 +121,26 @@ public class BrokerMeter implements AbstractMetrics.Meter {
   public static final BrokerMeter REQUEST_CHANNEL_LOCK_TIMEOUT_EXCEPTIONS = create(
       "REQUEST_CHANNEL_LOCK_TIMEOUT_EXCEPTIONS", "exceptions", false);
   public static final BrokerMeter REQUEST_SEND_EXCEPTIONS = create("REQUEST_SEND_EXCEPTIONS", "exceptions", false);
+  public static final BrokerMeter HEDGE_DECISIONS_SCHEDULED = create("HEDGE_DECISIONS_SCHEDULED", "hedges", false);
+  public static final BrokerMeter HEDGE_REQUESTS_SENT = create("HEDGE_REQUESTS_SENT", "hedges", false);
+  public static final BrokerMeter HEDGE_WINS = create("HEDGE_WINS", "hedges", false);
+  public static final BrokerMeter PRIMARY_WINS_AFTER_HEDGE = create("PRIMARY_WINS_AFTER_HEDGE", "hedges", false);
+  public static final BrokerMeter HEDGE_ALL_ATTEMPTS_FAILED =
+      create("HEDGE_ALL_ATTEMPTS_FAILED", "hedges", false);
+  public static final BrokerMeter HEDGE_SKIPPED_NO_ALTERNATE =
+      create("HEDGE_SKIPPED_NO_ALTERNATE", "hedges", false);
+  public static final BrokerMeter HEDGE_SKIPPED_NO_OUTSTANDING_REQUEST =
+      create("HEDGE_SKIPPED_NO_OUTSTANDING_REQUEST", "hedges", false);
+  public static final BrokerMeter HEDGE_SKIPPED_RATIO_BUDGET =
+      create("HEDGE_SKIPPED_RATIO_BUDGET", "hedges", false);
+  public static final BrokerMeter HEDGE_SKIPPED_CONCURRENCY_LIMIT =
+      create("HEDGE_SKIPPED_CONCURRENCY_LIMIT", "hedges", false);
+  public static final BrokerMeter HEDGE_SKIPPED_DEADLINE = create("HEDGE_SKIPPED_DEADLINE", "hedges", false);
+  public static final BrokerMeter HEDGE_SEND_EXCEPTIONS = create("HEDGE_SEND_EXCEPTIONS", "exceptions", false);
+  public static final BrokerMeter HEDGE_LOSER_RESPONSES_IGNORED =
+      create("HEDGE_LOSER_RESPONSES_IGNORED", "hedges", false);
+  public static final BrokerMeter HEDGE_DUPLICATE_RESPONSES_IGNORED =
+      create("HEDGE_DUPLICATE_RESPONSES_IGNORED", "hedges", false);
   // Gather phase.
   public static final BrokerMeter RESPONSE_FETCH_EXCEPTIONS = create("RESPONSE_FETCH_EXCEPTIONS", "exceptions", false);
   // Response deserialization phase.

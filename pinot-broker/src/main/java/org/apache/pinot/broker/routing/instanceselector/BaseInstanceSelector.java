@@ -438,6 +438,12 @@ abstract class BaseInstanceSelector implements InstanceSelector {
 
   @Override
   public SelectionResult select(BrokerRequest brokerRequest, List<String> segments, long requestId) {
+    return select(brokerRequest, segments, requestId, false);
+  }
+
+  @Override
+  public SelectionResult select(BrokerRequest brokerRequest, List<String> segments, long requestId,
+      boolean includeAlternateCandidates) {
     Map<String, String> queryOptions =
         (brokerRequest.getPinotQuery() != null && brokerRequest.getPinotQuery().getQueryOptions() != null)
             ? brokerRequest.getPinotQuery().getQueryOptions() : Collections.emptyMap();
@@ -447,9 +453,12 @@ abstract class BaseInstanceSelector implements InstanceSelector {
     SegmentStates segmentStates = _segmentStates;
     Pair<Map<String, String>, Map<String, String>> segmentToInstanceMap =
         select(segments, requestIdInt, segmentStates, queryOptions);
+    Map<String, List<String>> segmentToAlternateInstancesMap = includeAlternateCandidates
+        ? getAlternateInstances(segments, requestIdInt, segmentStates, queryOptions, segmentToInstanceMap)
+        : Collections.emptyMap();
     Set<String> unavailableSegments = segmentStates.getUnavailableSegments();
     if (unavailableSegments.isEmpty()) {
-      return new SelectionResult(segmentToInstanceMap, Collections.emptyList(), 0);
+      return new SelectionResult(segmentToInstanceMap, segmentToAlternateInstancesMap, Collections.emptyList(), 0);
     } else {
       List<String> unavailableSegmentsForRequest = new ArrayList<>();
       for (String segment : segments) {
@@ -457,8 +466,15 @@ abstract class BaseInstanceSelector implements InstanceSelector {
           unavailableSegmentsForRequest.add(segment);
         }
       }
-      return new SelectionResult(segmentToInstanceMap, unavailableSegmentsForRequest, 0);
+      return new SelectionResult(segmentToInstanceMap, segmentToAlternateInstancesMap,
+          unavailableSegmentsForRequest, 0);
     }
+  }
+
+  protected Map<String, List<String>> getAlternateInstances(List<String> segments, int requestId,
+      SegmentStates segmentStates, Map<String, String> queryOptions,
+      Pair<Map<String, String>, Map<String, String>> segmentToInstanceMap) {
+    return Collections.emptyMap();
   }
 
   protected boolean isUseFixedReplica(Map<String, String> queryOptions) {

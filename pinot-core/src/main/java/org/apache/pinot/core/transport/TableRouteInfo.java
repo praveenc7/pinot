@@ -217,6 +217,20 @@ public interface TableRouteInfo {
    */
   Map<ServerRoutingInstance, InstanceRequest> getRequestMap(long requestId, String brokerId, boolean preferTls);
 
+  /**
+   * Gets the primary requests and optional exact alternates for the single-stage Netty transport.
+   */
+  default QueryRequestPlan getQueryRequestPlan(long requestId, String brokerId, boolean preferTls) {
+    return QueryRequestPlan.primaryOnly(getRequestMap(requestId, brokerId, preferTls));
+  }
+
+  /**
+   * Gets the alternate servers that can receive a hedge, for explicit query cancellation coverage.
+   */
+  default Set<ServerInstance> getPotentialHedgeServers() {
+    return Set.of();
+  }
+
   static InstanceRequest createInstanceRequest(BrokerRequest brokerRequest, String brokerId, long requestId) {
     InstanceRequest instanceRequest = new InstanceRequest();
     instanceRequest.setBrokerId(brokerId);

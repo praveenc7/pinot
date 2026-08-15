@@ -282,8 +282,27 @@ public class QueryLoggerTest {
         "Expected empty queryHash field. Got: " + logLine);
   }
 
+  @Test
+  public void shouldEmitHedgeStatsOnlyWhenPresent() {
+    Mockito.when(_logRateLimiter.tryAcquire()).thenReturn(true);
+    QueryLogger queryLogger = new QueryLogger(_logRateLimiter, 100, true, true, _logger, _droppedRateLimiter);
+
+    queryLogger.log(generateParams(false, false, 0, 456, null, "hedgeStats"));
+    Assert.assertTrue(_infoLog.get(0).contains("hedgeStats=hedgeStats,"));
+
+    _infoLog.clear();
+    queryLogger.log(generateParams(false, false, 0, 456, null));
+    Assert.assertFalse(_infoLog.get(0).contains("hedgeStats="));
+  }
+
   private QueryLogger.QueryLogParams generateParams(boolean numGroupsLimitReached, boolean numGroupsWarningLimitReached,
       int numExceptions, long timeUsedMs, QueryFingerprint queryFingerprint) {
+    return generateParams(numGroupsLimitReached, numGroupsWarningLimitReached, numExceptions, timeUsedMs,
+        queryFingerprint, null);
+  }
+
+  private QueryLogger.QueryLogParams generateParams(boolean numGroupsLimitReached, boolean numGroupsWarningLimitReached,
+      int numExceptions, long timeUsedMs, QueryFingerprint queryFingerprint, String hedgeStatsString) {
     RequestContext requestContext = new DefaultRequestContext();
     requestContext.setRequestId(123);
     requestContext.setQuery("SELECT * FROM foo");
@@ -330,6 +349,7 @@ public class QueryLoggerTest {
 
     ServerStats serverStats = new ServerStats();
     serverStats.setServerStats("serverStats");
+    serverStats.setHedgeStats(hedgeStatsString);
 
     return new QueryLogger.QueryLogParams(requestContext, "table", response,
         QueryLogger.QueryLogParams.QueryEngine.SINGLE_STAGE, identity, serverStats, "workloadName");

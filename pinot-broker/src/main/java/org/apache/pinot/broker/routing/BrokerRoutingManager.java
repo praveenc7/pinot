@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -59,6 +60,7 @@ import org.apache.pinot.common.metrics.BrokerMeter;
 import org.apache.pinot.common.metrics.BrokerMetrics;
 import org.apache.pinot.common.request.BrokerRequest;
 import org.apache.pinot.common.utils.HashUtil;
+import org.apache.pinot.core.routing.AlternateServerRouteInfo;
 import org.apache.pinot.core.routing.RoutingManager;
 import org.apache.pinot.core.routing.RoutingTable;
 import org.apache.pinot.core.routing.ServerRouteInfo;
@@ -741,20 +743,38 @@ public class BrokerRoutingManager implements RoutingManager, ClusterChangeHandle
   @Nullable
   @Override
   public RoutingTable getRoutingTable(BrokerRequest brokerRequest, long requestId) {
+    return getRoutingTable(brokerRequest, requestId, false);
+  }
+
+  @Nullable
+  @Override
+  public RoutingTable getRoutingTable(BrokerRequest brokerRequest, long requestId, boolean includeAlternateRoutes) {
     String tableNameWithType = brokerRequest.getQuerySource().getTableName();
-    return getRoutingTable(brokerRequest, tableNameWithType, requestId);
+    return getRoutingTable(brokerRequest, tableNameWithType, requestId, includeAlternateRoutes);
   }
 
   @Nullable
   @Override
   public RoutingTable getRoutingTable(BrokerRequest brokerRequest, String tableNameWithType, long requestId) {
+    return getRoutingTable(brokerRequest, tableNameWithType, requestId, false);
+  }
+
+  @Nullable
+  @Override
+  public RoutingTable getRoutingTable(BrokerRequest brokerRequest, String tableNameWithType, long requestId,
+      boolean includeAlternateRoutes) {
     RoutingEntry routingEntry = _routingEntryMap.get(tableNameWithType);
     if (routingEntry == null) {
       return null;
     }
-    InstanceSelector.SelectionResult selectionResult = routingEntry.calculateRouting(brokerRequest, requestId);
-    return new RoutingTable(getServerInstanceToSegmentsMap(tableNameWithType, selectionResult),
-        selectionResult.getUnavailableSegments(), selectionResult.getNumPrunedSegments());
+    InstanceSelector.SelectionResult selectionResult =
+        routingEntry.calculateRouting(brokerRequest, requestId, includeAlternateRoutes);
+    Map<ServerInstance, ServerRouteInfo> primaryRoutes =
+        getServerInstanceToSegmentsMap(tableNameWithType, selectionResult);
+    Map<ServerInstance, List<AlternateServerRouteInfo>> alternateRoutes = includeAlternateRoutes
+        ? getAlternateServerRoutes(tableNameWithType, selectionResult, primaryRoutes) : Collections.emptyMap();
+    return new RoutingTable(primaryRoutes, alternateRoutes, selectionResult.getUnavailableSegments(),
+        selectionResult.getNumPrunedSegments());
   }
 
   private Map<ServerInstance, ServerRouteInfo> getServerInstanceToSegmentsMap(String tableNameWithType,
@@ -785,6 +805,67 @@ public class BrokerRoutingManager implements RoutingManager, ClusterChangeHandle
       // TODO: Report missing server metrics when we allow servers only with optional segments.
     }
     return merged;
+  }
+
+  private Map<ServerInstance, List<AlternateServerRouteInfo>> getAlternateServerRoutes(String tableNameWithType,
+      InstanceSelector.SelectionResult selectionResult, Map<ServerInstance, ServerRouteInfo> primaryRoutes) {
+    Map<String, List<String>> segmentToAlternateInstancesMap =
+        selectionResult.getSegmentToAlternateInstancesMap();
+    if (segmentToAlternateInstancesMap.isEmpty() || primaryRoutes.isEmpty()) {
+      return Collections.emptyMap();
+    }
+
+    Set<String> primaryInstanceIds = new HashSet<>(primaryRoutes.size());
+    for (ServerInstance primaryInstance : primaryRoutes.keySet()) {
+      primaryInstanceIds.add(primaryInstance.getInstanceId());
+    }
+
+    Map<ServerInstance, List<AlternateServerRouteInfo>> alternateRoutes = new HashMap<>();
+    for (Map.Entry<ServerInstance, ServerRouteInfo> primaryEntry : primaryRoutes.entrySet()) {
+      ServerRouteInfo primaryRoute = primaryEntry.getValue();
+      LinkedHashSet<String> commonCandidates = null;
+      for (String segment : primaryRoute.getSegments()) {
+        List<String> segmentCandidates = segmentToAlternateInstancesMap.get(segment);
+        if (segmentCandidates == null || segmentCandidates.isEmpty()) {
+          commonCandidates = new LinkedHashSet<>();
+          break;
+        }
+        if (commonCandidates == null) {
+          commonCandidates = new LinkedHashSet<>(segmentCandidates);
+        } else {
+          commonCandidates.retainAll(segmentCandidates);
+        }
+        if (commonCandidates.isEmpty()) {
+          break;
+        }
+      }
+      if (commonCandidates == null || commonCandidates.isEmpty()) {
+        continue;
+      }
+      commonCandidates.removeAll(primaryInstanceIds);
+
+      List<AlternateServerRouteInfo> routes = new ArrayList<>(commonCandidates.size());
+      for (String candidateInstanceId : commonCandidates) {
+        ServerInstance alternateInstance = _enabledServerInstanceMap.get(candidateInstanceId);
+        if (alternateInstance == null) {
+          _brokerMetrics.addMeteredTableValue(tableNameWithType, BrokerMeter.SERVER_MISSING_FOR_ROUTING, 1L);
+          continue;
+        }
+        List<String> optionalSegments = new ArrayList<>();
+        for (String optionalSegment : primaryRoute.getOptionalSegments()) {
+          List<String> optionalCandidates = segmentToAlternateInstancesMap.get(optionalSegment);
+          if (optionalCandidates != null && optionalCandidates.contains(candidateInstanceId)) {
+            optionalSegments.add(optionalSegment);
+          }
+        }
+        routes.add(new AlternateServerRouteInfo(alternateInstance,
+            new ServerRouteInfo(new ArrayList<>(primaryRoute.getSegments()), optionalSegments)));
+      }
+      if (!routes.isEmpty()) {
+        alternateRoutes.put(primaryEntry.getKey(), routes);
+      }
+    }
+    return alternateRoutes;
   }
 
   @Nullable
@@ -971,6 +1052,11 @@ public class BrokerRoutingManager implements RoutingManager, ClusterChangeHandle
     }
 
     InstanceSelector.SelectionResult calculateRouting(BrokerRequest brokerRequest, long requestId) {
+      return calculateRouting(brokerRequest, requestId, false);
+    }
+
+    InstanceSelector.SelectionResult calculateRouting(BrokerRequest brokerRequest, long requestId,
+        boolean includeAlternateCandidates) {
       Set<String> selectedSegments = _segmentSelector.select(brokerRequest);
       int numTotalSelectedSegments = selectedSegments.size();
       if (!selectedSegments.isEmpty()) {
@@ -980,8 +1066,10 @@ public class BrokerRoutingManager implements RoutingManager, ClusterChangeHandle
       }
       int numPrunedSegments = numTotalSelectedSegments - selectedSegments.size();
       if (!selectedSegments.isEmpty()) {
-        InstanceSelector.SelectionResult selectionResult =
-            _instanceSelector.select(brokerRequest, new ArrayList<>(selectedSegments), requestId);
+        List<String> segments = new ArrayList<>(selectedSegments);
+        InstanceSelector.SelectionResult selectionResult = includeAlternateCandidates
+            ? _instanceSelector.select(brokerRequest, segments, requestId, true)
+            : _instanceSelector.select(brokerRequest, segments, requestId);
         selectionResult.setNumPrunedSegments(numPrunedSegments);
         return selectionResult;
       } else {

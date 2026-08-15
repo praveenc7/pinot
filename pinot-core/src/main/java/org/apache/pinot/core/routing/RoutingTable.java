@@ -18,6 +18,7 @@
  */
 package org.apache.pinot.core.routing;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import org.apache.pinot.core.transport.ServerInstance;
@@ -29,18 +30,30 @@ public class RoutingTable {
   // had caused wrong query results, particularly for upsert tables. Instead, we should pass such segments to servers
   // and let them decide how to handle them, e.g. skip them upon issues or include them for better query results.
   private final Map<ServerInstance, ServerRouteInfo> _serverInstanceToSegmentsMap;
+  private final Map<ServerInstance, List<AlternateServerRouteInfo>> _alternateServerRoutes;
   private final List<String> _unavailableSegments;
   private final int _numPrunedSegments;
 
   public RoutingTable(Map<ServerInstance, ServerRouteInfo> serverInstanceToSegmentsMap,
       List<String> unavailableSegments, int numPrunedSegments) {
+    this(serverInstanceToSegmentsMap, Collections.emptyMap(), unavailableSegments, numPrunedSegments);
+  }
+
+  public RoutingTable(Map<ServerInstance, ServerRouteInfo> serverInstanceToSegmentsMap,
+      Map<ServerInstance, List<AlternateServerRouteInfo>> alternateServerRoutes, List<String> unavailableSegments,
+      int numPrunedSegments) {
     _serverInstanceToSegmentsMap = serverInstanceToSegmentsMap;
+    _alternateServerRoutes = alternateServerRoutes;
     _unavailableSegments = unavailableSegments;
     _numPrunedSegments = numPrunedSegments;
   }
 
   public Map<ServerInstance, ServerRouteInfo> getServerInstanceToSegmentsMap() {
     return _serverInstanceToSegmentsMap;
+  }
+
+  public Map<ServerInstance, List<AlternateServerRouteInfo>> getAlternateServerRoutes() {
+    return _alternateServerRoutes;
   }
 
   public List<String> getUnavailableSegments() {

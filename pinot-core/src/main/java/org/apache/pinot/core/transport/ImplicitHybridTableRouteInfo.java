@@ -19,6 +19,7 @@
 package org.apache.pinot.core.transport;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -26,6 +27,7 @@ import javax.annotation.Nullable;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.pinot.common.request.BrokerRequest;
 import org.apache.pinot.common.request.InstanceRequest;
+import org.apache.pinot.core.routing.AlternateServerRouteInfo;
 import org.apache.pinot.core.routing.ServerRouteInfo;
 import org.apache.pinot.core.routing.TimeBoundaryInfo;
 import org.apache.pinot.spi.config.table.QueryConfig;
@@ -53,6 +55,8 @@ public class ImplicitHybridTableRouteInfo extends BaseTableRouteInfo {
   private BrokerRequest _realtimeBrokerRequest;
   private Map<ServerInstance, ServerRouteInfo> _offlineRoutingTable;
   private Map<ServerInstance, ServerRouteInfo> _realtimeRoutingTable;
+  private Map<ServerInstance, List<AlternateServerRouteInfo>> _offlineAlternateRoutes;
+  private Map<ServerInstance, List<AlternateServerRouteInfo>> _realtimeAlternateRoutes;
 
   public ImplicitHybridTableRouteInfo() {
   }
@@ -161,6 +165,11 @@ public class ImplicitHybridTableRouteInfo extends BaseTableRouteInfo {
     _offlineRoutingTable = offlineRoutingTable;
   }
 
+  public void setOfflineAlternateRoutes(
+      Map<ServerInstance, List<AlternateServerRouteInfo>> offlineAlternateRoutes) {
+    _offlineAlternateRoutes = offlineAlternateRoutes;
+  }
+
   @Nullable
   @Override
   public Map<ServerInstance, ServerRouteInfo> getRealtimeRoutingTable() {
@@ -169,6 +178,11 @@ public class ImplicitHybridTableRouteInfo extends BaseTableRouteInfo {
 
   public void setRealtimeRoutingTable(Map<ServerInstance, ServerRouteInfo> realtimeRoutingTable) {
     _realtimeRoutingTable = realtimeRoutingTable;
+  }
+
+  public void setRealtimeAlternateRoutes(
+      Map<ServerInstance, List<AlternateServerRouteInfo>> realtimeAlternateRoutes) {
+    _realtimeAlternateRoutes = realtimeAlternateRoutes;
   }
 
   /**
@@ -322,5 +336,105 @@ public class ImplicitHybridTableRouteInfo extends BaseTableRouteInfo {
     }
 
     return requestMap;
+  }
+
+  @Override
+  public QueryRequestPlan getQueryRequestPlan(long requestId, String brokerId, boolean preferTls) {
+    Set<String> primaryInstanceIds = getPrimaryInstanceIds();
+    Map<ServerRoutingInstance, QueryRequestPlan.RequestGroup> requestGroups = new HashMap<>();
+    if (_offlineRoutingTable != null && _offlineBrokerRequest != null) {
+      addRequestGroups(requestGroups, TableType.OFFLINE, _offlineRoutingTable, _offlineAlternateRoutes,
+          _offlineBrokerRequest, primaryInstanceIds, requestId, brokerId, preferTls);
+    }
+    if (_realtimeRoutingTable != null && _realtimeBrokerRequest != null) {
+      addRequestGroups(requestGroups, TableType.REALTIME, _realtimeRoutingTable, _realtimeAlternateRoutes,
+          _realtimeBrokerRequest, primaryInstanceIds, requestId, brokerId, preferTls);
+    }
+    return new QueryRequestPlan(requestGroups);
+  }
+
+  @Override
+  public Set<ServerInstance> getPotentialHedgeServers() {
+    Set<String> primaryInstanceIds = getPrimaryInstanceIds();
+    Set<ServerInstance> potentialHedgeServers = new HashSet<>();
+    addPotentialHedgeServers(potentialHedgeServers, _offlineRoutingTable, _offlineAlternateRoutes, primaryInstanceIds);
+    addPotentialHedgeServers(potentialHedgeServers, _realtimeRoutingTable, _realtimeAlternateRoutes,
+        primaryInstanceIds);
+    return potentialHedgeServers;
+  }
+
+  private Set<String> getPrimaryInstanceIds() {
+    Set<String> primaryInstanceIds = new HashSet<>();
+    if (_offlineRoutingTable != null) {
+      for (ServerInstance serverInstance : _offlineRoutingTable.keySet()) {
+        primaryInstanceIds.add(serverInstance.getInstanceId());
+      }
+    }
+    if (_realtimeRoutingTable != null) {
+      for (ServerInstance serverInstance : _realtimeRoutingTable.keySet()) {
+        primaryInstanceIds.add(serverInstance.getInstanceId());
+      }
+    }
+    return primaryInstanceIds;
+  }
+
+  private static void addRequestGroups(
+      Map<ServerRoutingInstance, QueryRequestPlan.RequestGroup> requestGroups, TableType tableType,
+      Map<ServerInstance, ServerRouteInfo> routingTable,
+      @Nullable Map<ServerInstance, List<AlternateServerRouteInfo>> alternateRoutes, BrokerRequest brokerRequest,
+      Set<String> primaryInstanceIds, long requestId, String brokerId, boolean preferTls) {
+    for (Map.Entry<ServerInstance, ServerRouteInfo> entry : routingTable.entrySet()) {
+      ServerRoutingInstance primaryServer = entry.getKey().toServerRoutingInstance(tableType, preferTls);
+      InstanceRequest primaryRequest = getInstanceRequest(requestId, brokerId, brokerRequest, entry.getValue());
+      AlternateServerRouteInfo alternateRoute =
+          getFirstSafeAlternate(entry.getKey(), alternateRoutes, primaryInstanceIds);
+      if (alternateRoute == null) {
+        requestGroups.put(primaryServer,
+            new QueryRequestPlan.RequestGroup(primaryServer, primaryRequest, null, null, null));
+      } else {
+        ServerInstance alternateServerInstance = alternateRoute.getServerInstance();
+        ServerRoutingInstance alternateServer =
+            alternateServerInstance.toServerRoutingInstance(tableType, preferTls);
+        InstanceRequest alternateRequest =
+            getInstanceRequest(requestId, brokerId, brokerRequest, alternateRoute.getServerRouteInfo());
+        requestGroups.put(primaryServer, new QueryRequestPlan.RequestGroup(primaryServer, primaryRequest,
+            alternateServer, alternateRequest, alternateServerInstance));
+      }
+    }
+  }
+
+  private static void addPotentialHedgeServers(Set<ServerInstance> potentialHedgeServers,
+      @Nullable Map<ServerInstance, ServerRouteInfo> routingTable,
+      @Nullable Map<ServerInstance, List<AlternateServerRouteInfo>> alternateRoutes,
+      Set<String> primaryInstanceIds) {
+    if (routingTable == null) {
+      return;
+    }
+    for (ServerInstance primaryServer : routingTable.keySet()) {
+      AlternateServerRouteInfo alternateRoute =
+          getFirstSafeAlternate(primaryServer, alternateRoutes, primaryInstanceIds);
+      if (alternateRoute != null) {
+        potentialHedgeServers.add(alternateRoute.getServerInstance());
+      }
+    }
+  }
+
+  @Nullable
+  private static AlternateServerRouteInfo getFirstSafeAlternate(ServerInstance primaryServer,
+      @Nullable Map<ServerInstance, List<AlternateServerRouteInfo>> alternateRoutes,
+      Set<String> primaryInstanceIds) {
+    if (alternateRoutes == null) {
+      return null;
+    }
+    List<AlternateServerRouteInfo> routes = alternateRoutes.get(primaryServer);
+    if (routes == null) {
+      return null;
+    }
+    for (AlternateServerRouteInfo route : routes) {
+      if (!primaryInstanceIds.contains(route.getServerInstance().getInstanceId())) {
+        return route;
+      }
+    }
+    return null;
   }
 }

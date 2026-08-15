@@ -646,8 +646,13 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
     // Calculate routing table for the query
     // TODO: Modify RoutingManager interface to directly take PinotQuery
     long routingStartTimeNs = System.nanoTime();
-    routeProvider.calculateRoutes(routeInfo, _routingManager, offlineBrokerRequest, realtimeBrokerRequest,
-        requestId);
+    if (shouldIncludeAlternateRoutes(routeInfo, pinotQuery)) {
+      routeProvider.calculateRoutes(routeInfo, _routingManager, offlineBrokerRequest, realtimeBrokerRequest,
+          requestId, true);
+    } else {
+      routeProvider.calculateRoutes(routeInfo, _routingManager, offlineBrokerRequest, realtimeBrokerRequest,
+          requestId);
+    }
 
     Set<ServerInstance> offlineExecutionServers = routeInfo.getOfflineExecutionServers();
     Set<ServerInstance> realtimeExecutionServers = routeInfo.getRealtimeExecutionServers();
@@ -813,7 +818,8 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
       //       servers takes time, but will address later if needed.
       String clientRequestId = extractClientRequestId(sqlNodeAndOptions);
       onQueryStart(requestId, clientRequestId, query,
-          new QueryServers(query, offlineExecutionServers, realtimeExecutionServers));
+          new QueryServers(query, offlineExecutionServers, realtimeExecutionServers,
+              routeInfo.getPotentialHedgeServers()));
       try {
         brokerResponse = processBrokerRequest(requestId, brokerRequest, serverBrokerRequest, routeInfo,
             remainingTimeMs, serverStats, requestContext);
@@ -2098,6 +2104,10 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
       ServerStats serverStats, RequestContext requestContext)
       throws Exception;
 
+  protected boolean shouldIncludeAlternateRoutes(TableRouteInfo routeInfo, PinotQuery pinotQuery) {
+    return false;
+  }
+
   private String getGlobalQueryId(long requestId) {
     return _brokerId + "_" + requestId;
   }
@@ -2107,6 +2117,7 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
    */
   public static class ServerStats {
     private String _serverStats;
+    private String _hedgeStats;
 
     public String getServerStats() {
       return _serverStats;
@@ -2114,6 +2125,14 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
 
     public void setServerStats(String serverStats) {
       _serverStats = serverStats;
+    }
+
+    public String getHedgeStats() {
+      return _hedgeStats;
+    }
+
+    public void setHedgeStats(String hedgeStats) {
+      _hedgeStats = hedgeStats;
     }
   }
 
@@ -2125,7 +2144,7 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
     final Set<ServerInstance> _servers = new HashSet<>();
 
     QueryServers(String query, @Nullable Set<ServerInstance> offlineExecutionServers,
-        @Nullable Set<ServerInstance> realtimeExecutionServers) {
+        @Nullable Set<ServerInstance> realtimeExecutionServers, Set<ServerInstance> potentialHedgeServers) {
       _query = query;
       if (offlineExecutionServers != null) {
         _servers.addAll(offlineExecutionServers);
@@ -2133,6 +2152,7 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
       if (realtimeExecutionServers != null) {
         _servers.addAll(realtimeExecutionServers);
       }
+      _servers.addAll(potentialHedgeServers);
     }
   }
 }

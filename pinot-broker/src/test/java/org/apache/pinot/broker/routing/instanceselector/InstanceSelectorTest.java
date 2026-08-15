@@ -55,6 +55,7 @@ import org.apache.pinot.spi.config.table.RoutingConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.env.PinotConfiguration;
+import org.apache.pinot.spi.utils.CommonConstants;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.testng.annotations.AfterMethod;
@@ -2134,5 +2135,133 @@ public class InstanceSelectorTest {
     expectedSelection.put(segment2, instance4);
 
     assertEquals(selectedResult.getLeft(), expectedSelection);
+  }
+
+  @Test
+  public void testReplicaGroupAlternateCandidatesPreservePrimarySelectionAndOrdering() {
+    InstanceSelector selector = createTestInstanceSelector(REPLICA_GROUP_INSTANCE_SELECTOR_TYPE);
+    String segment0 = "segment0";
+    String segment1 = "segment1";
+    String instance0 = "instance0";
+    String instance1 = "instance1";
+    String instance2 = "instance2";
+    String instance3 = "instance3";
+    Set<String> enabledInstances = ImmutableSet.of(instance0, instance1, instance2, instance3);
+    Set<String> onlineSegments = ImmutableSet.of(segment0, segment1);
+    IdealState idealState = createIdealState(ImmutableMap.of(
+        segment0, ImmutableList.of(Pair.of(instance0, ONLINE), Pair.of(instance2, ONLINE)),
+        segment1, ImmutableList.of(Pair.of(instance1, ONLINE), Pair.of(instance3, ONLINE))));
+    ExternalView externalView = createExternalView(ImmutableMap.of(
+        segment0, ImmutableList.of(Pair.of(instance0, ONLINE), Pair.of(instance2, ONLINE)),
+        segment1, ImmutableList.of(Pair.of(instance1, ONLINE), Pair.of(instance3, ONLINE))));
+    selector.init(enabledInstances, EMPTY_SERVER_MAP, idealState, externalView, onlineSegments);
+
+    InstanceSelector.SelectionResult primaryOnly =
+        selector.select(_brokerRequest, ImmutableList.of(segment0, segment1), 0, false);
+    InstanceSelector.SelectionResult withAlternates =
+        selector.select(_brokerRequest, ImmutableList.of(segment0, segment1), 0, true);
+
+    assertEquals(withAlternates.getSegmentToInstanceMap(), primaryOnly.getSegmentToInstanceMap());
+    assertEquals(withAlternates.getOptionalSegmentToInstanceMap(), primaryOnly.getOptionalSegmentToInstanceMap());
+    assertEquals(withAlternates.getSegmentToAlternateInstancesMap(), ImmutableMap.of(
+        segment0, ImmutableList.of(instance0, instance2),
+        segment1, ImmutableList.of(instance1, instance3)));
+  }
+
+  @Test
+  public void testStrictReplicaGroupAlternateCandidatesExcludeUnavailableReplicaGroup() {
+    InstanceSelector selector = createTestInstanceSelector(STRICT_REPLICA_GROUP_INSTANCE_SELECTOR_TYPE);
+    String segment0 = "segment0";
+    String segment1 = "segment1";
+    String segment2 = "segment2";
+    String segment3 = "segment3";
+    String instance0 = "instance0";
+    String instance1 = "instance1";
+    String instance2 = "instance2";
+    String instance3 = "instance3";
+    Set<String> enabledInstances = ImmutableSet.of(instance0, instance1, instance2, instance3);
+    Set<String> onlineSegments = ImmutableSet.of(segment0, segment1, segment2, segment3);
+    IdealState idealState = createIdealState(ImmutableMap.of(
+        segment0, ImmutableList.of(Pair.of(instance0, ONLINE), Pair.of(instance2, ONLINE)),
+        segment1, ImmutableList.of(Pair.of(instance0, ONLINE), Pair.of(instance2, ONLINE)),
+        segment2, ImmutableList.of(Pair.of(instance1, ONLINE), Pair.of(instance3, ONLINE)),
+        segment3, ImmutableList.of(Pair.of(instance1, ONLINE), Pair.of(instance3, ONLINE))));
+    ExternalView externalView = createExternalView(ImmutableMap.of(
+        segment0, ImmutableList.of(Pair.of(instance0, ONLINE)),
+        segment1, ImmutableList.of(Pair.of(instance0, ONLINE)),
+        segment2, ImmutableList.of(Pair.of(instance1, ONLINE)),
+        segment3, ImmutableList.of(Pair.of(instance1, ONLINE))));
+    selector.init(enabledInstances, EMPTY_SERVER_MAP, idealState, externalView, onlineSegments);
+
+    InstanceSelector.SelectionResult selectionResult =
+        selector.select(_brokerRequest, ImmutableList.of(segment0, segment1, segment2, segment3), 0, true);
+
+    assertEquals(selectionResult.getSegmentToInstanceMap(), ImmutableMap.of(
+        segment0, instance0,
+        segment1, instance0,
+        segment2, instance1,
+        segment3, instance1));
+    assertEquals(selectionResult.getSegmentToAlternateInstancesMap(), ImmutableMap.of(
+        segment0, ImmutableList.of(instance0),
+        segment1, ImmutableList.of(instance0),
+        segment2, ImmutableList.of(instance1),
+        segment3, ImmutableList.of(instance1)));
+  }
+
+  @Test
+  public void testBalancedSelectorDoesNotReturnAlternateCandidates() {
+    InstanceSelector selector = createTestInstanceSelector(BALANCED_INSTANCE_SELECTOR);
+    String segment0 = "segment0";
+    String segment1 = "segment1";
+    String instance0 = "instance0";
+    String instance1 = "instance1";
+    Set<String> enabledInstances = ImmutableSet.of(instance0, instance1);
+    Set<String> onlineSegments = ImmutableSet.of(segment0, segment1);
+    IdealState idealState = createIdealState(ImmutableMap.of(
+        segment0, ImmutableList.of(Pair.of(instance0, ONLINE), Pair.of(instance1, ONLINE)),
+        segment1, ImmutableList.of(Pair.of(instance0, ONLINE), Pair.of(instance1, ONLINE))));
+    ExternalView externalView = createExternalView(ImmutableMap.of(
+        segment0, ImmutableList.of(Pair.of(instance0, ONLINE), Pair.of(instance1, ONLINE)),
+        segment1, ImmutableList.of(Pair.of(instance0, ONLINE), Pair.of(instance1, ONLINE))));
+    selector.init(enabledInstances, EMPTY_SERVER_MAP, idealState, externalView, onlineSegments);
+
+    InstanceSelector.SelectionResult primaryOnly =
+        selector.select(_brokerRequest, ImmutableList.of(segment0, segment1), 0, false);
+    InstanceSelector.SelectionResult withAlternates =
+        selector.select(_brokerRequest, ImmutableList.of(segment0, segment1), 0, true);
+
+    assertEquals(withAlternates.getSegmentToInstanceMap(), primaryOnly.getSegmentToInstanceMap());
+    assertTrue(withAlternates.getSegmentToAlternateInstancesMap().isEmpty());
+  }
+
+  @Test
+  public void testPreferredReplicaPrimarySelectionKeepsNonPreferredHedgeCandidates() {
+    String offlineTableName = "testTable_OFFLINE";
+    HybridSelector hybridSelector = mock(HybridSelector.class);
+    ReplicaGroupInstanceSelector instanceSelector =
+        new ReplicaGroupInstanceSelector(offlineTableName, _propertyStore, _brokerMetrics, hybridSelector,
+            Clock.systemUTC(), false, 300);
+    String preferredInstance = "preferredInstance";
+    String fallbackInstance = "fallbackInstance";
+    String segment = "segment0";
+    List<String> segments = ImmutableList.of(segment);
+    Map<String, String> queryOptions =
+        ImmutableMap.of(CommonConstants.Broker.Request.QueryOptionKey.ORDERED_PREFERRED_REPLICAS, "0");
+    Map<String, List<SegmentInstanceCandidate>> instanceCandidatesMap = ImmutableMap.of(segment, ImmutableList.of(
+        new SegmentInstanceCandidate(preferredInstance, true, 0),
+        new SegmentInstanceCandidate(fallbackInstance, true, 1)));
+    SegmentStates segmentStates = new SegmentStates(instanceCandidatesMap, ImmutableSet.of(segment), null);
+    when(hybridSelector.fetchServerRankingsWithScores(any())).thenReturn(ImmutableList.of(
+        new ImmutablePair<>(fallbackInstance, 1.0),
+        new ImmutablePair<>(preferredInstance, 2.0)));
+
+    Pair<Map<String, String>, Map<String, String>> selectedResult =
+        instanceSelector.select(segments, 0, segmentStates, queryOptions);
+    Map<String, List<String>> alternateCandidates =
+        instanceSelector.getAlternateInstances(segments, 0, segmentStates, queryOptions, selectedResult);
+
+    assertEquals(selectedResult.getLeft(), ImmutableMap.of(segment, preferredInstance));
+    assertEquals(alternateCandidates, ImmutableMap.of(segment,
+        ImmutableList.of(fallbackInstance, preferredInstance)));
   }
 }

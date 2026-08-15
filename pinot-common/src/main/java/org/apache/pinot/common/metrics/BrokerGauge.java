@@ -79,6 +79,9 @@ public enum BrokerGauge implements AbstractMetrics.Gauge {
    * The estimated number of query server threads for all currently running multi-stage queries.
    */
   ESTIMATED_MSE_SERVER_THREADS("number", true),
+  ACTIVE_HEDGE_REQUESTS("requests", true),
+  HEDGE_PRIMARY_REQUESTS_LAST_WINDOW("requests", true),
+  HEDGE_REQUESTS_LAST_WINDOW("requests", true),
 
   // gRPC Netty buffer metrics
   GRPC_NETTY_POOLED_USED_DIRECT_MEMORY("bytes", true),

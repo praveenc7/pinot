@@ -37,6 +37,7 @@ import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
+import static org.testng.Assert.expectThrows;
 
 
 public class ServerRoutingStatsManagerTest {
@@ -92,6 +93,17 @@ public class ServerRoutingStatsManagerTest {
 
     manager.init();
     assertTrue(manager.isEnabled());
+  }
+
+  @Test
+  public void testInvalidAdaptiveSelectorTypeIsRejected() {
+    Map<String, Object> properties = new HashMap<>();
+    properties.put(CommonConstants.Broker.AdaptiveServerSelector.CONFIG_OF_TYPE, "invalid");
+
+    IllegalArgumentException exception = expectThrows(IllegalArgumentException.class,
+        () -> new ServerRoutingStatsManager(new PinotConfiguration(properties), _brokerMetrics));
+
+    assertEquals(exception.getMessage(), "Illegal adaptive server selector type: invalid");
   }
 
   @Test

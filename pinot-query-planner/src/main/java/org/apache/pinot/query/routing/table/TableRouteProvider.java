@@ -45,4 +45,13 @@ public interface TableRouteProvider {
    */
   void calculateRoutes(TableRouteInfo tableRouteInfo, RoutingManager routingManager, BrokerRequest offlineBrokerRequest,
       BrokerRequest realtimeBrokerRequest, long requestId);
+
+  /**
+   * Calculates routes and optionally preserves exact alternate routes for single-stage Netty request hedging.
+   */
+  default void calculateRoutes(TableRouteInfo tableRouteInfo, RoutingManager routingManager,
+      BrokerRequest offlineBrokerRequest, BrokerRequest realtimeBrokerRequest, long requestId,
+      boolean includeAlternateRoutes) {
+    calculateRoutes(tableRouteInfo, routingManager, offlineBrokerRequest, realtimeBrokerRequest, requestId);
+  }
 }

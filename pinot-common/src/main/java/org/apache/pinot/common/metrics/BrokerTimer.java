@@ -58,6 +58,7 @@ public enum BrokerTimer implements AbstractMetrics.Timer {
   STARTUP_SUCCESS_DURATION_MS(true),
   // GRPC query execution time
   GRPC_QUERY_EXECUTION_MS(true),
+  HEDGE_RESPONSE_LATENCY_MS(false),
   // The total time spent in processing the workload queries
   WORKLOAD_TOTAL_QUERY_TIME_MS(false);
 

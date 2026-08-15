@@ -23,6 +23,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -51,6 +52,7 @@ public class ServerRoutingStatsManager {
 
   private final PinotConfiguration _config;
   private final BrokerMetrics _brokerMetrics;
+  private final AdaptiveServerSelector.Type _adaptiveSelectorType;
   private volatile boolean _isEnabled;
   private ConcurrentHashMap<String, ServerRoutingStatsEntry> _serverQueryStatsMap;
 
@@ -77,6 +79,15 @@ public class ServerRoutingStatsManager {
   public ServerRoutingStatsManager(PinotConfiguration pinotConfig, BrokerMetrics brokerMetrics) {
     _config = pinotConfig;
     _brokerMetrics = brokerMetrics;
+    String typeString =
+        _config.getProperty(AdaptiveServerSelector.CONFIG_OF_TYPE, AdaptiveServerSelector.DEFAULT_TYPE);
+    AdaptiveServerSelector.Type adaptiveSelectorType;
+    try {
+      adaptiveSelectorType = AdaptiveServerSelector.Type.valueOf(typeString.toUpperCase(Locale.ROOT));
+    } catch (IllegalArgumentException | NullPointerException e) {
+      throw new IllegalArgumentException("Illegal adaptive server selector type: " + typeString, e);
+    }
+    _adaptiveSelectorType = adaptiveSelectorType;
   }
 
   public void init() {
@@ -283,9 +294,7 @@ public class ServerRoutingStatsManager {
   }
 
   private boolean isHybridSelector() {
-    String typeStr =
-        _config.getProperty(AdaptiveServerSelector.CONFIG_OF_TYPE, AdaptiveServerSelector.DEFAULT_TYPE);
-    return AdaptiveServerSelector.Type.HYBRID.name().equalsIgnoreCase(typeStr);
+    return _adaptiveSelectorType == AdaptiveServerSelector.Type.HYBRID;
   }
 
   public int getQueueSize() {
@@ -557,6 +566,24 @@ public class ServerRoutingStatsManager {
       return stats.computeHybridScore();
     } finally {
       stats.getServerReadLock().unlock();
+    }
+  }
+
+  /**
+   * Returns the score used by the configured adaptive selector for one server.
+   */
+  public Double fetchConfiguredScoreForServer(String server) {
+    switch (_adaptiveSelectorType) {
+      case NUM_INFLIGHT_REQ:
+        Integer numInFlightRequests = fetchNumInFlightRequestsForServer(server);
+        return numInFlightRequests != null ? numInFlightRequests.doubleValue() : null;
+      case LATENCY:
+        return fetchEMALatencyForServer(server);
+      case HYBRID:
+        return fetchHybridScoreForServer(server);
+      case NO_OP:
+      default:
+        return null;
     }
   }
 

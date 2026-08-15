@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import org.apache.pinot.common.config.provider.TableCache;
 import org.apache.pinot.common.request.BrokerRequest;
+import org.apache.pinot.core.routing.AlternateServerRouteInfo;
 import org.apache.pinot.core.routing.RoutingManager;
 import org.apache.pinot.core.routing.RoutingTable;
 import org.apache.pinot.core.routing.ServerRouteInfo;
@@ -114,11 +115,20 @@ public class ImplicitHybridTableRouteProvider implements TableRouteProvider {
   public void calculateRoutes(TableRouteInfo tableRouteInfo, RoutingManager routingManager,
       BrokerRequest offlineBrokerRequest,
       BrokerRequest realtimeBrokerRequest, long requestId) {
+    calculateRoutes(tableRouteInfo, routingManager, offlineBrokerRequest, realtimeBrokerRequest, requestId, false);
+  }
+
+  @Override
+  public void calculateRoutes(TableRouteInfo tableRouteInfo, RoutingManager routingManager,
+      BrokerRequest offlineBrokerRequest, BrokerRequest realtimeBrokerRequest, long requestId,
+      boolean includeAlternateRoutes) {
     assert (tableRouteInfo.isExists());
     String offlineTableName = tableRouteInfo.getOfflineTableName();
     String realtimeTableName = tableRouteInfo.getRealtimeTableName();
     Map<ServerInstance, ServerRouteInfo> offlineRoutingTable = null;
     Map<ServerInstance, ServerRouteInfo> realtimeRoutingTable = null;
+    Map<ServerInstance, List<AlternateServerRouteInfo>> offlineAlternateRoutes = null;
+    Map<ServerInstance, List<AlternateServerRouteInfo>> realtimeAlternateRoutes = null;
     List<String> unavailableSegments = new ArrayList<>();
     int numPrunedSegmentsTotal = 0;
 
@@ -128,7 +138,9 @@ public class ImplicitHybridTableRouteProvider implements TableRouteProvider {
       // NOTE: Routing table might be null if table is just removed
       RoutingTable routingTable = null;
       if (!tableRouteInfo.isOfflineTableDisabled()) {
-        routingTable = routingManager.getRoutingTable(offlineBrokerRequest, requestId);
+        routingTable = includeAlternateRoutes
+            ? routingManager.getRoutingTable(offlineBrokerRequest, requestId, true)
+            : routingManager.getRoutingTable(offlineBrokerRequest, requestId);
       }
       if (routingTable != null) {
         unavailableSegments.addAll(routingTable.getUnavailableSegments());
@@ -136,6 +148,7 @@ public class ImplicitHybridTableRouteProvider implements TableRouteProvider {
             routingTable.getServerInstanceToSegmentsMap();
         if (!serverInstanceToSegmentsMap.isEmpty()) {
           offlineRoutingTable = serverInstanceToSegmentsMap;
+          offlineAlternateRoutes = routingTable.getAlternateServerRoutes();
         } else {
           offlineBrokerRequest = null;
         }
@@ -150,7 +163,9 @@ public class ImplicitHybridTableRouteProvider implements TableRouteProvider {
       // NOTE: Routing table might be null if table is just removed
       RoutingTable routingTable = null;
       if (!tableRouteInfo.isRealtimeTableDisabled()) {
-        routingTable = routingManager.getRoutingTable(realtimeBrokerRequest, requestId);
+        routingTable = includeAlternateRoutes
+            ? routingManager.getRoutingTable(realtimeBrokerRequest, requestId, true)
+            : routingManager.getRoutingTable(realtimeBrokerRequest, requestId);
       }
       if (routingTable != null) {
         unavailableSegments.addAll(routingTable.getUnavailableSegments());
@@ -158,6 +173,7 @@ public class ImplicitHybridTableRouteProvider implements TableRouteProvider {
             routingTable.getServerInstanceToSegmentsMap();
         if (!serverInstanceToSegmentsMap.isEmpty()) {
           realtimeRoutingTable = serverInstanceToSegmentsMap;
+          realtimeAlternateRoutes = routingTable.getAlternateServerRoutes();
         } else {
           realtimeBrokerRequest = null;
         }
@@ -174,5 +190,7 @@ public class ImplicitHybridTableRouteProvider implements TableRouteProvider {
     hybridTableRouteInfo.setRealtimeBrokerRequest(realtimeBrokerRequest);
     hybridTableRouteInfo.setOfflineRoutingTable(offlineRoutingTable);
     hybridTableRouteInfo.setRealtimeRoutingTable(realtimeRoutingTable);
+    hybridTableRouteInfo.setOfflineAlternateRoutes(offlineAlternateRoutes);
+    hybridTableRouteInfo.setRealtimeAlternateRoutes(realtimeAlternateRoutes);
   }
 }

@@ -22,18 +22,28 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.apache.helix.model.InstanceConfig;
 import org.apache.pinot.common.request.BrokerRequest;
 import org.apache.pinot.common.request.InstanceRequest;
+import org.apache.pinot.common.request.PinotQuery;
+import org.apache.pinot.core.routing.AlternateServerRouteInfo;
 import org.apache.pinot.core.routing.RoutingManager;
 import org.apache.pinot.core.routing.RoutingTable;
 import org.apache.pinot.core.routing.ServerRouteInfo;
+import org.apache.pinot.core.transport.ImplicitHybridTableRouteInfo;
+import org.apache.pinot.core.transport.QueryRequestPlan;
 import org.apache.pinot.core.transport.ServerInstance;
 import org.apache.pinot.core.transport.ServerRoutingInstance;
 import org.apache.pinot.core.transport.TableRouteInfo;
+import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.config.table.TableType;
 import org.apache.pinot.spi.utils.builder.TableNameBuilder;
 import org.testng.annotations.Test;
 
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;
@@ -376,5 +386,88 @@ public class ImplicitHybridTableRouteProviderCalculateRouteTest extends BaseTabl
     } else if (expectedTableRoute._realtimeRoutingTable != null) {
       assertNotNull(routeInfo.getRealtimeRoutingTable());
     }
+  }
+
+  @Test
+  void testCalculateRoutesOptInRequestsAndPropagatesAlternateRoutes() {
+    RoutingManager routingManager = mock(RoutingManager.class);
+    BrokerRequest offlineBrokerRequest = mockBrokerRequest();
+    BrokerRequest realtimeBrokerRequest = mockBrokerRequest();
+    ImplicitHybridTableRouteInfo routeInfo = new ImplicitHybridTableRouteInfo();
+    routeInfo.setOfflineTableName("testTable_OFFLINE");
+    routeInfo.setRealtimeTableName("testTable_REALTIME");
+    routeInfo.setOfflineTableConfig(mock(TableConfig.class));
+    routeInfo.setRealtimeTableConfig(mock(TableConfig.class));
+    ServerInstance offlinePrimary = createServerInstance(1200);
+    ServerInstance offlineAlternate = createServerInstance(1201);
+    ServerInstance realtimePrimary = createServerInstance(1202);
+    ServerInstance realtimeAlternate = createServerInstance(1203);
+    RoutingTable offlineRoutingTable = new RoutingTable(
+        Map.of(offlinePrimary, new ServerRouteInfo(new ArrayList<>(List.of("offlineSegment")), new ArrayList<>())),
+        Map.of(offlinePrimary, List.of(new AlternateServerRouteInfo(offlineAlternate,
+            new ServerRouteInfo(new ArrayList<>(List.of("offlineSegment")), new ArrayList<>())))),
+        List.of(), 0);
+    RoutingTable realtimeRoutingTable = new RoutingTable(
+        Map.of(realtimePrimary, new ServerRouteInfo(new ArrayList<>(List.of("realtimeSegment")), new ArrayList<>())),
+        Map.of(realtimePrimary, List.of(new AlternateServerRouteInfo(realtimeAlternate,
+            new ServerRouteInfo(new ArrayList<>(List.of("realtimeSegment")), new ArrayList<>())))),
+        List.of(), 0);
+    when(routingManager.getRoutingTable(offlineBrokerRequest, 11L, true)).thenReturn(offlineRoutingTable);
+    when(routingManager.getRoutingTable(realtimeBrokerRequest, 11L, true)).thenReturn(realtimeRoutingTable);
+
+    _hybridTableRouteProvider.calculateRoutes(routeInfo, routingManager, offlineBrokerRequest, realtimeBrokerRequest,
+        11L, true);
+
+    verify(routingManager).getRoutingTable(offlineBrokerRequest, 11L, true);
+    verify(routingManager).getRoutingTable(realtimeBrokerRequest, 11L, true);
+    verify(routingManager, never()).getRoutingTable(offlineBrokerRequest, 11L);
+    verify(routingManager, never()).getRoutingTable(realtimeBrokerRequest, 11L);
+    assertEquals(routeInfo.getPotentialHedgeServers(), Set.of(offlineAlternate, realtimeAlternate));
+    Map<ServerRoutingInstance, InstanceRequest> primaryRequestMap = routeInfo.getRequestMap(11L, "broker", false);
+    assertEquivalentRequests(routeInfo.getQueryRequestPlan(11L, "broker", false).getPrimaryRequestMap(),
+        primaryRequestMap);
+  }
+
+  @Test
+  void testCalculateRoutesLegacyOverloadStaysPrimaryOnly() {
+    RoutingManager routingManager = mock(RoutingManager.class);
+    BrokerRequest offlineBrokerRequest = mockBrokerRequest();
+    ImplicitHybridTableRouteInfo routeInfo = new ImplicitHybridTableRouteInfo();
+    routeInfo.setOfflineTableName("testTable_OFFLINE");
+    routeInfo.setOfflineTableConfig(mock(TableConfig.class));
+    ServerInstance offlinePrimary = createServerInstance(1210);
+    RoutingTable offlineRoutingTable = new RoutingTable(
+        Map.of(offlinePrimary, new ServerRouteInfo(new ArrayList<>(List.of("offlineSegment")), new ArrayList<>())),
+        List.of(), 0);
+    when(routingManager.getRoutingTable(offlineBrokerRequest, 12L)).thenReturn(offlineRoutingTable);
+
+    _hybridTableRouteProvider.calculateRoutes(routeInfo, routingManager, offlineBrokerRequest, null, 12L);
+
+    verify(routingManager).getRoutingTable(offlineBrokerRequest, 12L);
+    verify(routingManager, never()).getRoutingTable(offlineBrokerRequest, 12L, true);
+    assertTrue(routeInfo.getPotentialHedgeServers().isEmpty());
+    QueryRequestPlan requestPlan = routeInfo.getQueryRequestPlan(12L, "broker", false);
+    assertEquivalentRequests(requestPlan.getPrimaryRequestMap(), routeInfo.getRequestMap(12L, "broker", false));
+  }
+
+  private static void assertEquivalentRequests(Map<ServerRoutingInstance, InstanceRequest> actual,
+      Map<ServerRoutingInstance, InstanceRequest> expected) {
+    assertEquals(actual.keySet(), expected.keySet());
+    for (ServerRoutingInstance server : actual.keySet()) {
+      assertEquals(actual.get(server).getSearchSegments(), expected.get(server).getSearchSegments());
+      assertEquals(actual.get(server).getOptionalSegments(), expected.get(server).getOptionalSegments());
+    }
+  }
+
+  private static BrokerRequest mockBrokerRequest() {
+    BrokerRequest brokerRequest = mock(BrokerRequest.class);
+    PinotQuery pinotQuery = mock(PinotQuery.class);
+    when(brokerRequest.getPinotQuery()).thenReturn(pinotQuery);
+    when(pinotQuery.getQueryOptions()).thenReturn(null);
+    return brokerRequest;
+  }
+
+  private static ServerInstance createServerInstance(int port) {
+    return new ServerInstance(InstanceConfig.toInstanceConfig("Server_localhost_" + port));
   }
 }

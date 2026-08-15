@@ -20,13 +20,23 @@ package org.apache.pinot.query.routing.table;
 
 import java.util.Map;
 import java.util.Set;
+import org.apache.helix.model.InstanceConfig;
+import org.apache.pinot.common.request.BrokerRequest;
 import org.apache.pinot.common.request.InstanceRequest;
+import org.apache.pinot.common.request.PinotQuery;
+import org.apache.pinot.core.routing.RoutingManager;
+import org.apache.pinot.core.routing.RoutingTable;
 import org.apache.pinot.core.routing.ServerRouteInfo;
+import org.apache.pinot.core.transport.ImplicitHybridTableRouteInfo;
 import org.apache.pinot.core.transport.ServerInstance;
 import org.apache.pinot.core.transport.ServerRoutingInstance;
 import org.apache.pinot.core.transport.TableRouteInfo;
 import org.testng.annotations.Test;
 
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
 import static org.testng.Assert.assertNotNull;
@@ -119,5 +129,51 @@ public class LogicalTableRouteProviderCalculateRouteTest extends BaseTableRouteT
   @Test(dataProvider = "disabledTableProvider")
   void testDisabledTable(String tableName) {
     assertTableRoute(tableName, "disabledTableProvider", null, null, false, false);
+  }
+
+  @Test
+  void testLogicalTableRoutingUsesPrimaryOnlyPhysicalOverloads() {
+    RoutingManager routingManager = mock(RoutingManager.class);
+    BrokerRequest offlineBrokerRequest = mockBrokerRequest();
+    BrokerRequest realtimeBrokerRequest = mockBrokerRequest();
+    LogicalTableRouteInfo routeInfo = new LogicalTableRouteInfo();
+    routeInfo.setLogicalTableName("logicalTable");
+    ImplicitHybridTableRouteInfo offlinePhysicalTable = new ImplicitHybridTableRouteInfo();
+    offlinePhysicalTable.setOfflineTableName("physicalTable_OFFLINE");
+    offlinePhysicalTable.setOfflineRouteExists(true);
+    ImplicitHybridTableRouteInfo realtimePhysicalTable = new ImplicitHybridTableRouteInfo();
+    realtimePhysicalTable.setRealtimeTableName("physicalTable_REALTIME");
+    realtimePhysicalTable.setRealtimeRouteExists(true);
+    routeInfo.setOfflineTables(java.util.List.of(offlinePhysicalTable));
+    routeInfo.setRealtimeTables(java.util.List.of(realtimePhysicalTable));
+    ServerInstance offlinePrimary = createServerInstance(1300);
+    ServerInstance realtimePrimary = createServerInstance(1301);
+    when(routingManager.getRoutingTable(offlineBrokerRequest, "physicalTable_OFFLINE", 13L)).thenReturn(
+        new RoutingTable(Map.of(offlinePrimary,
+            new ServerRouteInfo(java.util.List.of("offlineSegment"), java.util.List.of())), java.util.List.of(), 0));
+    when(routingManager.getRoutingTable(realtimeBrokerRequest, "physicalTable_REALTIME", 13L)).thenReturn(
+        new RoutingTable(Map.of(realtimePrimary,
+            new ServerRouteInfo(java.util.List.of("realtimeSegment"), java.util.List.of())), java.util.List.of(), 0));
+
+    _logicalTableRouteProvider.calculateRoutes(routeInfo, routingManager, offlineBrokerRequest, realtimeBrokerRequest,
+        13L);
+
+    verify(routingManager).getRoutingTable(offlineBrokerRequest, "physicalTable_OFFLINE", 13L);
+    verify(routingManager).getRoutingTable(realtimeBrokerRequest, "physicalTable_REALTIME", 13L);
+    verify(routingManager, never()).getRoutingTable(offlineBrokerRequest, "physicalTable_OFFLINE", 13L, true);
+    verify(routingManager, never()).getRoutingTable(realtimeBrokerRequest, "physicalTable_REALTIME", 13L, true);
+    assertNotNull(routeInfo.getRequestMap(13L, "broker", false));
+  }
+
+  private static BrokerRequest mockBrokerRequest() {
+    BrokerRequest brokerRequest = mock(BrokerRequest.class);
+    PinotQuery pinotQuery = mock(PinotQuery.class);
+    when(brokerRequest.getPinotQuery()).thenReturn(pinotQuery);
+    when(pinotQuery.getQueryOptions()).thenReturn(null);
+    return brokerRequest;
+  }
+
+  private static ServerInstance createServerInstance(int port) {
+    return new ServerInstance(InstanceConfig.toInstanceConfig("Server_localhost_" + port));
   }
 }

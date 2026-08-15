@@ -368,6 +368,35 @@ public class CommonConstants {
     public static final String CONFIG_OF_BROKER_SEND_REQUEST_MAX_ATTEMPTS =
         "pinot.broker.query.router.send.request.max.attempts";
     public static final int DEFAULT_BROKER_SEND_REQUEST_MAX_ATTEMPTS = 1;
+
+    public static class Hedging {
+      private static final String CONFIG_PREFIX = "pinot.broker.query.router.hedging";
+
+      public static final String CONFIG_OF_ENABLED = CONFIG_PREFIX + ".enabled";
+      public static final boolean DEFAULT_ENABLED = false;
+
+      public static final String CONFIG_OF_DELAY_RATIO = CONFIG_PREFIX + ".delay.ratio";
+      public static final double DEFAULT_DELAY_RATIO = 0.5d;
+
+      public static final String CONFIG_OF_DELAY_MIN_MS = CONFIG_PREFIX + ".delay.min.ms";
+      public static final long DEFAULT_DELAY_MIN_MS = 25L;
+
+      public static final String CONFIG_OF_DELAY_MAX_MS = CONFIG_PREFIX + ".delay.max.ms";
+      public static final long DEFAULT_DELAY_MAX_MS = 500L;
+
+      public static final String CONFIG_OF_MAX_HEDGES_PER_QUERY = CONFIG_PREFIX + ".max.hedges.per.query";
+      public static final int DEFAULT_MAX_HEDGES_PER_QUERY = 1;
+
+      public static final String CONFIG_OF_MAX_EXTRA_REQUEST_RATIO = CONFIG_PREFIX + ".max.extra.request.ratio";
+      public static final double DEFAULT_MAX_EXTRA_REQUEST_RATIO = 0.01d;
+
+      public static final String CONFIG_OF_BUDGET_WINDOW_MS = CONFIG_PREFIX + ".budget.window.ms";
+      public static final long DEFAULT_BUDGET_WINDOW_MS = 60_000L;
+
+      public static final String CONFIG_OF_MAX_CONCURRENT_REQUESTS = CONFIG_PREFIX + ".max.concurrent.requests";
+      public static final int DEFAULT_MAX_CONCURRENT_REQUESTS = 32;
+    }
+
     public static final String CONFIG_OF_BROKER_ID = "pinot.broker.instance.id";
     public static final String CONFIG_OF_BROKER_INSTANCE_TAGS = "pinot.broker.instance.tags";
     public static final String CONFIG_OF_BROKER_HOSTNAME = "pinot.broker.hostname";

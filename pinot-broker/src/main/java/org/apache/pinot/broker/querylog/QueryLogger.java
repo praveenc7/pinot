@@ -98,8 +98,10 @@ public class QueryLogger {
 
     final StringBuilder queryLogBuilder = new StringBuilder();
     for (QueryLogEntry value : QUERY_LOG_ENTRY_VALUES) {
-      value.format(queryLogBuilder, this, params);
-      queryLogBuilder.append(',');
+      if (value.shouldFormat(params)) {
+        value.format(queryLogBuilder, this, params);
+        queryLogBuilder.append(',');
+      }
     }
 
     // always log the query last - don't add this to the QueryLogEntry enum
@@ -352,6 +354,17 @@ public class QueryLogger {
       void doFormat(StringBuilder builder, QueryLogger logger, QueryLogParams params) {
         builder.append(params._workloadName);
       }
+    },
+    HEDGE_STATS("hedgeStats") {
+      @Override
+      boolean shouldFormat(QueryLogParams params) {
+        return params._serverStats != null && params._serverStats.getHedgeStats() != null;
+      }
+
+      @Override
+      void doFormat(StringBuilder builder, QueryLogger logger, QueryLogParams params) {
+        builder.append(params._serverStats.getHedgeStats());
+      }
     };
 
     public final String _entryName;
@@ -367,6 +380,10 @@ public class QueryLogger {
     }
 
     abstract void doFormat(StringBuilder builder, QueryLogger logger, QueryLogParams params);
+
+    boolean shouldFormat(QueryLogParams params) {
+      return true;
+    }
 
     void format(StringBuilder builder, QueryLogger logger, QueryLogParams params) {
       // use StringBuilder because the compiler will struggle to turn string complicated
